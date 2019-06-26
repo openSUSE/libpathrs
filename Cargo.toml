@@ -25,6 +25,11 @@ edition = "2018"
 name = "pathrs"
 crate-type = ["cdylib"]
 
+[profile.release]
+# Since we are cdylib, panic!s will cause aborts once they hit the FFI barrier
+# anyway. We might as well reduce our code size if we're doing it.
+panic = "abort"
+
 [dependencies]
 lazy_static = "^1.3.0"
 errno = "^0.2.4"
