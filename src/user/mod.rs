@@ -63,7 +63,7 @@ pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
 }
 
 impl Handle for EmulatedHandle {
-    fn reopen(&self, opts: &OpenOptions) -> Result<File, Error> {
+    fn reopen(&self, options: &OpenOptions) -> Result<File, Error> {
         bail!("not yet implemented");
     }
 }
@@ -73,7 +73,11 @@ impl Root for EmulatedHandle {
         bail!("not yet implemented");
     }
 
-    fn create(&self, path: &Path, opts: &CreateOpts) -> Result<Box<dyn Handle>, Error> {
+    fn create(&self, path: &Path, options: &CreateOpts) -> Result<Box<dyn Handle>, Error> {
+        bail!("not yet implemented");
+    }
+
+    fn remove(&self, path: &Path) -> Result<(), Error> {
         bail!("not yet implemented");
     }
 }

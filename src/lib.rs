@@ -16,25 +16,41 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! libpathrs provides a series of primitives for GNU/Linux programs to safely
-//! handle the opening of paths inside an untrusted directory tree. The idea is
-//! that a libpathrs::Root handle is like a handle for resolution inside a
-//! chroot(2), with libpathrs::Handle being an O_PATH descriptor which you can
-//! "upgrade" to a proper std::fs::File. However this library acts far more
-//! efficiently than spawning a new process and doing a full chroot(2) for every
-//! operation.
+//! libpathrs provides a series of primitives for Linux programs to safely
+//! handle path operations inside an untrusted directory tree.
+//!
+//! The idea is that a [`Root`] handle is like a handle for resolution inside a
+//! [`chroot(2)`], with [`Handle`] being an `O_PATH` descriptor which you can
+//! "upgrade" to a proper [`File`]. However this library acts far more
+//! efficiently than spawning a new process and doing a full [`chroot(2)`] for
+//! every operation.
 //!
 //! In order to ensure the maximum possible number of people can make us of this
 //! library to increase the overall security of Linux tooling, it is written in
 //! Rust (to be memory-safe) and produces C dylibs for usage with any language
 //! that supports C-based FFI.
 //!
-//! The recommended usage of libpathrs looks something like this (in Rust):
+//! # Assumptions
+//!
+//! This library assumes that the kernel supports all of the needed features for
+//! at least one libpathrs backend. At time of writing, those are:
+//!
+//! * `renameat2` support, or privileges to do `pivot_root`.
+//! * Native Backend:
+//!   - `openat2` support.
+//! * Emulated Backend:
+//!   - A working `/proc` mount, such that `/proc/self/fd/` operates correctly.
+//!
+//! # Examples
+//!
+//! The recommended usage of libpathrs looks something like this:
 //!
 //! ```
+//! # use std::error::Error;
 //! use std::fs::OpenOptions;
 //! use std::path::Path;
 //!
+//! # fn main() -> Result<(), Error> {
 //! // Get a root handle for resolution.
 //! let root = libpathrs::open(Path::new("/path/to/root"))?;
 //! // Resolve the path.
@@ -45,8 +61,53 @@
 //! // Or, in one line:
 //! let file = root.resolve(Path::new("/etc/passwd"))?
 //!                .reopen(OpenOptions::new().read(true))?;
-//!
+//! # Ok(())
+//! # }
 //! ```
+//!
+//! The corresponding C example would be:
+//!
+//! ```c
+//! int get_my_fd(void)
+//! {
+//!     int fd = -1;
+//!     char *error = NULL;
+//!     pathrs_root_t *root = NULL;
+//!     pathrs_handle_t *handle = NULL;
+//!
+//!     root = pathrs_open("/path/to/root");
+//!     if (!root)
+//!         goto err;
+//!
+//!     handle = inroot_resolve(root, "/etc/passwd");
+//!     if (!handle)
+//!         goto err;
+//!
+//!     fd = handle_reopen(handle, O_RDONLY);
+//!     if (fd < 0)
+//!         goto err;
+//!
+//!     goto out;
+//!
+//! err:
+//!     error = malloc(pathrs_error_length());
+//!     if (!error)
+//!         abort();
+//!     pathrs_error(error, sizeof(error));
+//!     fprintf(stderr, "got error: %s\n", error);
+//!     free(error);
+//!
+//! out:
+//!     pathrs_hfree(handle);
+//!     pathrs_rfree(root);
+//!     return fd;
+//! }
+//! ```
+//!
+//! [`Root`]: trait.Root.html
+//! [`Handle`]: trait.Handle.html
+//! [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+//! [`chroot(2)`]: http://man7.org/linux/man-pages/man2/chroot.2.html
 
 #[macro_use] extern crate lazy_static;
 extern crate errno;
@@ -54,6 +115,8 @@ extern crate errno;
 extern crate libc;
 
 mod ffi;
+// TODO: We should expose user::open and kernel::open so that people can
+//       explicitly decide to use a different backend if they *really* want to.
 mod user;
 mod kernel;
 
@@ -67,40 +130,64 @@ lazy_static! {
     static ref KERNEL_SUPPORT: bool = kernel::supported();
 }
 
-/// Represents a "thing" being created through Handle::create(). This is mainly
-/// to aid in usability, since almost all of the operations required to actually
-/// create each type are fundamentally different when it comes to kernel APIs.
+/// An inode type to be created with [`Root::create`].
+///
+/// [`Root::create`]: trait.Root.html#tymethod.create
 pub enum InoType<'a> {
-    /// File.
+    /// Ordinary file, as in [`creat(2)`].
+    ///
+    /// [`creat(2)`]: http://man7.org/linux/man-pages/man2/creat.2.html
+    // XXX: It is possible to support non-O_EXCL O_CREAT with the native
+    //      backend. But it's unclear whether we should expose it given it's
+    //      only supported on native-kernel systems.
     File(),
 
-    /// Directory.
+    /// Directory, as in [`mkdir(2)`].
+    ///
+    /// [`mkdir(2)`]: http://man7.org/linux/man-pages/man2/mkdir.2.html
     Directory(),
 
-    /// Symlink with the given str contents (symlinks don't have special
-    /// resolution properties, so the string provided here is just passed
-    /// directly to symlinkat(2) without any cleaning or sanitisation).
+    /// Symlink with the given `&str` contents, as in [`symlinkat(2)`].
+    ///
+    /// We don't accept a [`Path`] here, since symlinks don't have special
+    /// resolution properties (and so we just pass the string directly to
+    /// [`symlinkat(2)`]).
+    ///
+    /// [`Path`]: https://doc.rust-lang.org/std/path/struct.Path.html
+    /// [`symlinkat(2)`]: http://man7.org/linux/man-pages/man2/symlinkat.2.html
     Symlink(&'a str),
 
-    /// Hard-link to the given Path (which will be internally resolved inside
-    /// the handle). If you wish to hardlink a file inside the Handle's tree to
-    /// a file outside the Handle's tree, this is currently unsupported.
+    /// Hard-link to the given [`Path`], as in [`linkat(2)`].
+    ///
+    /// The provided [`Path`] is resolved within the [`Root`]. It is currently
+    /// not supported to hardlink a file inside the [`Root`]'s tree to a file
+    /// outside the [`Root`]'s tree.
+    ///
+    /// [`linkat(2)`]: http://man7.org/linux/man-pages/man2/linkat.2.html
+    /// [`Path`]: https://doc.rust-lang.org/std/path/struct.Path.html
+    /// [`Root`]: trait.Root.html
     // XXX: Should we ever support that?
     Hardlink(&'a Path),
 
-    /// FIFO.
+    /// Named pipe (aka FIFO), as in [`mkfifo(3)`].
+    ///
+    /// [`mkfifo(3)`]: http://man7.org/linux/man-pages/man3/mkfifo.3.html
     Fifo(),
 
-    /// Character device.
+    /// Character device, as in [`mknod(2)`] with `S_IFCHR`.
+    ///
+    /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     Character(dev_t),
 
-    /// Block device.
+    /// Block device, as in [`mknod(2)`] with `S_IFBLK`.
+    ///
+    /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     Block(dev_t),
 
-    //// Unix socket. Note that this will be a "detached" socket and not
-    //// bound to by anyone. This purely exists to provide a safe mknod(S_IFSOCK)
-    //// implementation.
-    // TODO: See if we can even do bind(2) safely for a Socket() type.
+    //// "Detached" unix socket, as in [`mknod(2)`] with `S_IFSOCK`.
+    ////
+    //// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
+    // TODO: In principle we could do this safely by doing the `mknod` and then See if we can even do bind(2) safely for a Socket() type.
     //DetachedSocket(),
 }
 
@@ -110,56 +197,125 @@ pub struct CreateOpts<'a> {
     pub mode: Permissions,
 }
 
-/// A handle to a path within a given Root. This handle references an
-/// already-resolved path which can be used for only one purpose -- to "re-open"
-/// the handle and get an actual fs::File which can be used for ordinary
-/// operations.
+/// A handle to an existing inode within a [`Root`].
 ///
-/// It is critical for the safety of users of this library that *at no point* do
-/// you use interfaces like libc::openat directly on file descriptors you get
-/// from using this library (or extract the RawFd from a fs::File). You must
-/// always use operations through a Root.
+/// This handle references an already-resolved path which can be used for the
+/// purpose of "re-opening" the handle and get an actual [`File`] which can be
+/// used for ordinary operations.
+///
+/// # Safety
+///
+/// It is critical for the safety of this library that **at no point** do you
+/// use interfaces like [`libc::openat`] directly on any [`RawFd`]s you might
+/// extract from the [`File`] you get from this [`Handle`]. **You must always do
+/// operations through a valid [`Root`].**
+///
+/// [`Root`]: trait.Root.html
+/// [`Handle`]: trait.Handle.html
+/// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+/// [`RawFd`]: https://doc.rust-lang.org/std/os/unix/io/type.RawFd.html
+/// [`libc::openat`]: https://docs.rs/libc/latest/libc/fn.openat.html
 pub trait Handle: Drop {
-    /// "Upgrade" the handle to a usable std::fs::File handle suitable for
-    /// reading and writing. This does not consume the original handle (allowing
-    /// for it to be used many times).
+    /// "Upgrade" the handle to a usable [`File`] handle suitable for reading
+    /// and writing, as though the file was opened with `OpenOptions`.
     ///
-    /// It should be noted that the use of O_CREAT *is not* supported (and will
-    /// result in an error). Handles only refer to *existing* files. Instead you
-    /// need to use Root::create().
+    /// This does not consume the original handle (allowing for it to be used
+    /// many times). `O_CREAT` is not permitted in the options list, you should
+    /// use [`Root::create`]. It is recommended to `use` [`OpenOptionsExt`].
     ///
-    /// It is recommended to `use` std::os::unix::fs::OpenOptionsExt and
-    /// std::os::unix::fs::PermissionsExt.
-    fn reopen(&self, opts: &OpenOptions) -> Result<File, Error>;
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    /// [`OpenOptions`]: https://doc.rust-lang.org/std/fs/struct.OpenOptions.html
+    /// [`Root::create`]: trait.Root.html#tymethod.create
+    /// [`OpenOptionsExt`]: https://doc.rust-lang.org/std/os/unix/fs/trait.OpenOptionsExt.html
+    fn reopen(&self, options: &OpenOptions) -> Result<File, Error>;
+
+    // TODO: bind(). This might be safe to do but I'm a bit sad it'd be separate
+    //       from Handle::reopen().
 }
 
-/// A handle to the root of a directory tree to resolve within. The only purpose
-/// of this "root handle" is to get Handles to inodes within the directory tree.
+/// A handle to the root of a directory tree.
 ///
-/// At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
-/// inside a possibly-attacker-controlled directory tree. While we do have
-/// protections that should defend against it (for both drivers), it's far more
-/// dangerous than just opening a directory tree which is not inside a
+/// # Safety
+///
+/// At the time of writing, it is considered a **very bad idea** to open a
+/// [`Root`] inside a possibly-attacker-controlled directory tree. While we do
+/// have protections that should defend against it (for both drivers), it's far
+/// more dangerous than just opening a directory tree which is not inside a
 /// potentially-untrusted directory.
+///
+/// # Errors
+///
+/// If at any point an attack is detected during the execution of a [`Root`]
+/// method, an error will be returned. The method of attack detection is
+/// multi-layered and operates through explicit `/proc/self/fd` checks as well
+/// as (in the case of the native backend) kernel-space checks that will trigger
+/// `-EXDEV` in certain attack scenarios.
+///
+/// [`Root`]: trait.Root.html
 pub trait Root: Drop {
-    /// Within the given Root's tree, resolve the given Path (with all symlinks
-    /// being scoped to the Root) and return a handle to that path. The path
-    /// *must already exist*, otherwise an error will occur.
+    /// Within the given [`Root`]'s tree, resolve `path` and return a
+    /// [`Handle`]. All symlink path components are scoped to [`Root`].
+    ///
+    /// # Errors
+    ///
+    /// If `path` doesn't exist, or an attack was detected during resolution, a
+    /// corresponding Error will be returned. If no error is returned, then the
+    /// path is guaranteed to have been reachable from the root of the directory
+    /// tree and thus have been inside the root at one point in the resolution.
+    ///
+    /// [`Root`]: trait.Root.html
+    /// [`Handle`]: trait.Handle.html
     fn resolve(&self, path: &Path) -> Result<Box<dyn Handle>, Error>;
 
-    /// Within the Root's tree, create an inode at the Path as specified by
-    /// CreateOpts. If the path already exists, an error is returned
-    /// (effectively acting as though O_EXCL is always set).
-    fn create(&self, path: &Path, opts: &CreateOpts) -> Result<Box<dyn Handle>, Error>;
+    /// Within the [`Root`]'s tree, create an inode at `path` as specified by
+    /// `options`. A [`Handle`] to the newly-created inode is returned.
+    ///
+    /// # Errors
+    ///
+    /// If the path already exists (regardless of the type of the existing
+    /// inode), an error is returned.
+    ///
+    /// [`Root`]: trait.Root.html
+    /// [`Handle`]: trait.Handle.html
+    /// [`InoType::File`]: enum.InoType.html#variant.File
+    /// [`renameat2`]: http://man7.org/linux/man-pages/man2/rename.2.html
+    /// [`pivot_root`]: http://man7.org/linux/man-pages/man2/pivot_root.2.html
+    /// [github]: https://github.com/openSUSE/libpathrs
+    fn create(&self, path: &Path, options: &CreateOpts) -> Result<Box<dyn Handle>, Error>;
+
+    /// Within the [`Root`]'s tree, remove the inode at `path`.
+    ///
+    /// Any existing [`Handle`]s to `path` will continue to work as before,
+    /// since Linux does not invalidate file handles to unlinked files (though,
+    /// directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist or is a non-empty directory, an error will be
+    /// returned. In order to remove a non-empty directory, please use
+    /// [`Root::remove_all`].
+    ///
+    /// [`Root`]: trait.Root.html
+    /// [`Handle`]: trait.Handle.html
+    /// [`Root::remove_all`]: trait.Root.html#tymethod.remove_all
+    fn remove(&self, path: &Path) -> Result<(), Error>;
 }
 
-/// Open a Root handle. The correct backend (native/kernel or emulated) to use
-/// is auto-detected based on whether the kernel supports openat2(2).
+/// Open a [`Root`] handle using the best backend available.
 ///
-/// The provided Path must be an existing directory. If using the emulated
-/// driver, it also must be the fully-expanded path to a real directory (with no
-/// symlink components) because the given Path is used to double-check that the
-/// open operation was not affected by an attacker.
+/// The correct backend (native or emulated) to use is auto-detected based on
+/// whether the kernel supports `openat2(2)`.
+///
+/// # Errors
+///
+/// `path` must be an existing directory inside the [`Root`].
+///
+/// If using the emulated driver, `path` must also be the fully-expanded path to
+/// a real directory (in order words, not contain any symlink components). The
+/// reason for this is because `path` is used to double-check that the open
+/// operation was not affected by an attacker.
+///
+/// [`Root`]: trait.Root.html
 // TODO: We really need to provide a dirfd as a source, though the main problem
 //       here is that it's unclear what the "correct" path is for the emulated
 //       backend to check against. We could just read the dirfd but now we have
@@ -178,4 +334,5 @@ pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
 
 impl Root {
     // TODO: mkdir_all()
+    // TODO: remove_all()
 }
