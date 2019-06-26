@@ -16,10 +16,20 @@
 
 [package]
 name = "libpathrs"
-version = "0.0.0"
+version = "0.0.0+dev"
 license = "LGPL-3.0-or-later"
 authors = ["Aleksa Sarai <cyphar@cyphar.com>"]
+
+repository = "https://github.com/openSUSE/libpathrs"
+readme = "README.md"
+description = "C-friendly API to make path resolution safer on Linux."
+
+keywords = ["file", "fs", "security", "linux"]
+categories = ["filesystem"]
 edition = "2018"
+
+[badges]
+maintenance = { status = "experimental" }
 
 [lib]
 name = "pathrs"
