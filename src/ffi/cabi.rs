@@ -39,19 +39,24 @@ use libc::{c_char, c_int, c_uint, dev_t};
 type CPtr<T> = Option<&'static mut T>;
 
 // Private trait necessary to work around the "orphan trait" restriction.
-trait Check<T: ?Sized> {
+trait Pointer<T: ?Sized> {
     type Inner;
     fn check(self) -> Result<Self::Inner, Error>;
+    fn free(self);
 }
 
-
 // A basic way of having consistent and simple errors when passing NULL
-// incorrectly to a libpathrs API call.
-impl<T: ?Sized> Check<T> for CPtr<T> {
+// incorrectly to a libpathrs API call, and freeing it later.
+impl<T: ?Sized> Pointer<T> for CPtr<T> {
     type Inner = &'static mut T;
 
     fn check(self) -> Result<Self::Inner, Error> {
         self.ok_or(format_err!("invalid libpathrs handle -- must not be NULL"))
+    }
+
+    fn free(self) {
+        self.map(|inner| unsafe { Box::from_raw(inner as *mut T) });
+        // drop the Box
     }
 }
 
@@ -101,8 +106,7 @@ pub extern "C" fn pathrs_open(path: *const c_char) -> CRoot {
 /// Free a root handle.
 #[no_mangle]
 pub extern "C" fn pathrs_rfree(root: CRoot) {
-    root.map(|r| unsafe { Box::from_raw(r as *mut dyn Root) });
-    // drop the handle
+    root.free();
 }
 
 /// "Upgrade" the handle to a usable fd, suitable for reading and writing. This
@@ -138,8 +142,7 @@ pub extern "C" fn handle_reopen(handle: CHandle, flags: c_int, mode: c_uint) -> 
 /// Free a handle.
 #[no_mangle]
 pub extern "C" fn pathrs_hfree(handle: CHandle) {
-    handle.map(|h| unsafe { Box::from_raw(h as *mut dyn Handle) });
-    // drop the handle
+    handle.free();
 }
 
 /// Within the given root's tree, resolve the given path (with all symlinks
