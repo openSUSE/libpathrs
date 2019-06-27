@@ -16,11 +16,11 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{slice, ptr};
 use std::cell::RefCell;
+use std::{ptr, slice};
 
-use libc::{c_char, c_int};
 use failure::Error;
+use libc::{c_char, c_int};
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<Box<Error>>> = RefCell::new(None);
@@ -45,8 +45,9 @@ thread_local! {
 ///     })
 /// }
 /// ```
-pub fn ffi_wrap<F,R>(on_err: R, func: F) -> R
-    where F: FnOnce() -> Result<R, Error>
+pub fn ffi_wrap<F, R>(on_err: R, func: F) -> R
+where
+    F: FnOnce() -> Result<R, Error>,
 {
     // Clear the error before the operation to avoid the errno problem.
     let _ = take_error();
@@ -73,10 +74,10 @@ pub fn take_error() -> Option<Box<Error>> {
 /// byte). A return value of 0 indicates that there is no currently-stored
 /// error. Cannot fail.
 #[no_mangle]
-pub extern fn pathrs_error_length() -> c_int {
+pub extern "C" fn pathrs_error_length() -> c_int {
     LAST_ERROR.with(|prev| match *prev.borrow() {
         Some(ref err) => err.to_string().len() as c_int + 1,
-        None          => 0,
+        None => 0,
     })
 }
 
@@ -86,14 +87,14 @@ pub extern fn pathrs_error_length() -> c_int {
 /// written (including the trailing NUL byte) is returned and the error is
 /// cleared from libpathrs's side. If there was no error, then 0 is returned.
 #[no_mangle]
-pub extern fn pathrs_error(buffer: *mut c_char, length: c_int) -> c_int {
+pub extern "C" fn pathrs_error(buffer: *mut c_char, length: c_int) -> c_int {
     if buffer.is_null() {
         return -1;
     }
 
     let last_error = match take_error() {
         Some(err) => err,
-        None      => return 0,
+        None => return 0,
     };
 
     let error_message = last_error.to_string();

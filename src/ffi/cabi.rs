@@ -18,12 +18,15 @@
 
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
-use libpathrs::{CreateOpts, Handle, InoType, Root};
 use libpathrs::ffi::error;
+use libpathrs::{CreateOpts, Handle, InoType, Root};
 
-use std::fs::{OpenOptions, Permissions};
-use std::os::unix::{io::AsRawFd, fs::{OpenOptionsExt, PermissionsExt}};
 use std::ffi::CStr;
+use std::fs::{OpenOptions, Permissions};
+use std::os::unix::{
+    fs::{OpenOptionsExt, PermissionsExt},
+    io::AsRawFd,
+};
 use std::path::Path;
 
 use failure::Error;
@@ -89,7 +92,9 @@ pub extern "C" fn pathrs_open(path: *const c_char) -> CRoot {
         let path = unsafe { CStr::from_ptr(path) }.to_str()?;
 
         // Leak the box so we can return the pointer to the caller.
-        libpathrs::open(Path::new(path)).map(Box::leak).map(|h| Some(h))
+        libpathrs::open(Path::new(path))
+            .map(Box::leak)
+            .map(|h| Some(h))
     })
 }
 
@@ -99,7 +104,6 @@ pub extern "C" fn pathrs_rfree(root: CRoot) {
     root.map(|r| unsafe { Box::from_raw(r as *mut dyn Root) });
     // drop the handle
 }
-
 
 /// "Upgrade" the handle to a usable fd, suitable for reading and writing. This
 /// does not consume the original handle (allowing for it to be used many
@@ -116,12 +120,18 @@ pub extern "C" fn handle_reopen(handle: CHandle, flags: c_int, mode: c_uint) -> 
         // Construct options from the C-style flags. Due to weird restrictions
         // with OpenOptions we need to manually set the O_ACCMODE bits.
         let mut options = OpenOptions::new();
-        handle.reopen(match flags & libc::O_ACCMODE {
-            libc::O_RDONLY => options.read(true),
-            libc::O_WRONLY => options.write(true),
-            libc::O_RDWR   => options.read(true).write(true),
-            _              => bail!("invalid flags to reopen: {:?}", flags),
-        }.custom_flags(flags).mode(mode)).map(|f| f.as_raw_fd())
+        handle
+            .reopen(
+                match flags & libc::O_ACCMODE {
+                    libc::O_RDONLY => options.read(true),
+                    libc::O_WRONLY => options.write(true),
+                    libc::O_RDWR => options.read(true).write(true),
+                    _ => bail!("invalid flags to reopen: {:?}", flags),
+                }
+                .custom_flags(flags)
+                .mode(mode),
+            )
+            .map(|f| f.as_raw_fd())
     })
 }
 
@@ -156,7 +166,8 @@ fn _inroot_create(root: CRoot, path: *const c_char, opts: &CreateOpts) -> Result
     }
     let path = unsafe { CStr::from_ptr(path) }.to_str()?;
 
-    root.create(Path::new(path), opts).map(|h| Some(Box::leak(h)))
+    root.create(Path::new(path), opts)
+        .map(|h| Some(Box::leak(h)))
 }
 
 // Within the root, create an inode at the path with the given mode. If the
@@ -166,43 +177,57 @@ fn _inroot_create(root: CRoot, path: *const c_char, opts: &CreateOpts) -> Result
 // TODO: Replace all the inroot_* stuff with macros. It's quite repetitive.
 
 #[no_mangle]
-pub extern "C" fn inroot_creat(root: CRoot, path: *const c_char, mode: c_uint)
-    -> CHandle {
+pub extern "C" fn inroot_creat(root: CRoot, path: *const c_char, mode: c_uint) -> CHandle {
     error::ffi_wrap(None, move || {
-        _inroot_create(root, path, &CreateOpts{
-            typ: InoType::File(),
-            mode: Permissions::from_mode(mode),
-        })
+        _inroot_create(
+            root,
+            path,
+            &CreateOpts {
+                typ: InoType::File(),
+                mode: Permissions::from_mode(mode),
+            },
+        )
     })
 }
 
 #[no_mangle]
-pub extern "C" fn inroot_mkdir(root: CRoot, path: *const c_char, mode: c_uint)
-    -> CHandle {
+pub extern "C" fn inroot_mkdir(root: CRoot, path: *const c_char, mode: c_uint) -> CHandle {
     error::ffi_wrap(None, move || {
-        _inroot_create(root, path, &CreateOpts{
-            typ: InoType::Directory(),
-            mode: Permissions::from_mode(mode),
-        })
+        _inroot_create(
+            root,
+            path,
+            &CreateOpts {
+                typ: InoType::Directory(),
+                mode: Permissions::from_mode(mode),
+            },
+        )
     })
 }
 
 #[no_mangle]
-pub extern "C" fn inroot_mknod(root: CRoot, path: *const c_char, mode: c_uint,
-                           dev: dev_t) -> CHandle {
+pub extern "C" fn inroot_mknod(
+    root: CRoot,
+    path: *const c_char,
+    mode: c_uint,
+    dev: dev_t,
+) -> CHandle {
     error::ffi_wrap(None, move || {
         let typ = match mode & libc::S_IFMT {
-            libc::S_IFREG  => InoType::File(),
-            libc::S_IFDIR  => InoType::Directory(),
-            libc::S_IFBLK  => InoType::Block(dev),
-            libc::S_IFCHR  => InoType::Character(dev),
+            libc::S_IFREG => InoType::File(),
+            libc::S_IFDIR => InoType::Directory(),
+            libc::S_IFBLK => InoType::Block(dev),
+            libc::S_IFCHR => InoType::Character(dev),
             libc::S_IFSOCK => bail!("S_IFSOCK unsupported"),
-            libc::S_IFIFO  => InoType::Fifo(),
-            fmt @ _        => bail!("invalid mode: {:?}", fmt),
+            libc::S_IFIFO => InoType::Fifo(),
+            fmt @ _ => bail!("invalid mode: {:?}", fmt),
         };
-        _inroot_create(root, path, &CreateOpts{
-            typ: typ,
-            mode: Permissions::from_mode(mode),
-        })
+        _inroot_create(
+            root,
+            path,
+            &CreateOpts {
+                typ: typ,
+                mode: Permissions::from_mode(mode),
+            },
+        )
     })
 }

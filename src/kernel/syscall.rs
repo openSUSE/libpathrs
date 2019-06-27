@@ -24,8 +24,8 @@ use std::ffi::CString;
 use std::io::Error as IOError;
 use std::os::unix::io::RawFd;
 
-use libc::{c_char, c_long, c_int};
 use failure::Error;
+use libc::{c_char, c_int, c_long};
 
 /// get_errno constructs a failure::Error from the current system errno value.
 pub fn get_errno() -> Error {
@@ -44,7 +44,11 @@ impl NewOpenatOptions {
 #[allow(non_upper_case_globals)]
 const SYS_openat2: c_long = 435;
 
-unsafe fn openat2_raw(dirfd: c_int, pathname: *const c_char, opts: *const NewOpenatOptions) -> c_int {
+unsafe fn openat2_raw(
+    dirfd: c_int,
+    pathname: *const c_char,
+    opts: *const NewOpenatOptions,
+) -> c_int {
     libc::syscall(SYS_openat2, dirfd, pathname, opts) as c_int
 }
 
@@ -63,7 +67,7 @@ pub fn openat2(dirfd: RawFd, pathname: &str, opts: &NewOpenatOptions) -> Result<
 /// openat2(2) with RESOLVE_THIS_ROOT. This can be used to decide which
 /// underlying interface to use.
 pub fn supported() -> bool {
-    let opts = NewOpenatOptions{};
+    let opts = NewOpenatOptions {};
     match openat2(libc::AT_FDCWD, ".", &opts) {
         Err(_) => false,
         Ok(fd) => {

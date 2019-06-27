@@ -109,22 +109,24 @@
 //! [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
 //! [`chroot(2)`]: http://man7.org/linux/man-pages/man2/chroot.2.html
 
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate lazy_static;
 extern crate errno;
-#[macro_use] extern crate failure;
+#[macro_use]
+extern crate failure;
 extern crate libc;
 
 mod ffi;
 // TODO: We should expose user::open and kernel::open so that people can
 //       explicitly decide to use a different backend if they *really* want to.
-mod user;
 mod kernel;
+mod user;
 
-use std::fs::{File, Permissions, OpenOptions};
+use std::fs::{File, OpenOptions, Permissions};
 use std::path::Path;
 
-use libc::dev_t;
 use failure::Error;
+use libc::dev_t;
 
 lazy_static! {
     static ref KERNEL_SUPPORT: bool = kernel::supported();
@@ -183,7 +185,6 @@ pub enum InoType<'a> {
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     Block(dev_t),
-
     //// "Detached" unix socket, as in [`mknod(2)`] with `S_IFSOCK`.
     ////
     //// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
@@ -324,10 +325,13 @@ pub trait Root: Drop {
 //       first place?
 pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
     if path.is_relative() {
-        bail!("libpathrs: cannot open non-absolute root path: {}", path.to_str().unwrap());
+        bail!(
+            "libpathrs: cannot open non-absolute root path: {}",
+            path.to_str().unwrap()
+        );
     }
     match *KERNEL_SUPPORT {
-        true  => kernel::open(path),
+        true => kernel::open(path),
         false => user::open(path),
     }
 }

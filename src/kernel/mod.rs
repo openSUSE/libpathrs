@@ -19,10 +19,10 @@
 mod syscall;
 pub use syscall::supported;
 
-use std::fs::{File, OpenOptions};
-use std::path::Path;
-use std::os::unix::io::RawFd;
 use super::{CreateOpts, Handle, Root};
+use std::fs::{File, OpenOptions};
+use std::os::unix::io::RawFd;
+use std::path::Path;
 
 use failure::Error;
 
