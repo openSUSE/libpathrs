@@ -35,8 +35,8 @@
 //! measures, but the final check throgh procfs should block all attack
 //! attempts.
 
-use super::{CreateOpts, Handle, Root};
-use std::fs::{File, OpenOptions};
+use super::{Handle, InodeType, Root};
+use std::fs::{File, OpenOptions, Permissions};
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 
@@ -73,7 +73,11 @@ impl Root for EmulatedHandle {
         bail!("not yet implemented");
     }
 
-    fn create(&self, path: &Path, options: &CreateOpts) -> Result<Box<dyn Handle>, Error> {
+    fn create(&self, path: &Path, inode_type: &InodeType) -> Result<(), Error> {
+        bail!("not yet implemented");
+    }
+
+    fn create_file(&self, path: &Path, perm: &Permissions) -> Result<Box<dyn Handle>, Error> {
         bail!("not yet implemented");
     }
 

@@ -135,29 +135,29 @@ lazy_static! {
 /// An inode type to be created with [`Root::create`].
 ///
 /// [`Root::create`]: trait.Root.html#tymethod.create
-pub enum InoType<'a> {
+pub enum InodeType<'a> {
     /// Ordinary file, as in [`creat(2)`].
     ///
     /// [`creat(2)`]: http://man7.org/linux/man-pages/man2/creat.2.html
     // XXX: It is possible to support non-O_EXCL O_CREAT with the native
     //      backend. But it's unclear whether we should expose it given it's
     //      only supported on native-kernel systems.
-    File(),
+    File(&'a Permissions),
 
     /// Directory, as in [`mkdir(2)`].
     ///
     /// [`mkdir(2)`]: http://man7.org/linux/man-pages/man2/mkdir.2.html
-    Directory(),
+    Directory(&'a Permissions),
 
-    /// Symlink with the given `&str` contents, as in [`symlinkat(2)`].
+    /// Symlink with the given [`Path`], as in [`symlinkat(2)`].
     ///
-    /// We don't accept a [`Path`] here, since symlinks don't have special
-    /// resolution properties (and so we just pass the string directly to
-    /// [`symlinkat(2)`]).
+    /// Note that symlinks can contain any arbitrary [`CStr`]-style string (it
+    /// doesn't need to be a real pathname). We don't do any verification of the
+    /// target name.
     ///
     /// [`Path`]: https://doc.rust-lang.org/std/path/struct.Path.html
     /// [`symlinkat(2)`]: http://man7.org/linux/man-pages/man2/symlinkat.2.html
-    Symlink(&'a str),
+    Symlink(&'a Path),
 
     /// Hard-link to the given [`Path`], as in [`linkat(2)`].
     ///
@@ -174,28 +174,22 @@ pub enum InoType<'a> {
     /// Named pipe (aka FIFO), as in [`mkfifo(3)`].
     ///
     /// [`mkfifo(3)`]: http://man7.org/linux/man-pages/man3/mkfifo.3.html
-    Fifo(),
+    Fifo(&'a Permissions),
 
     /// Character device, as in [`mknod(2)`] with `S_IFCHR`.
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
-    Character(dev_t),
+    CharacterDevice(&'a Permissions, dev_t),
 
     /// Block device, as in [`mknod(2)`] with `S_IFBLK`.
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
-    Block(dev_t),
+    BlockDevice(&'a Permissions, dev_t),
     //// "Detached" unix socket, as in [`mknod(2)`] with `S_IFSOCK`.
     ////
     //// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     // TODO: In principle we could do this safely by doing the `mknod` and then See if we can even do bind(2) safely for a Socket() type.
     //DetachedSocket(),
-}
-
-/// Encapsulates all of the generic options required to create a file.
-pub struct CreateOpts<'a> {
-    pub typ: InoType<'a>,
-    pub mode: Permissions,
 }
 
 /// A handle to an existing inode within a [`Root`].
@@ -221,17 +215,19 @@ pub trait Handle: Drop {
     /// and writing, as though the file was opened with `OpenOptions`.
     ///
     /// This does not consume the original handle (allowing for it to be used
-    /// many times). `O_CREAT` is not permitted in the options list, you should
-    /// use [`Root::create`]. It is recommended to `use` [`OpenOptionsExt`].
+    /// many times). It is recommended to `use` [`OpenOptionsExt`].
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`OpenOptions`]: https://doc.rust-lang.org/std/fs/struct.OpenOptions.html
     /// [`Root::create`]: trait.Root.html#tymethod.create
     /// [`OpenOptionsExt`]: https://doc.rust-lang.org/std/os/unix/fs/trait.OpenOptionsExt.html
     fn reopen(&self, options: &OpenOptions) -> Result<File, Error>;
+}
 
-    // TODO: bind(). This might be safe to do but I'm a bit sad it'd be separate
-    //       from Handle::reopen().
+impl Handle {
+    // TODO: bind(). This might be safe to do (set the socket path to
+    //       /proc/self/fd/...) but I'm a bit sad it'd be separate from
+    //       Handle::reopen().
 }
 
 /// A handle to the root of a directory tree.
@@ -269,7 +265,7 @@ pub trait Root: Drop {
     fn resolve(&self, path: &Path) -> Result<Box<dyn Handle>, Error>;
 
     /// Within the [`Root`]'s tree, create an inode at `path` as specified by
-    /// `options`. A [`Handle`] to the newly-created inode is returned.
+    /// `inode_type`.
     ///
     /// # Errors
     ///
@@ -277,12 +273,36 @@ pub trait Root: Drop {
     /// inode), an error is returned.
     ///
     /// [`Root`]: trait.Root.html
+    fn create(&self, path: &Path, inode_type: &InodeType) -> Result<(), Error>;
+
+    /// Create an [`InodeType::File`] within the [`Root`]'s tree at `path` with
+    /// the mode given by `perm`, and return a [`Handle`] to the newly-created
+    /// file.
+    ///
+    /// However, unlike the trivial way of doing the above:
+    ///
+    /// ```
+    /// root.create(path, inode_type)?;
+    /// // What happens if the file is replaced here!?
+    /// let handle = root.resolve(path, perm)?;
+    /// ```
+    ///
+    /// [`Root::create_file`] guarantees that the returned [`Handle`] is the
+    /// same as the file created by the operation. This is only possible to
+    /// guarantee for ordinary files because there is no [`O_CREAT`]-equivalent
+    /// for other inode types.
+    ///
+    /// # Errors
+    ///
+    /// Identical to [`Root::create`].
+    ///
+    /// [`Root`]: trait.Root.html
     /// [`Handle`]: trait.Handle.html
-    /// [`InoType::File`]: enum.InoType.html#variant.File
-    /// [`renameat2`]: http://man7.org/linux/man-pages/man2/rename.2.html
-    /// [`pivot_root`]: http://man7.org/linux/man-pages/man2/pivot_root.2.html
-    /// [github]: https://github.com/openSUSE/libpathrs
-    fn create(&self, path: &Path, options: &CreateOpts) -> Result<Box<dyn Handle>, Error>;
+    /// [`Root::create`]: trait.Root.html#tymethod.create
+    /// [`Root::create_file`]: trait.Root.html#tymethod.create_file
+    /// [`InodeType::File`]: enum.InodeType.html#variant.File
+    /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
+    fn create_file(&self, path: &Path, perm: &Permissions) -> Result<Box<dyn Handle>, Error>;
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.
     ///
@@ -300,6 +320,11 @@ pub trait Root: Drop {
     /// [`Handle`]: trait.Handle.html
     /// [`Root::remove_all`]: trait.Root.html#tymethod.remove_all
     fn remove(&self, path: &Path) -> Result<(), Error>;
+}
+
+impl Root {
+    // TODO: mkdir_all()
+    // TODO: remove_all()
 }
 
 /// Open a [`Root`] handle using the best backend available.
@@ -334,9 +359,4 @@ pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
         true => kernel::open(path),
         false => user::open(path),
     }
-}
-
-impl Root {
-    // TODO: mkdir_all()
-    // TODO: remove_all()
 }

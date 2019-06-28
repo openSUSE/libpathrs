@@ -19,43 +19,58 @@
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
 use libpathrs::ffi::error;
-use libpathrs::{CreateOpts, Handle, InoType, Root};
+use libpathrs::{Handle, InodeType, Root};
 
 use std::ffi::CStr;
 use std::fs::{OpenOptions, Permissions};
+use std::ops::{Deref, DerefMut};
 use std::os::unix::{
     fs::{OpenOptionsExt, PermissionsExt},
-    io::AsRawFd,
+    io::{AsRawFd, RawFd},
 };
 use std::path::Path;
 
 use failure::Error;
 use libc::{c_char, c_int, c_uint, dev_t};
 
-/// A variation of *mut T which is more usable than dealing with ptr::null_mut()
-/// which appears to really hate trait objects. By using an Option<&mut T>, Rust
-/// makes None be equivalent to C's NULL -- with the ref value just being an
-/// opaque pointer value.
-type CPtr<T> = Option<&'static mut T>;
+/// Wrapping struct which we can given C a pointer to. `&T` isn't an option,
+/// because DSTs (fat pointers) like `dyn T` (and thus `&dyn T`) have no
+/// FFI-safe representation. So we need to hide it within an FFI-safe pointer
+/// (such as a trivial struct).
+pub struct CPointer<T> {
+    inner: T,
+}
 
 // Private trait necessary to work around the "orphan trait" restriction.
-trait Pointer<T: ?Sized> {
-    type Inner;
-    fn check(self) -> Result<Self::Inner, Error>;
-    fn free(self);
+trait Pointer<T: ?Sized>: Deref + DerefMut {
+    fn new(inner: T) -> &'static mut Self;
+    fn free(&mut self);
+}
+
+impl<T> Deref for CPointer<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for CPointer<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 // A basic way of having consistent and simple errors when passing NULL
 // incorrectly to a libpathrs API call, and freeing it later.
-impl<T: ?Sized> Pointer<T> for CPtr<T> {
-    type Inner = &'static mut T;
-
-    fn check(self) -> Result<Self::Inner, Error> {
-        self.ok_or(format_err!("invalid libpathrs handle -- must not be NULL"))
+impl<T> Pointer<T> for CPointer<T> {
+    // Heap-allocate a new CPointer, but then leak it for C FFI usage.
+    fn new(inner: T) -> &'static mut Self {
+        Box::leak(Box::new(CPointer { inner: inner }))
     }
 
-    fn free(self) {
-        self.map(|inner| unsafe { Box::from_raw(inner as *mut T) });
+    // Take an already-leaked CPointer and un-leak it so we can drop it in Rust.
+    fn free(&mut self) {
+        unsafe { Box::from_raw(self as *mut Self) }.inner;
         // drop the Box
     }
 }
@@ -68,7 +83,7 @@ impl<T: ?Sized> Pointer<T> for CPtr<T> {
 /// protections that should defend against it (for both drivers), it's far more
 /// dangerous than just opening a directory tree which is not inside a
 /// potentially-untrusted directory.
-pub type CRoot = CPtr<dyn Root>;
+pub type CRoot = CPointer<Box<dyn Root>>;
 
 /// A handle to a path within a given Root. This handle references an
 /// already-resolved path which can be used for only one purpose -- to "re-open"
@@ -79,7 +94,7 @@ pub type CRoot = CPtr<dyn Root>;
 /// you use interfaces like libc::openat directly on file descriptors you get
 /// from using this library (or extract the RawFd from a fs::File). You must
 /// always use operations through a Root.
-pub type CHandle = CPtr<dyn Handle>;
+pub type CHandle = CPointer<Box<dyn Handle>>;
 
 /// Open a root handle. The correct backend (native/kernel or emulated) to use
 /// is auto-detected based on whether the kernel supports openat2(2).
@@ -89,7 +104,7 @@ pub type CHandle = CPtr<dyn Handle>;
 /// symlink components) because the given path is used to double-check that the
 /// open operation was not affected by an attacker.
 #[no_mangle]
-pub extern "C" fn pathrs_open(path: *const c_char) -> CRoot {
+pub extern "C" fn pathrs_open(path: *const c_char) -> Option<&'static mut CRoot> {
     error::ffi_wrap(None, move || {
         if path.is_null() {
             bail!("pathrs_open got NULL path");
@@ -98,14 +113,14 @@ pub extern "C" fn pathrs_open(path: *const c_char) -> CRoot {
 
         // Leak the box so we can return the pointer to the caller.
         libpathrs::open(Path::new(path))
-            .map(Box::leak)
-            .map(|h| Some(h))
+            .map(CPointer::new)
+            .map(Option::Some)
     })
 }
 
 /// Free a root handle.
 #[no_mangle]
-pub extern "C" fn pathrs_rfree(root: CRoot) {
+pub extern "C" fn pathrs_rfree(root: &mut CRoot) {
     root.free();
 }
 
@@ -117,14 +132,13 @@ pub extern "C" fn pathrs_rfree(root: CRoot) {
 /// result in an error). Handles only refer to *existing* files. Instead you
 /// need to use inroot_creat().
 #[no_mangle]
-pub extern "C" fn handle_reopen(handle: CHandle, flags: c_int, mode: c_uint) -> c_int {
+pub extern "C" fn handle_reopen(handle: &CHandle, flags: c_int) -> RawFd {
     error::ffi_wrap(-1, move || {
-        let handle = handle.check()?;
-
         // Construct options from the C-style flags. Due to weird restrictions
         // with OpenOptions we need to manually set the O_ACCMODE bits.
         let mut options = OpenOptions::new();
         handle
+            .inner
             .reopen(
                 match flags & libc::O_ACCMODE {
                     libc::O_RDONLY => options.read(true),
@@ -132,8 +146,7 @@ pub extern "C" fn handle_reopen(handle: CHandle, flags: c_int, mode: c_uint) -> 
                     libc::O_RDWR => options.read(true).write(true),
                     _ => bail!("invalid flags to reopen: {:?}", flags),
                 }
-                .custom_flags(flags)
-                .mode(mode),
+                .custom_flags(flags),
             )
             .map(|f| f.as_raw_fd())
     })
@@ -141,7 +154,7 @@ pub extern "C" fn handle_reopen(handle: CHandle, flags: c_int, mode: c_uint) -> 
 
 /// Free a handle.
 #[no_mangle]
-pub extern "C" fn pathrs_hfree(handle: CHandle) {
+pub extern "C" fn pathrs_hfree(handle: &mut CHandle) {
     handle.free();
 }
 
@@ -149,28 +162,28 @@ pub extern "C" fn pathrs_hfree(handle: CHandle) {
 /// being scoped to the root) and return a handle to that path. The path *must
 /// already exist*, otherwise an error will occur.
 #[no_mangle]
-pub extern "C" fn inroot_resolve(root: CRoot, path: *const c_char) -> CHandle {
+pub extern "C" fn inroot_resolve(
+    root: &CRoot,
+    path: *const c_char,
+) -> Option<&'static mut CHandle> {
     error::ffi_wrap(None, move || {
-        let root = root.check()?;
-
         if path.is_null() {
             bail!("inroot_subpath got NULL path");
         }
         let path = unsafe { CStr::from_ptr(path) }.to_str()?;
-        root.resolve(Path::new(path)).map(|h| Some(Box::leak(h)))
+        root.resolve(Path::new(path))
+            .map(CPointer::new)
+            .map(Option::Some)
     })
 }
 
-fn _inroot_create(root: CRoot, path: *const c_char, opts: &CreateOpts) -> Result<CHandle, Error> {
-    let root = root.check()?;
-
+fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     if path.is_null() {
-        bail!("inroot_subpath got NULL path");
+        bail!("path argument cannot be NULL");
     }
     let path = unsafe { CStr::from_ptr(path) }.to_str()?;
-
-    root.create(Path::new(path), opts)
-        .map(|h| Some(Box::leak(h)))
+    let path = Path::new(path);
+    Ok(path)
 }
 
 // Within the root, create an inode at the path with the given mode. If the
@@ -180,57 +193,82 @@ fn _inroot_create(root: CRoot, path: *const c_char, opts: &CreateOpts) -> Result
 // TODO: Replace all the inroot_* stuff with macros. It's quite repetitive.
 
 #[no_mangle]
-pub extern "C" fn inroot_creat(root: CRoot, path: *const c_char, mode: c_uint) -> CHandle {
+pub extern "C" fn inroot_creat(
+    root: &CRoot,
+    path: *const c_char,
+    mode: c_uint,
+) -> Option<&'static mut CHandle> {
+    let mode = mode & !libc::S_IFMT;
+    let perm = Permissions::from_mode(mode);
+
     error::ffi_wrap(None, move || {
-        _inroot_create(
-            root,
-            path,
-            &CreateOpts {
-                typ: InoType::File(),
-                mode: Permissions::from_mode(mode),
-            },
-        )
+        let path = parse_path(path)?;
+        root.create_file(path, &perm)
+            .map(CPointer::new)
+            .map(Option::Some)
     })
 }
 
 #[no_mangle]
-pub extern "C" fn inroot_mkdir(root: CRoot, path: *const c_char, mode: c_uint) -> CHandle {
-    error::ffi_wrap(None, move || {
-        _inroot_create(
-            root,
-            path,
-            &CreateOpts {
-                typ: InoType::Directory(),
-                mode: Permissions::from_mode(mode),
-            },
-        )
-    })
+pub extern "C" fn inroot_mkdir(root: &CRoot, path: *const c_char, mode: c_uint) -> c_int {
+    let mode = mode & !libc::S_IFMT;
+
+    inroot_mknod(root, path, libc::S_IFDIR | mode, 0)
 }
 
 #[no_mangle]
 pub extern "C" fn inroot_mknod(
-    root: CRoot,
+    root: &CRoot,
     path: *const c_char,
     mode: c_uint,
     dev: dev_t,
-) -> CHandle {
-    error::ffi_wrap(None, move || {
-        let typ = match mode & libc::S_IFMT {
-            libc::S_IFREG => InoType::File(),
-            libc::S_IFDIR => InoType::Directory(),
-            libc::S_IFBLK => InoType::Block(dev),
-            libc::S_IFCHR => InoType::Character(dev),
+) -> c_int {
+    let fmt = mode & libc::S_IFMT;
+    let perms = Permissions::from_mode(mode & !libc::S_IFMT);
+
+    error::ffi_wrap(-1, move || {
+        let path = parse_path(path)?;
+        let inode_type = match fmt {
+            libc::S_IFREG => InodeType::File(&perms),
+            libc::S_IFDIR => InodeType::Directory(&perms),
+            libc::S_IFBLK => InodeType::BlockDevice(&perms, dev),
+            libc::S_IFCHR => InodeType::CharacterDevice(&perms, dev),
+            libc::S_IFIFO => InodeType::Fifo(&perms),
             libc::S_IFSOCK => bail!("S_IFSOCK unsupported"),
-            libc::S_IFIFO => InoType::Fifo(),
-            fmt @ _ => bail!("invalid mode: {:?}", fmt),
+            _ => bail!("invalid mode: {:?}", fmt),
         };
-        _inroot_create(
-            root,
-            path,
-            &CreateOpts {
-                typ: typ,
-                mode: Permissions::from_mode(mode),
-            },
-        )
+
+        root.create(path, &inode_type)?;
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn inroot_symlink(
+    root: &CRoot,
+    path: *const c_char,
+    target: *const c_char,
+) -> c_int {
+    error::ffi_wrap(-1, move || {
+        let path = parse_path(path)?;
+        let target = parse_path(target)?;
+
+        root.create(path, &InodeType::Symlink(target))?;
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn inroot_hardlink(
+    root: &CRoot,
+    path: *const c_char,
+    target: *const c_char,
+) -> c_int {
+    error::ffi_wrap(-1, move || {
+        let path = parse_path(path)?;
+        let target = parse_path(target)?;
+
+        root.create(path, &InodeType::Hardlink(target))?;
+        Ok(0)
     })
 }
