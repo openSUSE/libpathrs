@@ -116,14 +116,23 @@ extern crate errno;
 extern crate failure;
 extern crate libc;
 
+mod handle;
+pub use handle::Handle;
+
 mod ffi;
 // TODO: We should expose user::open and kernel::open so that people can
 //       explicitly decide to use a different backend if they *really* want to.
 mod kernel;
 mod user;
 
-use std::fs::{File, OpenOptions, Permissions};
-use std::path::Path;
+use core::convert::TryFrom;
+use std::ffi::CString;
+use std::fs::Permissions;
+use std::os::unix::{
+    fs::PermissionsExt,
+    io::{AsRawFd, RawFd},
+};
+use std::{path, path::Path};
 
 use failure::Error;
 use libc::dev_t;
@@ -134,7 +143,7 @@ lazy_static! {
 
 /// An inode type to be created with [`Root::create`].
 ///
-/// [`Root::create`]: trait.Root.html#tymethod.create
+/// [`Root::create`]: trait.Root.html#method.create
 pub enum InodeType<'a> {
     /// Ordinary file, as in [`creat(2)`].
     ///
@@ -192,42 +201,28 @@ pub enum InodeType<'a> {
     //DetachedSocket(),
 }
 
-/// A handle to an existing inode within a [`Root`].
-///
-/// This handle references an already-resolved path which can be used for the
-/// purpose of "re-opening" the handle and get an actual [`File`] which can be
-/// used for ordinary operations.
-///
-/// # Safety
-///
-/// It is critical for the safety of this library that **at no point** do you
-/// use interfaces like [`libc::openat`] directly on any [`RawFd`]s you might
-/// extract from the [`File`] you get from this [`Handle`]. **You must always do
-/// operations through a valid [`Root`].**
-///
-/// [`Root`]: trait.Root.html
-/// [`Handle`]: trait.Handle.html
-/// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-/// [`RawFd`]: https://doc.rust-lang.org/std/os/unix/io/type.RawFd.html
-/// [`libc::openat`]: https://docs.rs/libc/latest/libc/fn.openat.html
-pub trait Handle: Drop {
-    /// "Upgrade" the handle to a usable [`File`] handle suitable for reading
-    /// and writing, as though the file was opened with `OpenOptions`.
-    ///
-    /// This does not consume the original handle (allowing for it to be used
-    /// many times). It is recommended to `use` [`OpenOptionsExt`].
-    ///
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-    /// [`OpenOptions`]: https://doc.rust-lang.org/std/fs/struct.OpenOptions.html
-    /// [`Root::create`]: trait.Root.html#tymethod.create
-    /// [`OpenOptionsExt`]: https://doc.rust-lang.org/std/os/unix/fs/trait.OpenOptionsExt.html
-    fn reopen(&self, options: &OpenOptions) -> Result<File, Error>;
-}
+/// Helper to split a Path into its parent directory and trailing path. The
+/// trailing component is guaranteed to not contain a directory separator.
+fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p str), Error> {
+    let parent = path.parent().unwrap_or("/".as_ref());
 
-impl Handle {
-    // TODO: bind(). This might be safe to do (set the socket path to
-    //       /proc/self/fd/...) but I'm a bit sad it'd be separate from
-    //       Handle::reopen().
+    // Now construct the trailing portion of the target.
+    let name = path
+        .file_name()
+        .ok_or(format_err!("no trailing path to create"))?
+        .to_str()
+        .ok_or(format_err!("cannot convert trailing pathname to &str"))?;
+
+    // It's critical we are only touching the final component in the path.
+    // If there are any other path components we must bail.
+    if name.contains(path::MAIN_SEPARATOR) {
+        bail!(
+            "internal error: trailing name of '{:?}' contains '/': '{}'",
+            path,
+            name
+        );
+    }
+    Ok((parent, name))
 }
 
 /// A handle to the root of a directory tree.
@@ -262,8 +257,10 @@ pub trait Root: Drop {
     ///
     /// [`Root`]: trait.Root.html
     /// [`Handle`]: trait.Handle.html
-    fn resolve(&self, path: &Path) -> Result<Box<dyn Handle>, Error>;
+    fn resolve(&self, path: &Path) -> Result<Handle, Error>;
+}
 
+impl Root {
     /// Within the [`Root`]'s tree, create an inode at `path` as specified by
     /// `inode_type`.
     ///
@@ -273,7 +270,60 @@ pub trait Root: Drop {
     /// inode), an error is returned.
     ///
     /// [`Root`]: trait.Root.html
-    fn create(&self, path: &Path, inode_type: &InodeType) -> Result<(), Error>;
+    pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
+        // Use create_file if that's the inode_type. We drop the File returned
+        // (it was free to create anyway because we used openat(2)).
+        if let InodeType::File(perm) = inode_type {
+            return self.create_file(path, perm).map(|_| ());
+        }
+
+        // Get a handle for the lexical parent of the target path. It must
+        // already exist, and once we have it we're safe from rename races in
+        // the parent.
+        let (parent, name) = path_split(path.as_ref())?;
+        let dirfd = self.resolve(parent)?.as_raw_fd();
+        let name = CString::new(name)?.as_ptr();
+
+        let is_ok = match inode_type {
+            InodeType::File(_) => unreachable!(), /* we dealt with this above */
+            InodeType::Directory(perm) => {
+                let mode = perm.mode() & !libc::S_IFMT;
+                unsafe { libc::mkdirat(dirfd, name, mode) }
+            }
+            InodeType::Symlink(target) => {
+                let target = target
+                    .to_str()
+                    .ok_or(format_err!("cannot convert symlink targe to &str"))?;
+                let target = CString::new(target)?.as_ptr();
+                unsafe { libc::symlinkat(target, dirfd, name) }
+            }
+            InodeType::Hardlink(target) => {
+                let oldfd = self.resolve(target)?.as_raw_fd();
+                let empty_path = CString::new("")?.as_ptr();
+                unsafe { libc::linkat(oldfd, empty_path, dirfd, name, libc::AT_EMPTY_PATH) }
+            }
+            InodeType::Fifo(perm) => {
+                let mode = perm.mode() & !libc::S_IFMT;
+                unsafe { libc::mknodat(dirfd, name, libc::S_IFIFO | mode, 0) }
+            }
+            InodeType::CharacterDevice(perm, dev) => {
+                let mode = perm.mode() & !libc::S_IFMT;
+                unsafe { libc::mknodat(dirfd, name, libc::S_IFCHR | mode, *dev) }
+            }
+            InodeType::BlockDevice(perm, dev) => {
+                let mode = perm.mode() & !libc::S_IFMT;
+                unsafe { libc::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev) }
+            }
+        }
+        .is_positive();
+
+        if is_ok {
+            Ok(())
+        } else {
+            // TODO: Clean this up.
+            bail!("failed to root.create: {}", errno::errno())
+        }
+    }
 
     /// Create an [`InodeType::File`] within the [`Root`]'s tree at `path` with
     /// the mode given by `perm`, and return a [`Handle`] to the newly-created
@@ -298,11 +348,37 @@ pub trait Root: Drop {
     ///
     /// [`Root`]: trait.Root.html
     /// [`Handle`]: trait.Handle.html
-    /// [`Root::create`]: trait.Root.html#tymethod.create
-    /// [`Root::create_file`]: trait.Root.html#tymethod.create_file
+    /// [`Root::create`]: trait.Root.html#method.create
+    /// [`Root::create_file`]: trait.Root.html#method.create_file
     /// [`InodeType::File`]: enum.InodeType.html#variant.File
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
-    fn create_file(&self, path: &Path, perm: &Permissions) -> Result<Box<dyn Handle>, Error>;
+    pub fn create_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+        perm: &Permissions,
+    ) -> Result<Handle, Error> {
+        // Get a handle for the lexical parent of the target path. It must
+        // already exist, and once we have it we're safe from rename races in
+        // the parent.
+        let (parent, name) = path_split(path.as_ref())?;
+        let dirfd = self.resolve(parent)?.as_raw_fd();
+        let name = CString::new(name)?.as_ptr();
+
+        let fd: RawFd = unsafe {
+            libc::openat(
+                dirfd,
+                name,
+                libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW,
+                perm.mode(),
+            )
+        };
+
+        if fd < 0 {
+            // TODO: Clean this up.
+            bail!("failed to root.create_file: {}", errno::errno());
+        }
+        Handle::try_from(fd)
+    }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.
     ///
@@ -318,11 +394,26 @@ pub trait Root: Drop {
     ///
     /// [`Root`]: trait.Root.html
     /// [`Handle`]: trait.Handle.html
-    /// [`Root::remove_all`]: trait.Root.html#tymethod.remove_all
-    fn remove(&self, path: &Path) -> Result<(), Error>;
-}
+    /// [`Root::remove_all`]: trait.Root.html#method.remove_all
+    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        // Get a handle for the lexical parent of the target path. It must
+        // already exist, and once we have it we're safe from rename races in
+        // the parent.
+        let (parent, name) = path_split(path.as_ref())?;
+        let dirfd = self.resolve(parent)?.as_raw_fd();
+        let name = CString::new(name)?.as_ptr();
 
-impl Root {
+        // TODO: Handle the lovely "is it a directory or file" problem.
+        let is_ok = unsafe { libc::unlinkat(dirfd, name, 0) }.is_positive();
+
+        if is_ok {
+            Ok(())
+        } else {
+            // TODO: Clean this up.
+            bail!("failed to root.remove: {}", errno::errno())
+        }
+    }
+
     // TODO: mkdir_all()
     // TODO: remove_all()
 }

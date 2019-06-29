@@ -19,8 +19,7 @@
 mod syscall;
 pub use syscall::supported;
 
-use super::{Handle, InodeType, Root};
-use std::fs::{File, OpenOptions, Permissions};
+use super::{Handle, Root};
 use std::os::unix::io::RawFd;
 use std::path::Path;
 
@@ -45,26 +44,8 @@ pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
     bail!("not yet implemented");
 }
 
-impl Handle for NativeHandle {
-    fn reopen(&self, options: &OpenOptions) -> Result<File, Error> {
-        bail!("not yet implemented");
-    }
-}
-
 impl Root for NativeHandle {
-    fn resolve(&self, path: &Path) -> Result<Box<dyn Handle>, Error> {
-        bail!("not yet implemented");
-    }
-
-    fn create(&self, path: &Path, inode_type: &InodeType) -> Result<(), Error> {
-        bail!("not yet implemented");
-    }
-
-    fn create_file(&self, path: &Path, perm: &Permissions) -> Result<Box<dyn Handle>, Error> {
-        bail!("not yet implemented");
-    }
-
-    fn remove(&self, path: &Path) -> Result<(), Error> {
+    fn resolve(&self, path: &Path) -> Result<Handle, Error> {
         bail!("not yet implemented");
     }
 }

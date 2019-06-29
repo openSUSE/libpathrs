@@ -94,7 +94,7 @@ pub type CRoot = CPointer<Box<dyn Root>>;
 /// you use interfaces like libc::openat directly on file descriptors you get
 /// from using this library (or extract the RawFd from a fs::File). You must
 /// always use operations through a Root.
-pub type CHandle = CPointer<Box<dyn Handle>>;
+pub type CHandle = CPointer<Handle>;
 
 /// Open a root handle. The correct backend (native/kernel or emulated) to use
 /// is auto-detected based on whether the kernel supports openat2(2).
