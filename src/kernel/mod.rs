@@ -19,11 +19,12 @@
 mod syscall;
 pub use syscall::supported;
 
-use super::{Handle, Root};
+use crate::{Error, Handle, Root};
+
 use std::os::unix::io::RawFd;
 use std::path::Path;
 
-use failure::Error;
+use failure::Error as FailureError;
 
 #[derive(Debug)]
 struct NativeHandle {
@@ -40,12 +41,12 @@ impl Drop for NativeHandle {
     }
 }
 
-pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
-    bail!("not yet implemented");
+pub fn open(path: &Path) -> Result<Box<dyn Root>, FailureError> {
+    Err(Error::NotImplemented("kernel::open"))?
 }
 
 impl Root for NativeHandle {
-    fn resolve(&self, path: &Path) -> Result<Handle, Error> {
-        bail!("not yet implemented");
+    fn resolve(&self, path: &Path) -> Result<Handle, FailureError> {
+        Err(Error::NotImplemented("NativeHandle::resolve"))?
     }
 }

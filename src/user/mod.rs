@@ -35,11 +35,12 @@
 //! measures, but the final check throgh procfs should block all attack
 //! attempts.
 
-use super::{Handle, Root};
+use crate::{Error, Handle, Root};
+
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 
-use failure::Error;
+use failure::Error as FailureError;
 
 #[derive(Debug)]
 struct EmulatedHandle {
@@ -57,12 +58,12 @@ impl Drop for EmulatedHandle {
     }
 }
 
-pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
-    bail!("not yet implemented");
+pub fn open(path: &Path) -> Result<Box<dyn Root>, FailureError> {
+    Err(Error::NotImplemented("user::open"))?
 }
 
 impl Root for EmulatedHandle {
-    fn resolve(&self, path: &Path) -> Result<Handle, Error> {
-        bail!("not yet implemented");
+    fn resolve(&self, path: &Path) -> Result<Handle, FailureError> {
+        Err(Error::NotImplemented("EmulatedHandle::resolve"))?
     }
 }

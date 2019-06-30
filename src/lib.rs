@@ -50,7 +50,7 @@
 //! use std::fs::OpenOptions;
 //! use std::path::Path;
 //!
-//! # fn main() -> Result<(), Error> {
+//! # fn main() -> Result<(), FailureError> {
 //! // Get a root handle for resolution.
 //! let root = libpathrs::open(Path::new("/path/to/root"))?;
 //! // Resolve the path.
@@ -128,17 +128,47 @@ mod user;
 use core::convert::TryFrom;
 use std::ffi::CString;
 use std::fs::Permissions;
+use std::io::Error as IOError;
 use std::os::unix::{
     fs::PermissionsExt,
     io::{AsRawFd, RawFd},
 };
-use std::{path, path::Path};
+use std::path::Path;
 
-use failure::Error;
+use failure::{Error as FailureError, ResultExt};
 use libc::dev_t;
 
 lazy_static! {
     static ref KERNEL_SUPPORT: bool = kernel::supported();
+}
+
+/// The underlying [`cause`] of the [`failure::Error`] type returned by
+/// libpathrs.
+///
+/// [`cause`]: https://docs.rs/failure/*/failure/struct.Error.html#method.cause
+/// [`failure::Error`]: https://docs.rs/failure/*/failure/struct.Error.html
+#[derive(Fail, Debug)]
+pub enum Error {
+    /// The requested feature is not yet implemented.
+    #[fail(display = "feature not yet implemented: {}", _0)]
+    NotImplemented(&'static str),
+
+    /// One of the provided arguments in invalid. The returned tuple is
+    /// (argument name, description of error).
+    #[fail(display = "invalid {} argument: {}", _0, _1)]
+    InvalidArgument(&'static str, &'static str),
+
+    /// Returned whenever libpathrs has detected some form of safety requirement
+    /// violation. This might be an attempted breakout by an attacker or even a
+    /// bug internal to libpathrs.
+    #[fail(display = "violation of safety requirement: {}", _0)]
+    SafetyViolation(&'static str),
+
+    /// An [`io::Error`] was encountered during the operation.
+    ///
+    /// [`io::Error`]: https://doc.rust-lang.org/std/io/struct.Error.html
+    #[fail(display = "os error: {}", _0)]
+    OsError(#[fail(cause)] IOError),
 }
 
 /// An inode type to be created with [`Root::create`].
@@ -203,24 +233,22 @@ pub enum InodeType<'a> {
 
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
-fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p str), Error> {
+fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p str), FailureError> {
     let parent = path.parent().unwrap_or("/".as_ref());
 
     // Now construct the trailing portion of the target.
     let name = path
         .file_name()
-        .ok_or(format_err!("no trailing path to create"))?
+        .ok_or(Error::InvalidArgument("path", "no trailing component"))?
         .to_str()
-        .ok_or(format_err!("cannot convert trailing pathname to &str"))?;
+        .ok_or(Error::InvalidArgument("path", "not a valid Rust string"))?;
 
     // It's critical we are only touching the final component in the path.
     // If there are any other path components we must bail.
-    if name.contains(path::MAIN_SEPARATOR) {
-        bail!(
-            "internal error: trailing name of '{:?}' contains '/': '{}'",
-            path,
-            name
-        );
+    if name.contains(std::path::MAIN_SEPARATOR) {
+        return Err(Error::SafetyViolation(
+            "trailing component of pathname contains '/'",
+        ))?;
     }
     Ok((parent, name))
 }
@@ -257,7 +285,7 @@ pub trait Root: Drop {
     ///
     /// [`Root`]: trait.Root.html
     /// [`Handle`]: trait.Handle.html
-    fn resolve(&self, path: &Path) -> Result<Handle, Error>;
+    fn resolve(&self, path: &Path) -> Result<Handle, FailureError>;
 }
 
 impl Root {
@@ -270,7 +298,11 @@ impl Root {
     /// inode), an error is returned.
     ///
     /// [`Root`]: trait.Root.html
-    pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
+    pub fn create<P: AsRef<Path>>(
+        &self,
+        path: P,
+        inode_type: &InodeType,
+    ) -> Result<(), FailureError> {
         // Use create_file if that's the inode_type. We drop the File returned
         // (it was free to create anyway because we used openat(2)).
         if let InodeType::File(perm) = inode_type {
@@ -280,11 +312,17 @@ impl Root {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
-        let (parent, name) = path_split(path.as_ref())?;
-        let dirfd = self.resolve(parent)?.as_raw_fd();
-        let name = CString::new(name)?.as_ptr();
+        let (parent, name) = path_split(path.as_ref())
+            .context("split path into (parent, name) for inode creation")?;
+        let dirfd = self
+            .resolve(parent)
+            .context("resolve parent directory for inode creation")?
+            .as_raw_fd();
+        let name = CString::new(name)
+            .context("convert name into CString for FFI")?
+            .as_ptr();
 
-        let is_ok = match inode_type {
+        let ret = match inode_type {
             InodeType::File(_) => unreachable!(), /* we dealt with this above */
             InodeType::Directory(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
@@ -293,12 +331,15 @@ impl Root {
             InodeType::Symlink(target) => {
                 let target = target
                     .to_str()
-                    .ok_or(format_err!("cannot convert symlink targe to &str"))?;
+                    .ok_or(Error::InvalidArgument("target", "not a valid Rust string"))?;
                 let target = CString::new(target)?.as_ptr();
                 unsafe { libc::symlinkat(target, dirfd, name) }
             }
             InodeType::Hardlink(target) => {
-                let oldfd = self.resolve(target)?.as_raw_fd();
+                let oldfd = self
+                    .resolve(target)
+                    .context("resolve target path for hardlink")?
+                    .as_raw_fd();
                 let empty_path = CString::new("")?.as_ptr();
                 unsafe { libc::linkat(oldfd, empty_path, dirfd, name, libc::AT_EMPTY_PATH) }
             }
@@ -314,15 +355,13 @@ impl Root {
                 let mode = perm.mode() & !libc::S_IFMT;
                 unsafe { libc::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev) }
             }
-        }
-        .is_positive();
+        };
+        let err = errno::errno().into();
 
-        if is_ok {
-            Ok(())
-        } else {
-            // TODO: Clean this up.
-            bail!("failed to root.create: {}", errno::errno())
+        if ret.is_negative() {
+            return Err(Error::OsError(err)).context("root inode create failed")?;
         }
+        Ok(())
     }
 
     /// Create an [`InodeType::File`] within the [`Root`]'s tree at `path` with
@@ -356,13 +395,19 @@ impl Root {
         &self,
         path: P,
         perm: &Permissions,
-    ) -> Result<Handle, Error> {
+    ) -> Result<Handle, FailureError> {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
-        let (parent, name) = path_split(path.as_ref())?;
-        let dirfd = self.resolve(parent)?.as_raw_fd();
-        let name = CString::new(name)?.as_ptr();
+        let (parent, name) = path_split(path.as_ref())
+            .context("split path into (parent, name) for inode creation")?;
+        let dirfd = self
+            .resolve(parent)
+            .context("resolve parent directory for inode creation")?
+            .as_raw_fd();
+        let name = CString::new(name)
+            .context("convert name into CString for FFI")?
+            .as_ptr();
 
         let fd: RawFd = unsafe {
             libc::openat(
@@ -372,12 +417,12 @@ impl Root {
                 perm.mode(),
             )
         };
+        let err = errno::errno().into();
 
-        if fd < 0 {
-            // TODO: Clean this up.
-            bail!("failed to root.create_file: {}", errno::errno());
+        if fd.is_negative() {
+            return Err(Error::OsError(err)).context("root file create failed")?;
         }
-        Handle::try_from(fd)
+        Ok(Handle::try_from(fd).context("convert O_CREAT fd to Handle")?)
     }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.
@@ -395,7 +440,7 @@ impl Root {
     /// [`Root`]: trait.Root.html
     /// [`Handle`]: trait.Handle.html
     /// [`Root::remove_all`]: trait.Root.html#method.remove_all
-    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), FailureError> {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
@@ -404,14 +449,13 @@ impl Root {
         let name = CString::new(name)?.as_ptr();
 
         // TODO: Handle the lovely "is it a directory or file" problem.
-        let is_ok = unsafe { libc::unlinkat(dirfd, name, 0) }.is_positive();
+        let ret = unsafe { libc::unlinkat(dirfd, name, 0) };
+        let err = errno::errno().into();
 
-        if is_ok {
-            Ok(())
-        } else {
-            // TODO: Clean this up.
-            bail!("failed to root.remove: {}", errno::errno())
+        if ret.is_negative() {
+            return Err(Error::OsError(err)).context("root inode remove failed")?;
         }
+        Ok(())
     }
 
     // TODO: mkdir_all()
@@ -439,15 +483,14 @@ impl Root {
 //       more races to deal with. We could ask the user to provide a backup
 //       path to check against, but then why not just use that path in the
 //       first place?
-pub fn open(path: &Path) -> Result<Box<dyn Root>, Error> {
+pub fn open(path: &Path) -> Result<Box<dyn Root>, FailureError> {
     if path.is_relative() {
-        bail!(
-            "libpathrs: cannot open non-absolute root path: {}",
-            path.to_str().unwrap()
-        );
+        return Err(Error::InvalidArgument("path", "must be an absolute path"))
+            .context("open root handle")?;
     }
-    match *KERNEL_SUPPORT {
-        true => kernel::open(path),
-        false => user::open(path),
-    }
+
+    Ok(match *KERNEL_SUPPORT {
+        true => kernel::open(path)?,
+        false => user::open(path)?,
+    })
 }

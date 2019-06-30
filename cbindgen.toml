@@ -54,4 +54,5 @@ style = "type"
 [export.rename]
 "CRoot" = "pathrs_root_t"
 "CHandle" = "pathrs_handle_t"
+"CPointer_Handle" = "__pathrs_cpointer_handle"
 "RawFd" = "int"

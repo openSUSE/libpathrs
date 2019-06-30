@@ -16,11 +16,13 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::Error;
+
 use core::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use failure::Error;
+use failure::{Error as FailureError, ResultExt};
 
 /// A handle to an existing inode within a [`Root`].
 ///
@@ -53,8 +55,12 @@ impl Drop for Handle {
 }
 
 impl TryFrom<RawFd> for Handle {
-    type Error = Error;
+    type Error = FailureError;
     fn try_from(fd: RawFd) -> Result<Self, Self::Error> {
+        if fd.is_negative() {
+            return Err(Error::InvalidArgument("fd", "must be positive"))
+                .context("convert fd into Handle")?;
+        }
         // TODO: Check if the fd is valid.
         Ok(Handle(fd))
     }
@@ -81,12 +87,14 @@ impl Handle {
     /// [`OpenOptions`]: https://doc.rust-lang.org/std/fs/struct.OpenOptions.html
     /// [`Root::create`]: trait.Root.html#method.create
     /// [`OpenOptionsExt`]: https://doc.rust-lang.org/std/os/unix/fs/trait.OpenOptionsExt.html
-    pub fn reopen(&self, options: &OpenOptions) -> Result<File, Error> {
+    pub fn reopen(&self, options: &OpenOptions) -> Result<File, FailureError> {
         // TODO: Implement re-opening with O_EMPTYPATH if it's supported.
         let fd_path = format!("/proc/self/fd/{}", self.as_raw_fd());
         options
             .open(fd_path)
-            .map_err(|e| Error::from_boxed_compat(Box::new(e)))
+            .map_err(Error::OsError)
+            .context("reopen handle through /proc/self/fd")
+            .map_err(|err| err.into())
     }
 
     // TODO: bind(). This might be safe to do (set the socket path to
