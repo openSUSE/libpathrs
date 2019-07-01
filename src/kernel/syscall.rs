@@ -24,42 +24,90 @@ use std::ffi::CString;
 use std::io::Error as IOError;
 use std::os::unix::io::RawFd;
 
-use failure::Error;
 use libc::{c_char, c_int, c_long};
 
-/// get_errno constructs a failure::Error from the current system errno value.
-pub fn get_errno() -> Error {
-    Error::from_boxed_compat(Box::new(Into::<IOError>::into(errno::errno())))
-}
-
+/// `OpenHow.access` field definition.
 #[repr(C)]
-pub struct NewOpenatOptions {
-    // TODO: Still being designed.
+pub union Access {
+    /// O_CREAT file mode (ignored otherwise).
+    pub mode: u16,
+    /// Restrict how the O_PATH may be re-opened (ignored otherwise).
+    pub upgrade_mask: u16,
 }
 
-impl NewOpenatOptions {
-    // TODO: Still being designed.
+/// Arguments for how `openat2` should open the target path.
+///
+/// If `extra` is zero, then `openat2` is identical to `openat`. Only one of the
+/// members of access may be set at any given time.
+#[repr(C)]
+pub struct OpenHow {
+    /// O_* flags (unknown flags ignored).
+    pub flags: u32,
+    /// Access settings (ignored otherwise).
+    pub access: Access,
+    /// RESOLVE_* flags (`-EINVAL` on unknown flags).
+    pub resolve: u16,
+    /// Reserved for future extensions, must be zeroed.
+    _reserved: [u64; 7],
 }
+
+impl OpenHow {
+    /// Default value of `OpenHow`.
+    ///
+    /// Due to future-compatible reserved fields, this is the only way to
+    /// initialise an `OpenHow` instance.
+    #[inline]
+    pub fn default() -> Self {
+        // A zero-filled C struct without pointers is legal.
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+/// Block mount-point crossings (including bind-mounts).
+#[allow(unused)]
+pub const RESOLVE_NO_XDEV: u32 = 0x01;
+
+/// Block traversal through procfs-style "magic links".
+#[allow(unused)]
+pub const RESOLVE_NO_MAGICLINKS: u32 = 0x02;
+
+/// Block traversal through all symlinks (implies RESOLVE_NO_MAGICLINKS).
+#[allow(unused)]
+pub const RESOLVE_NO_SYMLINKS: u32 = 0x04;
+
+/// Block "lexical" trickery like "..", symlinks-to-"/", and absolute paths
+/// which escape the dirfd.
+#[allow(unused)]
+pub const RESOLVE_BENEATH: u32 = 0x08;
+
+/// Make all jumps to "/" or ".." be scoped inside the dirfd (similar to
+/// `chroot`).
+#[allow(unused)]
+pub const RESOLVE_IN_ROOT: u32 = 0x10;
+
+/// Block re-opening with MAY_READ.
+#[allow(unused)]
+pub const UPGRADE_NOWRITE: u16 = 0x02;
+
+/// Block re-opening with MAY_READ.
+#[allow(unused)]
+pub const UPGRADE_NOREAD: u16 = 0x04;
 
 #[allow(non_upper_case_globals)]
 const SYS_openat2: c_long = 435;
 
-unsafe fn openat2_raw(
-    dirfd: c_int,
-    pathname: *const c_char,
-    opts: *const NewOpenatOptions,
-) -> c_int {
-    libc::syscall(SYS_openat2, dirfd, pathname, opts) as c_int
+unsafe fn openat2_raw(dirfd: c_int, pathname: *const c_char, how: *const OpenHow) -> c_int {
+    libc::syscall(SYS_openat2, dirfd, pathname, how) as c_int
 }
 
-/// openat2 is a nix-like wrapper of openat2.
-pub fn openat2(dirfd: RawFd, pathname: &str, opts: &NewOpenatOptions) -> Result<RawFd, Error> {
+/// Basic wrapper around openat2.
+pub fn openat2(dirfd: RawFd, pathname: &str, how: &OpenHow) -> Result<RawFd, IOError> {
     let pathname = CString::new(pathname)?;
-    let fd = unsafe { openat2_raw(dirfd, pathname.into_raw(), opts) };
+    let fd = unsafe { openat2_raw(dirfd, pathname.into_raw(), how) };
     if fd >= 0 {
         Ok(fd as RawFd)
     } else {
-        Err(get_errno())
+        Err(errno::errno().into())
     }
 }
 
@@ -67,8 +115,8 @@ pub fn openat2(dirfd: RawFd, pathname: &str, opts: &NewOpenatOptions) -> Result<
 /// openat2(2) with RESOLVE_THIS_ROOT. This can be used to decide which
 /// underlying interface to use.
 pub fn supported() -> bool {
-    let opts = NewOpenatOptions {};
-    match openat2(libc::AT_FDCWD, ".", &opts) {
+    let how = OpenHow::default();
+    match openat2(libc::AT_FDCWD, ".", &how) {
         Err(_) => false,
         Ok(fd) => {
             unsafe { libc::close(fd) };

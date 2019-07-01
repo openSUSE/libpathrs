@@ -18,13 +18,15 @@
 
 mod syscall;
 pub use syscall::supported;
+use syscall::OpenHow;
 
 use crate::{Error, Handle, Root};
 
+use core::convert::TryFrom;
 use std::os::unix::io::RawFd;
 use std::path::Path;
 
-use failure::Error as FailureError;
+use failure::{Error as FailureError, ResultExt};
 
 #[derive(Debug)]
 struct NativeHandle {
@@ -42,11 +44,28 @@ impl Drop for NativeHandle {
 }
 
 pub fn open(path: &Path) -> Result<Box<dyn Root>, FailureError> {
-    Err(Error::NotImplemented("kernel::open"))?
+    let path = path
+        .to_str()
+        .ok_or(Error::InvalidArgument("path", "not a valid Rust string"))?;
+
+    let mut how = OpenHow::default();
+    how.flags = (libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC) as u32;
+
+    let fd = syscall::openat2(libc::AT_FDCWD, path, &how).context("open root path")?;
+    Ok(Box::new(NativeHandle { fd: fd }))
 }
 
 impl Root for NativeHandle {
     fn resolve(&self, path: &Path) -> Result<Handle, FailureError> {
-        Err(Error::NotImplemented("NativeHandle::resolve"))?
+        let path = path
+            .to_str()
+            .ok_or(Error::InvalidArgument("path", "not a valid Rust string"))?;
+
+        let mut how = OpenHow::default();
+        how.flags = (libc::O_PATH | libc::O_CLOEXEC) as u32;
+        how.resolve = syscall::RESOLVE_IN_ROOT;
+
+        let fd = syscall::openat2(self.fd, path, &how).context("open subpath")?;
+        Ok(Handle::try_from(fd).context("convert RESOLVE_IN_ROOT fd to Handle")?)
     }
 }
