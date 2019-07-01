@@ -28,8 +28,6 @@ keywords = ["file", "fs", "security", "linux"]
 categories = ["filesystem"]
 edition = "2018"
 
-exclude = ["include"]
-
 [badges]
 maintenance = { status = "experimental" }
 
@@ -47,6 +45,3 @@ libc = "^0.2.58"
 errno = "^0.2.4"
 lazy_static = "^1.3.0"
 failure = "^0.1.5"
-
-[build-dependencies]
-cbindgen = "^0.9"
