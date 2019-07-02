@@ -139,26 +139,31 @@ pub extern "C" fn pathrs_rfree(root: &mut CRoot) {
 /// result in an error). Handles only refer to *existing* files. Instead you
 /// need to use inroot_creat().
 #[no_mangle]
-pub extern "C" fn handle_reopen(handle: &CHandle, flags: c_int) -> RawFd {
+pub extern "C" fn pathrs_handle_reopen(handle: &CHandle, flags: c_int) -> RawFd {
     error::ffi_wrap(-1, move || {
         // Construct options from the C-style flags. Due to weird restrictions
         // with OpenOptions we need to manually set the O_ACCMODE bits.
         let mut options = OpenOptions::new();
-        handle
-            .0
-            .reopen(
-                match flags & libc::O_ACCMODE {
-                    libc::O_RDONLY => options.read(true),
-                    libc::O_WRONLY => options.write(true),
-                    libc::O_RDWR => options.read(true).write(true),
-                    _ => Err(Error::InvalidArgument(
-                        "mode",
-                        "invalid reopen O_ACCMODE flags",
-                    ))?,
-                }
-                .custom_flags(flags),
-            )
-            .map(|f| f.as_raw_fd())
+        let options = match flags & libc::O_ACCMODE {
+            libc::O_RDONLY => options.read(true),
+            libc::O_WRONLY => options.write(true),
+            libc::O_RDWR => options.read(true).write(true),
+            _ => Err(Error::InvalidArgument(
+                "mode",
+                "invalid reopen O_ACCMODE flags",
+            ))?,
+        }
+        .custom_flags(flags);
+
+        // The file descriptor will be freed when File is dropped. We don't want
+        // to std::mem:forget here (god knows what else is allocated within
+        // File), so we dup the fd.
+        let file = handle.0.reopen(&options)?;
+        let fd = unsafe { libc::dup(file.as_raw_fd()) };
+        if fd < 0 {
+            return Err(Error::OsError(errno::errno().into())).context("dup re-opened fd")?;
+        }
+        Ok(fd)
     })
 }
 
@@ -172,7 +177,7 @@ pub extern "C" fn pathrs_hfree(handle: &mut CHandle) {
 /// being scoped to the root) and return a handle to that path. The path *must
 /// already exist*, otherwise an error will occur.
 #[no_mangle]
-pub extern "C" fn inroot_resolve(
+pub extern "C" fn pathrs_inroot_resolve(
     root: &CRoot,
     path: *const c_char,
 ) -> Option<&'static mut CHandle> {
@@ -190,7 +195,7 @@ pub extern "C" fn inroot_resolve(
 // TODO: Replace all the inroot_* stuff with macros. It's quite repetitive.
 
 #[no_mangle]
-pub extern "C" fn inroot_creat(
+pub extern "C" fn pathrs_inroot_creat(
     root: &CRoot,
     path: *const c_char,
     mode: c_uint,
@@ -206,14 +211,14 @@ pub extern "C" fn inroot_creat(
 }
 
 #[no_mangle]
-pub extern "C" fn inroot_mkdir(root: &CRoot, path: *const c_char, mode: c_uint) -> c_int {
+pub extern "C" fn pathrs_inroot_mkdir(root: &CRoot, path: *const c_char, mode: c_uint) -> c_int {
     let mode = mode & !libc::S_IFMT;
 
-    inroot_mknod(root, path, libc::S_IFDIR | mode, 0)
+    pathrs_inroot_mknod(root, path, libc::S_IFDIR | mode, 0)
 }
 
 #[no_mangle]
-pub extern "C" fn inroot_mknod(
+pub extern "C" fn pathrs_inroot_mknod(
     root: &CRoot,
     path: *const c_char,
     mode: c_uint,
@@ -239,7 +244,7 @@ pub extern "C" fn inroot_mknod(
 }
 
 #[no_mangle]
-pub extern "C" fn inroot_symlink(
+pub extern "C" fn pathrs_inroot_symlink(
     root: &CRoot,
     path: *const c_char,
     target: *const c_char,
@@ -253,7 +258,7 @@ pub extern "C" fn inroot_symlink(
 }
 
 #[no_mangle]
-pub extern "C" fn inroot_hardlink(
+pub extern "C" fn pathrs_inroot_hardlink(
     root: &CRoot,
     path: *const c_char,
     target: *const c_char,

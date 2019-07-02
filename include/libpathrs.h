@@ -63,44 +63,6 @@ typedef struct pathrs_root_t pathrs_root_t;
 typedef __pathrs_cpointer_handle pathrs_handle_t;
 
 /**
- * "Upgrade" the handle to a usable fd, suitable for reading and writing. This
- * does not consume the original handle (allowing for it to be used many
- * times).
- * It should be noted that the use of O_CREAT *is not* supported (and will
- * result in an error). Handles only refer to *existing* files. Instead you
- * need to use inroot_creat().
- */
-int handle_reopen(const pathrs_handle_t *handle, int flags);
-
-pathrs_handle_t *inroot_creat(const pathrs_root_t *root,
-                              const char *path,
-                              unsigned int mode);
-
-int inroot_hardlink(const pathrs_root_t *root,
-                    const char *path,
-                    const char *target);
-
-int inroot_mkdir(const pathrs_root_t *root,
-                 const char *path,
-                 unsigned int mode);
-
-int inroot_mknod(const pathrs_root_t *root,
-                 const char *path,
-                 unsigned int mode,
-                 dev_t dev);
-
-/**
- * Within the given root's tree, resolve the given path (with all symlinks
- * being scoped to the root) and return a handle to that path. The path *must
- * already exist*, otherwise an error will occur.
- */
-pathrs_handle_t *inroot_resolve(const pathrs_root_t *root, const char *path);
-
-int inroot_symlink(const pathrs_root_t *root,
-                   const char *path,
-                   const char *target);
-
-/**
  * Copy the currently-stored error string into the provided buffer. If the
  * buffer is not large enough to fit the message (see pathrs_error_length) or
  * is NULL, then -1 is returned. If the operation succeeds, the number of bytes
@@ -117,9 +79,48 @@ int pathrs_error(char *buffer, int length);
 int pathrs_error_length(void);
 
 /**
+ * "Upgrade" the handle to a usable fd, suitable for reading and writing. This
+ * does not consume the original handle (allowing for it to be used many
+ * times).
+ * It should be noted that the use of O_CREAT *is not* supported (and will
+ * result in an error). Handles only refer to *existing* files. Instead you
+ * need to use inroot_creat().
+ */
+int pathrs_handle_reopen(const pathrs_handle_t *handle, int flags);
+
+/**
  * Free a handle.
  */
 void pathrs_hfree(pathrs_handle_t *handle);
+
+pathrs_handle_t *pathrs_inroot_creat(const pathrs_root_t *root,
+                                     const char *path,
+                                     unsigned int mode);
+
+int pathrs_inroot_hardlink(const pathrs_root_t *root,
+                           const char *path,
+                           const char *target);
+
+int pathrs_inroot_mkdir(const pathrs_root_t *root,
+                        const char *path,
+                        unsigned int mode);
+
+int pathrs_inroot_mknod(const pathrs_root_t *root,
+                        const char *path,
+                        unsigned int mode,
+                        dev_t dev);
+
+/**
+ * Within the given root's tree, resolve the given path (with all symlinks
+ * being scoped to the root) and return a handle to that path. The path *must
+ * already exist*, otherwise an error will occur.
+ */
+pathrs_handle_t *pathrs_inroot_resolve(const pathrs_root_t *root,
+                                       const char *path);
+
+int pathrs_inroot_symlink(const pathrs_root_t *root,
+                          const char *path,
+                          const char *target);
 
 /**
  * Open a root handle. The correct backend (native/kernel or emulated) to use

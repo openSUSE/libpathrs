@@ -57,6 +57,14 @@ where
     })
 }
 
+/// Pretty-print the error in a C-like or Go-like way (causes are appended to
+/// one another with separating colons).
+fn format_err(err: &Error) -> String {
+    let fail = err.as_fail();
+    err.iter_causes()
+        .fold(fail.to_string(), |prev, next| format!("{}: {}", prev, next))
+}
+
 /// Update the most recent error from Rust, clearing whatever error might have
 /// been previously set.
 pub fn set_error(err: Error) {
@@ -76,7 +84,7 @@ pub fn take_error() -> Option<Box<Error>> {
 #[no_mangle]
 pub extern "C" fn pathrs_error_length() -> c_int {
     LAST_ERROR.with(|prev| match *prev.borrow() {
-        Some(ref err) => err.to_string().len() as c_int + 1,
+        Some(ref err) => format_err(err).len() as c_int + 1,
         None => 0,
     })
 }
@@ -97,7 +105,7 @@ pub extern "C" fn pathrs_error(buffer: *mut c_char, length: c_int) -> c_int {
         None => return 0,
     };
 
-    let error_message = last_error.to_string();
+    let error_message = format_err(&last_error);
     if error_message.len() >= length as usize {
         // No need to do any mutex logic because LAST_ERROR is thread-local.
         set_error(*last_error);
@@ -114,5 +122,5 @@ pub extern "C" fn pathrs_error(buffer: *mut c_char, length: c_int) -> c_int {
         buffer[error_message.len()] = 0;
     }
 
-    error_message.len() as c_int
+    error_message.len() as c_int + 1
 }

@@ -65,25 +65,25 @@ impl OpenHow {
 
 /// Block mount-point crossings (including bind-mounts).
 #[allow(unused)]
-pub const RESOLVE_NO_XDEV: u32 = 0x01;
+pub const RESOLVE_NO_XDEV: u16 = 0x01;
 
 /// Block traversal through procfs-style "magic links".
 #[allow(unused)]
-pub const RESOLVE_NO_MAGICLINKS: u32 = 0x02;
+pub const RESOLVE_NO_MAGICLINKS: u16 = 0x02;
 
 /// Block traversal through all symlinks (implies RESOLVE_NO_MAGICLINKS).
 #[allow(unused)]
-pub const RESOLVE_NO_SYMLINKS: u32 = 0x04;
+pub const RESOLVE_NO_SYMLINKS: u16 = 0x04;
 
 /// Block "lexical" trickery like "..", symlinks-to-"/", and absolute paths
 /// which escape the dirfd.
 #[allow(unused)]
-pub const RESOLVE_BENEATH: u32 = 0x08;
+pub const RESOLVE_BENEATH: u16 = 0x08;
 
 /// Make all jumps to "/" or ".." be scoped inside the dirfd (similar to
 /// `chroot`).
 #[allow(unused)]
-pub const RESOLVE_IN_ROOT: u32 = 0x10;
+pub const RESOLVE_IN_ROOT: u16 = 0x10;
 
 /// Block re-opening with MAY_READ.
 #[allow(unused)]

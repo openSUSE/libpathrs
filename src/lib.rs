@@ -70,7 +70,7 @@
 //! ```c
 //! int get_my_fd(void)
 //! {
-//!     int fd = -1;
+//!     int fd = -1, errlen;
 //!     char *error = NULL;
 //!     pathrs_root_t *root = NULL;
 //!     pathrs_handle_t *handle = NULL;
@@ -90,10 +90,11 @@
 //!     goto out;
 //!
 //! err:
-//!     error = malloc(pathrs_error_length());
+//!     errlen = pathrs_error_length();
+//!     error = malloc(errlen);
 //!     if (!error)
 //!         abort();
-//!     pathrs_error(error, sizeof(error));
+//!     pathrs_error(error, errlen);
 //!     fprintf(stderr, "got error: %s\n", error);
 //!     free(error);
 //!
@@ -488,7 +489,6 @@ pub fn open(path: &Path) -> Result<Box<dyn Root>, FailureError> {
         return Err(Error::InvalidArgument("path", "must be an absolute path"))
             .context("open root handle")?;
     }
-
     Ok(match *KERNEL_SUPPORT {
         true => kernel::open(path)?,
         false => user::open(path)?,
