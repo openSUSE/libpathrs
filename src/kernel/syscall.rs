@@ -20,49 +20,16 @@
 //! will almost certainly not work on your machine, and may cause other problems
 //! depending on what syscall is using the syscall number this code will call.
 
+use crate::Error;
+
 use std::ffi::CString;
+use std::fs::File;
 use std::io::Error as IOError;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{FromRawFd, RawFd};
+use std::path::Path;
 
+use failure::{Error as FailureError, ResultExt};
 use libc::{c_char, c_int, c_long};
-
-/// `OpenHow.access` field definition.
-#[repr(C)]
-pub union Access {
-    /// O_CREAT file mode (ignored otherwise).
-    pub mode: u16,
-    /// Restrict how the O_PATH may be re-opened (ignored otherwise).
-    pub upgrade_mask: u16,
-}
-
-/// Arguments for how `openat2` should open the target path.
-///
-/// If `extra` is zero, then `openat2` is identical to `openat`. Only one of the
-/// members of access may be set at any given time.
-#[repr(C)]
-pub struct OpenHow {
-    /// O_* flags (unknown flags ignored).
-    pub flags: u32,
-    /// Access settings (ignored otherwise).
-    pub access: Access,
-    /// RESOLVE_* flags (`-EINVAL` on unknown flags).
-    pub resolve: u16,
-    /// Reserved for future extensions, must be zeroed.
-    _reserved: [u64; 7],
-}
-
-impl Default for OpenHow {
-    #[inline]
-    fn default() -> Self {
-        // We could do std::mem::zeroed but let's avoid unsafe blocks.
-        OpenHow {
-            flags: 0,
-            access: Access { mode: 0 },
-            resolve: 0,
-            _reserved: [0; 7],
-        }
-    }
-}
 
 /// Block mount-point crossings (including bind-mounts).
 #[allow(unused)]
@@ -97,31 +64,82 @@ pub const UPGRADE_NOREAD: u16 = 0x04;
 #[allow(non_upper_case_globals)]
 const SYS_openat2: c_long = 435;
 
-unsafe fn openat2_raw(dirfd: c_int, pathname: *const c_char, how: *const OpenHow) -> c_int {
+unsafe fn openat2(dirfd: c_int, pathname: *const c_char, how: *const OpenHow) -> c_int {
     libc::syscall(SYS_openat2, dirfd, pathname, how) as c_int
 }
 
-/// Basic wrapper around openat2.
-pub fn openat2(dirfd: RawFd, pathname: &str, how: &OpenHow) -> Result<RawFd, IOError> {
-    let pathname = CString::new(pathname)?;
-    let fd = unsafe { openat2_raw(dirfd, pathname.into_raw(), how) };
-    if fd >= 0 {
-        Ok(fd as RawFd)
-    } else {
-        Err(errno::errno().into())
-    }
+/// `OpenHow.access` field definition.
+#[repr(C)]
+pub union Access {
+    /// O_CREAT file mode (ignored otherwise).
+    pub mode: u16,
+    /// Restrict how the O_PATH may be re-opened (ignored otherwise).
+    pub upgrade_mask: u16,
 }
 
-/// supported checks at runtime whether the current running kernel supports
-/// openat2(2) with RESOLVE_THIS_ROOT. This can be used to decide which
-/// underlying interface to use.
-pub fn supported() -> bool {
-    let how = Default::default();
-    match openat2(libc::AT_FDCWD, ".", &how) {
-        Err(_) => false,
-        Ok(fd) => {
-            unsafe { libc::close(fd) };
-            true
+/// Arguments for how `openat2` should open the target path.
+///
+/// If `extra` is zero, then `openat2` is identical to `openat`. Only one of the
+/// members of access may be set at any given time.
+#[repr(C)]
+pub struct OpenHow {
+    /// O_* flags (unknown flags ignored).
+    flags: u32,
+    /// Access settings (ignored otherwise).
+    access: Access,
+    /// RESOLVE_* flags (`-EINVAL` on unknown flags).
+    resolve: u16,
+    /// Reserved for future extensions, must be zeroed.
+    _reserved: [u64; 7],
+}
+
+#[allow(unused)]
+impl OpenHow {
+    pub fn custom_flags(&mut self, flags: i32) -> &mut Self {
+        self.flags = flags as u32;
+        self
+    }
+
+    pub fn custom_resolve(&mut self, resolve: u16) -> &mut Self {
+        self.resolve = resolve;
+        self
+    }
+
+    pub fn custom_mode(&mut self, mode: u16) -> &mut Self {
+        self.access.mode = mode;
+        self
+    }
+
+    pub fn custom_upgrade_mask(&mut self, upgrade_mask: u16) -> &mut Self {
+        self.access.upgrade_mask = upgrade_mask;
+        self
+    }
+
+    pub fn open<P: AsRef<Path>>(&self, dirfd: RawFd, path: P) -> Result<File, FailureError> {
+        let path = path
+            .as_ref()
+            .to_str()
+            .ok_or(Error::InvalidArgument("path", "not a valid Rust string"))
+            .context("openat2")?;
+        let path = CString::new(path).context("openat2")?;
+
+        let fd = unsafe { openat2(dirfd, path.as_ptr(), self) } as RawFd;
+        let err: IOError = errno::errno().into();
+        if fd >= 0 {
+            Ok(unsafe { File::from_raw_fd(fd) })
+        } else {
+            Err(err).context("openat2")?
+        }
+    }
+
+    #[inline]
+    pub fn new() -> Self {
+        // We could do std::mem::zeroed but let's avoid unsafe blocks.
+        OpenHow {
+            flags: 0,
+            access: Access { mode: 0 },
+            resolve: 0,
+            _reserved: [0; 7],
         }
     }
 }

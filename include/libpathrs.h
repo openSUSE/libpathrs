@@ -37,18 +37,13 @@
  * This is only exported to work around a Rust compiler restriction. Consider
  * it an implementation detail and don't make use of it.
  */
-typedef struct __pathrs_cpointer_handle __pathrs_cpointer_handle;
+typedef struct __pathrs_handle_t __pathrs_handle_t;
 
 /**
- * A handle to the root of a directory tree to resolve within. The only purpose
- * of this "root handle" is to get Handles to inodes within the directory tree.
- * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
- * inside a possibly-attacker-controlled directory tree. While we do have
- * protections that should defend against it (for both drivers), it's far more
- * dangerous than just opening a directory tree which is not inside a
- * potentially-untrusted directory.
+ * This is only exported to work around a Rust compiler restriction. Consider
+ * it an implementation detail and don't make use of it.
  */
-typedef struct pathrs_root_t pathrs_root_t;
+typedef struct __pathrs_root_t __pathrs_root_t;
 
 /**
  * An error description and (optionally) the underlying errno value that
@@ -69,7 +64,18 @@ typedef struct {
  * from using this library (or extract the RawFd from a fs::File). You must
  * always use operations through a Root.
  */
-typedef __pathrs_cpointer_handle pathrs_handle_t;
+typedef __pathrs_handle_t pathrs_handle_t;
+
+/**
+ * A handle to the root of a directory tree to resolve within. The only purpose
+ * of this "root handle" is to get Handles to inodes within the directory tree.
+ * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
+ * inside a possibly-attacker-controlled directory tree. While we do have
+ * protections that should defend against it (for both drivers), it's far more
+ * dangerous than just opening a directory tree which is not inside a
+ * potentially-untrusted directory.
+ */
+typedef __pathrs_root_t pathrs_root_t;
 
 /**
  * Copy the currently-stored infomation into the provided buffer.

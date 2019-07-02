@@ -37,33 +37,10 @@
 
 use crate::{Error, Handle, Root};
 
-use std::os::unix::io::RawFd;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use failure::Error as FailureError;
 
-#[derive(Debug)]
-struct EmulatedHandle {
-    fd: RawFd,
-    path: PathBuf,
-}
-
-// RawFds aren't auto-dropped in Rust so we need to do it manually. As long as
-// nobody has done anything strange with the current process's fds, this will
-// not fail.
-impl Drop for EmulatedHandle {
-    fn drop(&mut self) {
-        // Cannot return errors in Drop or panic! in C FFI. So just ignore it.
-        unsafe { libc::close(self.fd) };
-    }
-}
-
-pub fn open(path: &Path) -> Result<Box<dyn Root>, FailureError> {
-    Err(Error::NotImplemented("user::open"))?
-}
-
-impl Root for EmulatedHandle {
-    fn resolve(&self, path: &Path) -> Result<Handle, FailureError> {
-        Err(Error::NotImplemented("EmulatedHandle::resolve"))?
-    }
+pub fn resolve(root: &Root, path: &Path) -> Result<Handle, FailureError> {
+    Err(Error::NotImplemented("user::resolve"))?
 }

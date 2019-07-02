@@ -37,7 +37,7 @@ use failure::{Error as FailureError, ResultExt};
 /// extract from the [`File`] you get from this [`Handle`]. **You must always do
 /// operations through a valid [`Root`].**
 ///
-/// [`Root`]: trait.Root.html
+/// [`Root`]: struct.Root.html
 /// [`Handle`]: trait.Handle.html
 /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
 /// [`RawFd`]: https://doc.rust-lang.org/std/os/unix/io/type.RawFd.html
@@ -85,15 +85,15 @@ impl Handle {
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`OpenOptions`]: https://doc.rust-lang.org/std/fs/struct.OpenOptions.html
-    /// [`Root::create`]: trait.Root.html#method.create
+    /// [`Root::create`]: struct.Root.html#method.create
     /// [`OpenOptionsExt`]: https://doc.rust-lang.org/std/os/unix/fs/trait.OpenOptionsExt.html
     pub fn reopen(&self, options: &OpenOptions) -> Result<File, FailureError> {
         // TODO: Implement re-opening with O_EMPTYPATH if it's supported.
         let fd_path = format!("/proc/self/fd/{}", self.as_raw_fd());
-        options
+        let file = options
             .open(fd_path)
-            .context("reopen handle through /proc/self/fd")
-            .map_err(|err| err.into())
+            .context("reopen handle through /proc/self/fd")?;
+        Ok(file)
     }
 
     // TODO: bind(). This might be safe to do (set the socket path to

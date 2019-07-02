@@ -24,11 +24,10 @@ use libpathrs::{Handle, InodeType, Root};
 
 use std::ffi::CStr;
 use std::fs::{OpenOptions, Permissions};
-use std::io::Error as IOError;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::{
     fs::{OpenOptionsExt, PermissionsExt},
-    io::{AsRawFd, RawFd},
+    io::{AsRawFd, IntoRawFd, RawFd},
 };
 use std::path::Path;
 
@@ -85,7 +84,7 @@ impl<T> Pointer<T> for CPointer<T> {
 /// protections that should defend against it (for both drivers), it's far more
 /// dangerous than just opening a directory tree which is not inside a
 /// potentially-untrusted directory.
-pub type CRoot = CPointer<Box<dyn Root>>;
+pub type CRoot = CPointer<Root>;
 
 /// A handle to a path within a given Root. This handle references an
 /// already-resolved path which can be used for only one purpose -- to "re-open"
@@ -156,16 +155,15 @@ pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
         }
         .custom_flags(flags);
 
-        // The file descriptor will be freed when File is dropped. We don't want
-        // to std::mem:forget here (god knows what else is allocated within
-        // File), so we dup the fd.
         let file = handle.0.reopen(&options)?;
-        let fd = unsafe { libc::dup(file.as_raw_fd()) };
-        let err: IOError = errno::errno().into();
-        if fd < 0 {
-            return Err(err).context("dup re-opened fd")?;
+        // Rust sets O_CLOEXEC by default, without an opt-out. We need to
+        // disable it if we weren't asked to do O_CLOEXEC.
+        if flags & libc::O_CLOEXEC == 0 {
+            let fd = file.as_raw_fd();
+            let old = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            unsafe { libc::fcntl(fd, libc::F_SETFD, old & !libc::FD_CLOEXEC) };
         }
-        Ok(fd)
+        Ok(file.into_raw_fd())
     })
 }
 
