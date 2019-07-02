@@ -70,10 +70,10 @@
 //! ```c
 //! int get_my_fd(void)
 //! {
-//!     int fd = -1, errlen;
-//!     char *error = NULL;
+//!     int fd = -1;
 //!     pathrs_root_t *root = NULL;
 //!     pathrs_handle_t *handle = NULL;
+//!     pathrs_error_t error = {};
 //!
 //!     root = pathrs_open("/path/to/root");
 //!     if (!root)
@@ -90,13 +90,9 @@
 //!     goto out;
 //!
 //! err:
-//!     errlen = pathrs_error_length();
-//!     error = malloc(errlen);
-//!     if (!error)
+//!     if (pathrs_error(&error) <= 0)
 //!         abort();
-//!     pathrs_error(error, errlen);
-//!     fprintf(stderr, "got error: %s\n", error);
-//!     free(error);
+//!     fprintf(stderr, "got error (errno=%d): %s\n", error.errno, error.description);
 //!
 //! out:
 //!     pathrs_hfree(handle);
@@ -164,12 +160,6 @@ pub enum Error {
     /// bug internal to libpathrs.
     #[fail(display = "violation of safety requirement: {}", _0)]
     SafetyViolation(&'static str),
-
-    /// An [`io::Error`] was encountered during the operation.
-    ///
-    /// [`io::Error`]: https://doc.rust-lang.org/std/io/struct.Error.html
-    #[fail(display = "os error: {}", _0)]
-    OsError(#[fail(cause)] IOError),
 }
 
 /// An inode type to be created with [`Root::create`].
@@ -357,10 +347,10 @@ impl Root {
                 unsafe { libc::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev) }
             }
         };
-        let err = errno::errno().into();
+        let err: IOError = errno::errno().into();
 
         if ret.is_negative() {
-            return Err(Error::OsError(err)).context("root inode create failed")?;
+            return Err(err).context("root inode create failed")?;
         }
         Ok(())
     }
@@ -414,14 +404,14 @@ impl Root {
             libc::openat(
                 dirfd,
                 name,
-                libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW,
+                libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
                 perm.mode(),
             )
         };
-        let err = errno::errno().into();
+        let err: IOError = errno::errno().into();
 
         if fd.is_negative() {
-            return Err(Error::OsError(err)).context("root file create failed")?;
+            return Err(err).context("root file create failed")?;
         }
         Ok(Handle::try_from(fd).context("convert O_CREAT fd to Handle")?)
     }
@@ -451,10 +441,10 @@ impl Root {
 
         // TODO: Handle the lovely "is it a directory or file" problem.
         let ret = unsafe { libc::unlinkat(dirfd, name, 0) };
-        let err = errno::errno().into();
+        let err: IOError = errno::errno().into();
 
         if ret.is_negative() {
-            return Err(Error::OsError(err)).context("root inode remove failed")?;
+            return Err(err).context("root inode remove failed")?;
         }
         Ok(())
     }

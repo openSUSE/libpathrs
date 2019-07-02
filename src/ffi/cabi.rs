@@ -24,6 +24,7 @@ use libpathrs::{Handle, InodeType, Root};
 
 use std::ffi::CStr;
 use std::fs::{OpenOptions, Permissions};
+use std::io::Error as IOError;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::{
     fs::{OpenOptionsExt, PermissionsExt},
@@ -139,7 +140,7 @@ pub extern "C" fn pathrs_rfree(root: &mut CRoot) {
 /// result in an error). Handles only refer to *existing* files. Instead you
 /// need to use inroot_creat().
 #[no_mangle]
-pub extern "C" fn pathrs_handle_reopen(handle: &CHandle, flags: c_int) -> RawFd {
+pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
     error::ffi_wrap(-1, move || {
         // Construct options from the C-style flags. Due to weird restrictions
         // with OpenOptions we need to manually set the O_ACCMODE bits.
@@ -160,8 +161,9 @@ pub extern "C" fn pathrs_handle_reopen(handle: &CHandle, flags: c_int) -> RawFd 
         // File), so we dup the fd.
         let file = handle.0.reopen(&options)?;
         let fd = unsafe { libc::dup(file.as_raw_fd()) };
+        let err: IOError = errno::errno().into();
         if fd < 0 {
-            return Err(Error::OsError(errno::errno().into())).context("dup re-opened fd")?;
+            return Err(err).context("dup re-opened fd")?;
         }
         Ok(fd)
     })

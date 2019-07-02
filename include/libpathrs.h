@@ -51,6 +51,15 @@ typedef struct __pathrs_cpointer_handle __pathrs_cpointer_handle;
 typedef struct pathrs_root_t pathrs_root_t;
 
 /**
+ * An error description and (optionally) the underlying errno value that
+ * triggered it (if there is no underlying errno, it is 0).
+ */
+typedef struct {
+    int32_t errno;
+    unsigned char description[1024];
+} pathrs_error_t;
+
+/**
  * A handle to a path within a given Root. This handle references an
  * already-resolved path which can be used for only one purpose -- to "re-open"
  * the handle and get an actual fs::File which can be used for ordinary
@@ -63,30 +72,12 @@ typedef struct pathrs_root_t pathrs_root_t;
 typedef __pathrs_cpointer_handle pathrs_handle_t;
 
 /**
- * Copy the currently-stored error string into the provided buffer. If the
- * buffer is not large enough to fit the message (see pathrs_error_length) or
- * is NULL, then -1 is returned. If the operation succeeds, the number of bytes
- * written (including the trailing NUL byte) is returned and the error is
- * cleared from libpathrs's side. If there was no error, then 0 is returned.
+ * Copy the currently-stored infomation into the provided buffer.
+ * If there was a stored error, a positive value is returned. If there was no
+ * stored error, the contents of buffer are undefined and 0 is returned. If an
+ * internal error occurs during processing, -1 is returned.
  */
-int pathrs_error(char *buffer, int length);
-
-/**
- * Get the string size currently-stored error (including the trailing NUL
- * byte). A return value of 0 indicates that there is no currently-stored
- * error. Cannot fail.
- */
-int pathrs_error_length(void);
-
-/**
- * "Upgrade" the handle to a usable fd, suitable for reading and writing. This
- * does not consume the original handle (allowing for it to be used many
- * times).
- * It should be noted that the use of O_CREAT *is not* supported (and will
- * result in an error). Handles only refer to *existing* files. Instead you
- * need to use inroot_creat().
- */
-int pathrs_handle_reopen(const pathrs_handle_t *handle, int flags);
+int pathrs_error(pathrs_error_t *buffer);
 
 /**
  * Free a handle.
@@ -131,6 +122,16 @@ int pathrs_inroot_symlink(const pathrs_root_t *root,
  * open operation was not affected by an attacker.
  */
 pathrs_root_t *pathrs_open(const char *path);
+
+/**
+ * "Upgrade" the handle to a usable fd, suitable for reading and writing. This
+ * does not consume the original handle (allowing for it to be used many
+ * times).
+ * It should be noted that the use of O_CREAT *is not* supported (and will
+ * result in an error). Handles only refer to *existing* files. Instead you
+ * need to use inroot_creat().
+ */
+int pathrs_reopen(const pathrs_handle_t *handle, int flags);
 
 /**
  * Free a root handle.

@@ -51,15 +51,16 @@ pub struct OpenHow {
     _reserved: [u64; 7],
 }
 
-impl OpenHow {
-    /// Default value of `OpenHow`.
-    ///
-    /// Due to future-compatible reserved fields, this is the only way to
-    /// initialise an `OpenHow` instance.
+impl Default for OpenHow {
     #[inline]
-    pub fn default() -> Self {
-        // A zero-filled C struct without pointers is legal.
-        unsafe { std::mem::zeroed() }
+    fn default() -> Self {
+        // We could do std::mem::zeroed but let's avoid unsafe blocks.
+        OpenHow {
+            flags: 0,
+            access: Access { mode: 0 },
+            resolve: 0,
+            _reserved: [0; 7],
+        }
     }
 }
 
@@ -115,7 +116,7 @@ pub fn openat2(dirfd: RawFd, pathname: &str, how: &OpenHow) -> Result<RawFd, IOE
 /// openat2(2) with RESOLVE_THIS_ROOT. This can be used to decide which
 /// underlying interface to use.
 pub fn supported() -> bool {
-    let how = OpenHow::default();
+    let how = Default::default();
     match openat2(libc::AT_FDCWD, ".", &how) {
         Err(_) => false,
         Ok(fd) => {

@@ -92,7 +92,6 @@ impl Handle {
         let fd_path = format!("/proc/self/fd/{}", self.as_raw_fd());
         options
             .open(fd_path)
-            .map_err(Error::OsError)
             .context("reopen handle through /proc/self/fd")
             .map_err(|err| err.into())
     }

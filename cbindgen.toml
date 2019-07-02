@@ -71,5 +71,6 @@ exclude = [
 [export.rename]
 "CRoot" = "pathrs_root_t"
 "CHandle" = "pathrs_handle_t"
+"CError" = "pathrs_error_t"
 "CPointer_Handle" = "__pathrs_cpointer_handle"
 "RawFd" = "int"

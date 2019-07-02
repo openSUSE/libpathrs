@@ -17,13 +17,36 @@
  */
 
 use std::cell::RefCell;
-use std::{ptr, slice};
+use std::ffi::CString;
+use std::io::Error as IOError;
 
 use failure::Error;
-use libc::{c_char, c_int};
+use libc::{c_int, c_uchar};
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<Box<Error>>> = RefCell::new(None);
+}
+
+/// An error description and (optionally) the underlying errno value that
+/// triggered it (if there is no underlying errno, it is 0).
+#[repr(C)]
+pub struct CError {
+    pub errno: i32,
+    // TODO: Ideally, we would have a dynamically-sized struct here but Rust
+    //       really doesn't like doing this. We could probably do it manually
+    //       with libc::calloc(), but I'm not a huge fan of this idea.
+    pub description: [c_uchar; 1024],
+}
+
+impl Default for CError {
+    #[inline]
+    fn default() -> Self {
+        // We could do std::mem::zeroed but let's avoid unsafe blocks.
+        CError {
+            errno: 0,
+            description: [0; 1024],
+        }
+    }
 }
 
 /// Very helpful wrapper to use in "pub extern fn" Rust FFI functions, to allow
@@ -57,12 +80,39 @@ where
     })
 }
 
-/// Pretty-print the error in a C-like or Go-like way (causes are appended to
-/// one another with separating colons).
-fn format_err(err: &Error) -> String {
+/// Construct a new CError struct based on the given error. The description is
+/// pretty-printed in a C-like manner (causes are appended to one another with
+/// separating colons). In addition, if the root-cause of the error is an
+/// IOError then errno is populated with that value.
+fn to_cerror(err: &Error) -> Result<CError, Error> {
     let fail = err.as_fail();
-    err.iter_causes()
-        .fold(fail.to_string(), |prev, next| format!("{}: {}", prev, next))
+    let desc = err
+        .iter_causes()
+        .fold(fail.to_string(), |prev, next| format!("{}: {}", prev, next));
+
+    // A repr(C) struct with no references is always safe.
+    let mut cerr: CError = Default::default();
+    {
+        // Create a C-compatible string, and truncate it to the size of our
+        // fixed-length description slot. There's not much we can usefully do if
+        // the error message is larger than 1K.
+        let desc = CString::new(desc)?
+            .into_bytes()
+            .into_iter()
+            .take(cerr.description.len() - 1)
+            .chain(vec![0])
+            .collect::<Vec<_>>();
+        assert!(desc.len() <= cerr.description.len());
+
+        // memcpy into the fixed buffer.
+        let (prefix, _) = cerr.description.split_at_mut(desc.len());
+        prefix.copy_from_slice(desc.as_slice());
+    }
+    cerr.errno = match fail.find_root_cause().downcast_ref::<IOError>() {
+        Some(err) => err.raw_os_error().unwrap_or(0),
+        _ => 0,
+    };
+    Ok(cerr)
 }
 
 /// Update the most recent error from Rust, clearing whatever error might have
@@ -78,24 +128,13 @@ pub fn take_error() -> Option<Box<Error>> {
     LAST_ERROR.with(|prev| prev.borrow_mut().take())
 }
 
-/// Get the string size currently-stored error (including the trailing NUL
-/// byte). A return value of 0 indicates that there is no currently-stored
-/// error. Cannot fail.
+/// Copy the currently-stored infomation into the provided buffer.
+///
+/// If there was a stored error, a positive value is returned. If there was no
+/// stored error, the contents of buffer are undefined and 0 is returned. If an
+/// internal error occurs during processing, -1 is returned.
 #[no_mangle]
-pub extern "C" fn pathrs_error_length() -> c_int {
-    LAST_ERROR.with(|prev| match *prev.borrow() {
-        Some(ref err) => format_err(err).len() as c_int + 1,
-        None => 0,
-    })
-}
-
-/// Copy the currently-stored error string into the provided buffer. If the
-/// buffer is not large enough to fit the message (see pathrs_error_length) or
-/// is NULL, then -1 is returned. If the operation succeeds, the number of bytes
-/// written (including the trailing NUL byte) is returned and the error is
-/// cleared from libpathrs's side. If there was no error, then 0 is returned.
-#[no_mangle]
-pub extern "C" fn pathrs_error(buffer: *mut c_char, length: c_int) -> c_int {
+pub extern "C" fn pathrs_error(buffer: *mut CError) -> c_int {
     if buffer.is_null() {
         return -1;
     }
@@ -105,22 +144,11 @@ pub extern "C" fn pathrs_error(buffer: *mut c_char, length: c_int) -> c_int {
         None => return 0,
     };
 
-    let error_message = format_err(&last_error);
-    if error_message.len() >= length as usize {
-        // No need to do any mutex logic because LAST_ERROR is thread-local.
-        set_error(*last_error);
-        return -1;
-    }
+    let cerr = match to_cerror(&last_error) {
+        Ok(cerr) => cerr,
+        Err(_) => return -1, // TODO: Log a warning...
+    };
+    unsafe { *buffer = cerr };
 
-    unsafe {
-        let buffer = slice::from_raw_parts_mut(buffer as *mut u8, length as usize);
-        ptr::copy_nonoverlapping(
-            error_message.as_ptr(),
-            buffer.as_mut_ptr(),
-            error_message.len(),
-        );
-        buffer[error_message.len()] = 0;
-    }
-
-    error_message.len() as c_int + 1
+    std::mem::size_of::<CError>() as c_int
 }

@@ -48,7 +48,7 @@ pub fn open(path: &Path) -> Result<Box<dyn Root>, FailureError> {
         .to_str()
         .ok_or(Error::InvalidArgument("path", "not a valid Rust string"))?;
 
-    let mut how = OpenHow::default();
+    let mut how: OpenHow = Default::default();
     how.flags = (libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC) as u32;
 
     let fd = syscall::openat2(libc::AT_FDCWD, path, &how).context("open root path")?;
