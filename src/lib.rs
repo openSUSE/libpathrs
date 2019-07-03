@@ -35,11 +35,9 @@
 //! This library assumes that the kernel supports all of the needed features for
 //! at least one libpathrs backend. At time of writing, those are:
 //!
-//! * `renameat2` support, or privileges to do `pivot_root`.
+//! * A working `/proc` mount, such that `/proc/self/fd/` operates correctly.
 //! * Native Backend:
 //!   - `openat2` support.
-//! * Emulated Backend:
-//!   - A working `/proc` mount, such that `/proc/self/fd/` operates correctly.
 //!
 //! # Examples
 //!
@@ -52,14 +50,14 @@
 //!
 //! # fn main() -> Result<(), FailureError> {
 //! // Get a root handle for resolution.
-//! let root = libpathrs::open(Path::new("/path/to/root"))?;
+//! let root = Root::open("/path/to/root")?;
 //! // Resolve the path.
-//! let handle = root.resolve(Path::new("/etc/passwd"))?;
+//! let handle = root.resolve("/etc/passwd")?;
 //! // Upgrade the handle to a full std::fs::File.
 //! let file = handle.reopen(OpenOptions::new().read(true))?;
 //!
 //! // Or, in one line:
-//! let file = root.resolve(Path::new("/etc/passwd"))?
+//! let file = root.resolve("/etc/passwd")?
 //!                .reopen(OpenOptions::new().read(true))?;
 //! # Ok(())
 //! # }
@@ -114,20 +112,19 @@ extern crate failure;
 extern crate libc;
 
 mod handle;
-pub use handle::Handle;
+pub use handle::*;
 
 mod root;
-pub use root::{InodeType, Root};
+pub use root::*;
 
 mod ffi;
-// TODO: We should expose user::open and kernel::open so that people can
-//       explicitly decide to use a different backend if they *really* want to.
 mod kernel;
 mod user;
+mod utils;
 
-use std::path::Path;
-
-use failure::Error as FailureError;
+use std::io::Error as IOError;
+use std::os::unix::io::RawFd;
+use std::path::PathBuf;
 
 /// The underlying [`cause`] of the [`failure::Error`] type returned by
 /// libpathrs.
@@ -150,29 +147,21 @@ pub enum Error {
     /// bug internal to libpathrs.
     #[fail(display = "violation of safety requirement: {}", _0)]
     SafetyViolation(&'static str),
-}
 
-/// Open a [`Root`] handle using the best backend available.
-///
-/// The correct backend (native or emulated) to use is auto-detected based on
-/// whether the kernel supports `openat2(2)`.
-///
-/// # Errors
-///
-/// `path` must be an existing directory inside the [`Root`].
-///
-/// If using the emulated driver, `path` must also be the fully-expanded path to
-/// a real directory (in order words, not contain any symlink components). The
-/// reason for this is because `path` is used to double-check that the open
-/// operation was not affected by an attacker.
-///
-/// [`Root`]: struct.Root.html
-// TODO: We really need to provide a dirfd as a source, though the main problem
-//       here is that it's unclear what the "correct" path is for the emulated
-//       backend to check against. We could just read the dirfd but now we have
-//       more races to deal with. We could ask the user to provide a backup
-//       path to check against, but then why not just use that path in the
-//       first place?
-pub fn open<P: AsRef<Path>>(path: P) -> Result<Root, FailureError> {
-    Root::open(path)
+    /// An operating system error during a raw-syscall execution.
+    #[fail(
+        display = "syscall error {}({}=>{:?}, {:?})",
+        syscall, fd, fdpath, path
+    )]
+    OsPathError {
+        syscall: &'static str,
+        // XXX: Ideally this would be fd: (RawFd, PathBuf) but #[fail(display)]
+        //      doesn't like referencing tuple elements in the display field.
+        //      It's apparently a compiler limitation.
+        fd: RawFd,
+        fdpath: PathBuf,
+        path: PathBuf,
+        #[fail(cause)]
+        cause: IOError,
+    },
 }

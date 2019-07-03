@@ -34,6 +34,21 @@
 #include <sys/types.h>
 
 /**
+ * The backend used for path resolution within a pathrs_root_t to get a
+ * pathrs_handle_t.
+ */
+typedef enum {
+    /**
+     * Use the native openat2(2) backend (requires kernel support).
+     */
+    PATHRS_KERNEL_RESOLVER,
+    /**
+     * Use the userspace "emulated" backend.
+     */
+    PATHRS_EMULATED_RESOLVER,
+} pathrs_resolver_t;
+
+/**
  * This is only exported to work around a Rust compiler restriction. Consider
  * it an implementation detail and don't make use of it.
  */
@@ -120,8 +135,10 @@ int pathrs_inroot_symlink(const pathrs_root_t *root,
                           const char *target);
 
 /**
- * Open a root handle. The correct backend (native/kernel or emulated) to use
- * is auto-detected based on whether the kernel supports openat2(2).
+ * Open a root handle.
+ * The default resolver is automatically chosen based on the running kernel.
+ * You can switch the resolver used with pathrs_set_resolver() -- though this
+ * is not strictly recommended unless you have a good reason to do it.
  * The provided path must be an existing directory. If using the emulated
  * driver, it also must be the fully-expanded path to a real directory (with no
  * symlink components) because the given path is used to double-check that the
@@ -143,5 +160,10 @@ int pathrs_reopen(const pathrs_handle_t *handle, int flags);
  * Free a root handle.
  */
 void pathrs_rfree(pathrs_root_t *root);
+
+/**
+ * Switch the resolver for the given root handle.
+ */
+void pathrs_set_resolver(pathrs_root_t *root, pathrs_resolver_t resolver);
 
 #endif /* LIBPATHRS_H */

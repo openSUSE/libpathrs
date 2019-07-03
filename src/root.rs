@@ -16,27 +16,26 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{kernel, user, Error, Handle};
+use crate::utils::FileExt;
+use crate::{kernel, user};
+use crate::{Error, Handle};
 
 use core::convert::TryFrom;
 use std::ffi::CString;
+use std::fs::{File, OpenOptions, Permissions};
 use std::io::Error as IOError;
+use std::ops::Deref;
 use std::os::unix::{
     fs::{OpenOptionsExt, PermissionsExt},
-    io::{AsRawFd, IntoRawFd, RawFd},
+    io::{AsRawFd, FromRawFd},
 };
-use std::path::{Path, PathBuf};
 use std::{
-    fs,
-    fs::{OpenOptions, Permissions},
+    path,
+    path::{Path, PathBuf},
 };
 
 use failure::{Error as FailureError, ResultExt};
 use libc::dev_t;
-
-lazy_static! {
-    static ref KERNEL_SUPPORT: bool = kernel::supported();
-}
 
 /// An inode type to be created with [`Root::create`].
 ///
@@ -98,6 +97,47 @@ pub enum InodeType<'a> {
     //DetachedSocket(),
 }
 
+/// The backend used for path resolution within a [`Root`] to get a [`Handle`].
+///
+/// We don't generally recommend specifying this, since libpathrs will
+/// automatically detect the best backend for your platform. However,
+///
+/// [`Root`]: struct.Root.html
+/// [`Handle`]: struct.Handle.html
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum Resolver {
+    /// Use the native `openat2(2)` backend (requires kernel support).
+    Kernel,
+    /// Use the userspace "emulated" backend.
+    Emulated,
+    // TODO: Implement a HardcoreEmulated which does pivot_root(2) and all the
+    //       rest of it. It'd be useful to compare against and for some
+    //       hyper-concerned users.
+}
+
+lazy_static! {
+    static ref DEFAULT_RESOLVER: Resolver = match *kernel::IS_SUPPORTED {
+        true => Resolver::Kernel,
+        false => Resolver::Emulated,
+    };
+}
+
+impl Default for Resolver {
+    fn default() -> Self {
+        *DEFAULT_RESOLVER
+    }
+}
+
+impl Resolver {
+    /// Is this resolver supported by the current platform?
+    pub fn supported(&self) -> bool {
+        match self {
+            Resolver::Kernel => *kernel::IS_SUPPORTED,
+            Resolver::Emulated => true, // TODO: Should check for /proc.
+        }
+    }
+}
+
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
 fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p str), FailureError> {
@@ -112,24 +152,12 @@ fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p str), FailureError> {
 
     // It's critical we are only touching the final component in the path.
     // If there are any other path components we must bail.
-    if name.contains(std::path::MAIN_SEPARATOR) {
+    if name.contains(path::MAIN_SEPARATOR) {
         return Err(Error::SafetyViolation(
             "trailing component of pathname contains '/'",
         ))?;
     }
     Ok((parent, name))
-}
-
-/// Check whether a given RawFd refers to the given path.
-///
-/// This is naturally racy, so it's important to only use this with the
-/// understanding that it only provides the guarantee that "at some point during
-/// execution this was true" and no more.
-fn fd_is_path(fd: RawFd, other_path: &Path) -> Result<bool, FailureError> {
-    let path = format!("/proc/self/fd/{}", fd);
-    let path = fs::read_link(path).context("readlink /proc/self/fd")?;
-
-    Ok(path == other_path)
 }
 
 /// A handle to the root of a directory tree.
@@ -158,28 +186,35 @@ fn fd_is_path(fd: RawFd, other_path: &Path) -> Result<bool, FailureError> {
 /// [`Root`]: struct.Root.html
 /// [`Error::SafetyViolation`]: enum.Error.html#variant.SafetyViolation
 pub struct Root {
-    fd: RawFd,
+    inner: File,
+    resolver: Resolver,
     path: PathBuf,
 }
 
-// RawFds aren't auto-dropped in Rust so we need to do it manually. As long as
-// nobody has done anything strange with the current process's fds, this will
-// not fail.
-impl Drop for Root {
-    fn drop(&mut self) {
-        // Cannot return errors in Drop or panic! in C FFI. So just ignore it.
-        unsafe { libc::close(self.fd) };
+// Only used internally by libpathrs.
+#[doc(hidden)]
+impl AsRef<Path> for Root {
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
     }
 }
 
-impl AsRawFd for Root {
-    fn as_raw_fd(&self) -> RawFd {
-        self.fd
+// Only used internally by libpathrs.
+#[doc(hidden)]
+impl Deref for Root {
+    type Target = File;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
 impl Root {
     /// Open a [`Root`] handle.
+    ///
+    /// The [`Resolver`] used by this handle is chosen at runtime based on which
+    /// resolvers are supported by the running kernel (the default [`Resolver`]
+    /// is always `Resolver::default()`). You can change the [`Resolver`] used
+    /// with [`Root::with_resolver`], though this is not recommended.
     ///
     /// # Errors
     ///
@@ -188,6 +223,8 @@ impl Root {
     /// might be relaxed in the future.
     ///
     /// [`Root`]: struct.Root.html
+    /// [`Root::with_resolver`]: struct.Root.html#method.with_resolver
+    /// [`Resolver`]: enum.Resolver.html
     // TODO: We really need to provide a dirfd as a source, though the main
     //       problem here is that it's unclear what the "correct" path is for
     //       the emulated backend to check against. We could just read the dirfd
@@ -209,7 +246,8 @@ impl Root {
             .context("open root handle")?;
 
         let root = Root {
-            fd: file.into_raw_fd(),
+            inner: file,
+            resolver: Default::default(),
             path: path.into(),
         };
 
@@ -217,9 +255,24 @@ impl Root {
         Ok(root)
     }
 
+    /// Change the [`Resolver`] used by this [`Root`] instance.
+    ///
+    /// Using this option is not recommended, but it can be useful for testing
+    /// or specifically ensuring that a particular backend is used to work
+    /// around issues in another backend.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Root::with_resolver`]: struct.Root.html#method.with_resolver
+    /// [`Resolver`]: enum.Resolver.html
+    pub fn with_resolver(&mut self, resolver: Resolver) -> &mut Self {
+        self.resolver = resolver;
+        self
+    }
+
     /// Check whether the Root is still valid.
-    fn check(&self) -> Result<(), FailureError> {
-        if fd_is_path(self.fd, &self.path)? {
+    #[doc(hidden)]
+    pub fn check(&self) -> Result<(), FailureError> {
+        if self.inner.as_path()? == self.path {
             Ok(())
         } else {
             Err(Error::SafetyViolation(
@@ -242,9 +295,9 @@ impl Root {
     /// [`Handle`]: trait.Handle.html
     pub fn resolve(&self, path: &Path) -> Result<Handle, FailureError> {
         self.check()?;
-        match *KERNEL_SUPPORT {
-            true => kernel::resolve(self, path),
-            false => user::resolve(self, path),
+        match self.resolver {
+            Resolver::Kernel => kernel::resolve(self, path),
+            Resolver::Emulated => user::resolve(self, path),
         }
     }
 
@@ -372,7 +425,7 @@ impl Root {
             .context("convert name into CString for FFI")?
             .as_ptr();
 
-        let fd: RawFd = unsafe {
+        let fd = unsafe {
             libc::openat(
                 dirfd,
                 name,
@@ -385,7 +438,8 @@ impl Root {
         if fd.is_negative() {
             return Err(err).context("root file create failed")?;
         }
-        Ok(Handle::try_from(fd).context("convert O_CREAT fd to Handle")?)
+        let file = unsafe { File::from_raw_fd(fd) };
+        Ok(Handle::try_from(file).context("convert O_CREAT fd to Handle")?)
     }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.

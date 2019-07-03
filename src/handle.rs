@@ -16,11 +16,11 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::Error;
+use crate::utils::FileExt;
 
 use core::convert::TryFrom;
 use std::fs::{File, OpenOptions};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::ops::Deref;
 
 use failure::{Error as FailureError, ResultExt};
 
@@ -42,37 +42,24 @@ use failure::{Error as FailureError, ResultExt};
 /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
 /// [`RawFd`]: https://doc.rust-lang.org/std/os/unix/io/type.RawFd.html
 /// [`libc::openat`]: https://docs.rs/libc/latest/libc/fn.openat.html
-pub struct Handle(RawFd);
+pub struct Handle(File);
 
-// RawFds aren't auto-dropped in Rust so we need to do it manually. As long as
-// nobody has done anything strange with the current process's fds, this will
-// not fail.
-impl Drop for Handle {
-    fn drop(&mut self) {
-        // Cannot return errors in Drop or panic! in C FFI. So just ignore it.
-        unsafe { libc::close(self.0) };
-    }
-}
-
-impl TryFrom<RawFd> for Handle {
-    type Error = FailureError;
-    fn try_from(fd: RawFd) -> Result<Self, Self::Error> {
-        if fd.is_negative() {
-            return Err(Error::InvalidArgument("fd", "must be positive"))
-                .context("convert fd into Handle")?;
-        }
-        // TODO: Check if the fd is valid.
-        Ok(Handle(fd))
-    }
-}
-
-// Not super-safe to use since the Handle might be dropped after getting the
-// RawFd (meaning you end up with EBADF. But it's much more ergonomic than
-// Into<RawFd>.
+// Only used internally by libpathrs.
 #[doc(hidden)]
-impl AsRawFd for Handle {
-    fn as_raw_fd(&self) -> RawFd {
-        self.0
+impl TryFrom<File> for Handle {
+    type Error = FailureError;
+    fn try_from(file: File) -> Result<Self, Self::Error> {
+        // TODO: Check if the file is valid.
+        Ok(Handle(file))
+    }
+}
+
+// Only used internally by libpathrs.
+#[doc(hidden)]
+impl Deref for Handle {
+    type Target = File;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -89,9 +76,8 @@ impl Handle {
     /// [`OpenOptionsExt`]: https://doc.rust-lang.org/std/os/unix/fs/trait.OpenOptionsExt.html
     pub fn reopen(&self, options: &OpenOptions) -> Result<File, FailureError> {
         // TODO: Implement re-opening with O_EMPTYPATH if it's supported.
-        let fd_path = format!("/proc/self/fd/{}", self.as_raw_fd());
         let file = options
-            .open(fd_path)
+            .open(self.as_path()?)
             .context("reopen handle through /proc/self/fd")?;
         Ok(file)
     }

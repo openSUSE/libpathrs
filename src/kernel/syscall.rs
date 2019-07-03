@@ -20,15 +20,15 @@
 //! will almost certainly not work on your machine, and may cause other problems
 //! depending on what syscall is using the syscall number this code will call.
 
+use crate::utils::{RawFdExt, ToCString};
 use crate::Error;
 
-use std::ffi::CString;
 use std::fs::File;
 use std::io::Error as IOError;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::path::Path;
 
-use failure::{Error as FailureError, ResultExt};
+use failure::Error as FailureError;
 use libc::{c_char, c_int, c_long};
 
 /// Block mount-point crossings (including bind-mounts).
@@ -72,9 +72,9 @@ unsafe fn openat2(dirfd: c_int, pathname: *const c_char, how: *const OpenHow) ->
 #[repr(C)]
 pub union Access {
     /// O_CREAT file mode (ignored otherwise).
-    pub mode: u16,
+    mode: u16,
     /// Restrict how the O_PATH may be re-opened (ignored otherwise).
-    pub upgrade_mask: u16,
+    upgrade_mask: u16,
 }
 
 /// Arguments for how `openat2` should open the target path.
@@ -116,19 +116,19 @@ impl OpenHow {
     }
 
     pub fn open<P: AsRef<Path>>(&self, dirfd: RawFd, path: P) -> Result<File, FailureError> {
-        let path = path
-            .as_ref()
-            .to_str()
-            .ok_or(Error::InvalidArgument("path", "not a valid Rust string"))
-            .context("openat2")?;
-        let path = CString::new(path).context("openat2")?;
-
-        let fd = unsafe { openat2(dirfd, path.as_ptr(), self) } as RawFd;
+        let path = path.as_ref();
+        let fd = unsafe { openat2(dirfd, path.to_c_string().as_ptr(), self) } as RawFd;
         let err: IOError = errno::errno().into();
         if fd >= 0 {
             Ok(unsafe { File::from_raw_fd(fd) })
         } else {
-            Err(err).context("openat2")?
+            Err(Error::OsPathError {
+                syscall: "openat2",
+                fd: dirfd,
+                fdpath: dirfd.as_path_lossy(),
+                path: path.into(),
+                cause: err,
+            })?
         }
     }
 

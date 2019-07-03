@@ -19,8 +19,7 @@
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
 use libpathrs::ffi::error;
-use libpathrs::Error;
-use libpathrs::{Handle, InodeType, Root};
+use libpathrs::{Error, Handle, InodeType, Resolver, Root};
 
 use std::ffi::CStr;
 use std::fs::{OpenOptions, Permissions};
@@ -108,8 +107,11 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, FailureError> {
     Ok(path)
 }
 
-/// Open a root handle. The correct backend (native/kernel or emulated) to use
-/// is auto-detected based on whether the kernel supports openat2(2).
+/// Open a root handle.
+///
+/// The default resolver is automatically chosen based on the running kernel.
+/// You can switch the resolver used with pathrs_set_resolver() -- though this
+/// is not strictly recommended unless you have a good reason to do it.
 ///
 /// The provided path must be an existing directory. If using the emulated
 /// driver, it also must be the fully-expanded path to a real directory (with no
@@ -119,10 +121,36 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, FailureError> {
 pub extern "C" fn pathrs_open(path: *const c_char) -> Option<&'static mut CRoot> {
     error::ffi_wrap(None, move || {
         // Leak the box so we can return the pointer to the caller.
-        libpathrs::open(parse_path(path)?)
+        Root::open(parse_path(path)?)
             .map(CPointer::new)
             .map(Option::Some)
     })
+}
+
+/// The backend used for path resolution within a pathrs_root_t to get a
+/// pathrs_handle_t.
+#[repr(C)]
+#[allow(non_camel_case_types, dead_code)]
+pub enum CResolver {
+    /// Use the native openat2(2) backend (requires kernel support).
+    PATHRS_KERNEL_RESOLVER,
+    /// Use the userspace "emulated" backend.
+    PATHRS_EMULATED_RESOLVER,
+}
+
+impl Into<Resolver> for CResolver {
+    fn into(self) -> Resolver {
+        match self {
+            CResolver::PATHRS_KERNEL_RESOLVER => Resolver::Kernel,
+            CResolver::PATHRS_EMULATED_RESOLVER => Resolver::Emulated,
+        }
+    }
+}
+
+/// Switch the resolver for the given root handle.
+#[no_mangle]
+pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) {
+    root.with_resolver(resolver.into());
 }
 
 /// Free a root handle.

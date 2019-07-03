@@ -22,29 +22,28 @@ use syscall::OpenHow;
 use crate::{Handle, Root};
 
 use core::convert::TryFrom;
-use std::os::unix::io::{AsRawFd, IntoRawFd};
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
 use failure::{Error as FailureError, ResultExt};
 
-pub fn resolve(root: &Root, path: &Path) -> Result<Handle, FailureError> {
+lazy_static! {
+    #[doc(hidden)]
+    pub static ref IS_SUPPORTED: bool = OpenHow::new().open(libc::AT_FDCWD, ".").is_ok();
+}
+
+/// Resolve `path` within `root` through `openat2(2)`.
+pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureError> {
+    if !*IS_SUPPORTED {
+        bail!("kernel resolution is not supported on this kernel")
+    }
+
     let file = OpenHow::new()
         .custom_flags(libc::O_PATH | libc::O_CLOEXEC)
         .custom_resolve(syscall::RESOLVE_IN_ROOT)
         .open(root.as_raw_fd(), path)
         .context("open sub-path")?;
 
-    let handle =
-        Handle::try_from(file.as_raw_fd()).context("convert RESOLVE_IN_ROOT fd to Handle")?;
-
-    // Move the file *after* we successfully created the handle.
-    let _fd = file.into_raw_fd();
+    let handle = Handle::try_from(file).context("convert RESOLVE_IN_ROOT fd to Handle")?;
     Ok(handle)
-}
-
-/// supported checks at runtime whether the current running kernel supports
-/// openat2(2) with RESOLVE_THIS_ROOT. This can be used to decide which
-/// underlying interface to use.
-pub fn supported() -> bool {
-    OpenHow::new().open(libc::AT_FDCWD, ".").is_ok()
 }
