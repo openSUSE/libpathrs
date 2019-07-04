@@ -15,14 +15,14 @@
 # with this program. If not, see <https://www.gnu.org/licenses/>.
 
 [package]
-name = "libpathrs"
-version = "0.0.0+dev"
+name = "pathrs"
+version = "0.0.0"
 license = "LGPL-3.0-or-later"
 authors = ["Aleksa Sarai <cyphar@cyphar.com>"]
 
+description = "C-friendly API to make path resolution safer on Linux."
 repository = "https://github.com/openSUSE/libpathrs"
 readme = "README.md"
-description = "C-friendly API to make path resolution safer on Linux."
 
 keywords = ["file", "fs", "security", "linux"]
 categories = ["filesystem"]
@@ -32,10 +32,11 @@ edition = "2018"
 maintenance = { status = "experimental" }
 
 [lib]
-name = "pathrs"
 crate-type = ["cdylib"]
 
 [profile.release]
+# Enable link-time optimisations.
+lto = true
 # Since we are cdylib, panic!s will cause aborts once they hit the FFI barrier
 # anyway. We might as well reduce our code size if we're doing it.
 panic = "abort"
