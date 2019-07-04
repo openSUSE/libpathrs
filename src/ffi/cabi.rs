@@ -155,8 +155,8 @@ pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) {
 
 /// Free a root handle.
 #[no_mangle]
-pub extern "C" fn pathrs_rfree(root: &mut CRoot) {
-    root.free();
+pub extern "C" fn pathrs_rfree(root: Option<&mut CRoot>) {
+    root.map(CPointer::free);
 }
 
 /// "Upgrade" the handle to a usable fd, suitable for reading and writing. This
@@ -197,8 +197,8 @@ pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
 
 /// Free a handle.
 #[no_mangle]
-pub extern "C" fn pathrs_hfree(handle: &mut CHandle) {
-    handle.free();
+pub extern "C" fn pathrs_hfree(handle: Option<&mut CHandle>) {
+    handle.map(CPointer::free);
 }
 
 /// Within the given root's tree, resolve the given path (with all symlinks
