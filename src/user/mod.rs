@@ -63,7 +63,7 @@ fn openat(dirfd: RawFd, path: &Path) -> Result<File, FailureError> {
             libc::O_PATH | libc::O_CLOEXEC | libc::O_NOFOLLOW,
         )
     };
-    let err: IOError = errno::errno().into();
+    let err = errno::errno();
     if fd >= 0 {
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
@@ -72,7 +72,7 @@ fn openat(dirfd: RawFd, path: &Path) -> Result<File, FailureError> {
             fd: dirfd,
             fdpath: dirfd.as_path_lossy(),
             path: path.into(),
-            cause: err,
+            cause: err.into(),
         })?
     }
 }

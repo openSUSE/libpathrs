@@ -110,11 +110,11 @@ impl FileExt for File {
 
     fn dup_cloexec(&self) -> Result<File, FailureError> {
         let fd = unsafe { libc::fcntl(self.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
-        let err: IOError = errno::errno().into();
+        let err = errno::errno();
         if fd >= 0 {
             Ok(unsafe { File::from_raw_fd(fd) })
         } else {
-            Err(err).context("dupfd cloexec")?
+            Err(IOError::from(err)).context("dupfd cloexec")?
         }
     }
 

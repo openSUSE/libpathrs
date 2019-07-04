@@ -24,7 +24,6 @@ use crate::utils::{RawFdExt, ToCString};
 use crate::Error;
 
 use std::fs::File;
-use std::io::Error as IOError;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::path::Path;
 
@@ -118,16 +117,20 @@ impl OpenHow {
     pub fn open<P: AsRef<Path>>(&self, dirfd: RawFd, path: P) -> Result<File, FailureError> {
         let path = path.as_ref();
         let fd = unsafe { openat2(dirfd, path.to_c_string().as_ptr(), self) } as RawFd;
-        let err: IOError = errno::errno().into();
+        let err = errno::errno();
         if fd >= 0 {
             Ok(unsafe { File::from_raw_fd(fd) })
+        } else if err.0 == libc::EXDEV {
+            Err(Error::SafetyViolation(
+                "openat2 detected a potential attack",
+            ))?
         } else {
             Err(Error::OsPathError {
                 syscall: "openat2",
                 fd: dirfd,
                 fdpath: dirfd.as_path_lossy(),
                 path: path.into(),
-                cause: err,
+                cause: err.into(),
             })?
         }
     }

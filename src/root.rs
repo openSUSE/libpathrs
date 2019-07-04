@@ -363,10 +363,11 @@ impl Root {
         };
         let err: IOError = errno::errno().into();
 
-        if ret.is_negative() {
-            return Err(err).context("root inode create failed")?;
+        if ret >= 0 {
+            Ok(())
+        } else {
+            Err(err).context("root inode create failed")?
         }
-        Ok(())
     }
 
     /// Create an [`InodeType::File`] within the [`Root`]'s tree at `path` with
@@ -424,11 +425,12 @@ impl Root {
         };
         let err: IOError = errno::errno().into();
 
-        if fd.is_negative() {
-            return Err(err).context("root file create failed")?;
+        if fd >= 0 {
+            let file = unsafe { File::from_raw_fd(fd) };
+            Ok(Handle::try_from(file).context("convert O_CREAT fd to Handle")?)
+        } else {
+            Err(err).context("root file create failed")?
         }
-        let file = unsafe { File::from_raw_fd(fd) };
-        Ok(Handle::try_from(file).context("convert O_CREAT fd to Handle")?)
     }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.
@@ -460,10 +462,11 @@ impl Root {
         let ret = unsafe { libc::unlinkat(dirfd, name, 0) };
         let err: IOError = errno::errno().into();
 
-        if ret.is_negative() {
-            return Err(err).context("root inode remove failed")?;
+        if ret >= 0 {
+            Ok(())
+        } else {
+            Err(err).context("root inode remove failed")?
         }
-        Ok(())
     }
 
     // TODO: mkdir_all()
