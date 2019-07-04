@@ -16,23 +16,21 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::utils::FileExt;
+use crate::utils::{FileExt, ToCString, PATH_SEPARATOR};
 use crate::{kernel, user};
 use crate::{Error, Handle};
 
 use core::convert::TryFrom;
-use std::ffi::CString;
+use std::ffi::{CString, OsStr};
 use std::fs::{File, OpenOptions, Permissions};
 use std::io::Error as IOError;
 use std::ops::Deref;
 use std::os::unix::{
+    ffi::OsStrExt,
     fs::{OpenOptionsExt, PermissionsExt},
     io::{AsRawFd, FromRawFd},
 };
-use std::{
-    path,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use failure::{Error as FailureError, ResultExt};
 use libc::dev_t;
@@ -140,19 +138,17 @@ impl Resolver {
 
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
-fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p str), FailureError> {
+fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p OsStr), FailureError> {
     let parent = path.parent().unwrap_or("/".as_ref());
 
     // Now construct the trailing portion of the target.
     let name = path
         .file_name()
-        .ok_or(Error::InvalidArgument("path", "no trailing component"))?
-        .to_str()
-        .ok_or(Error::InvalidArgument("path", "not a valid Rust string"))?;
+        .ok_or(Error::InvalidArgument("path", "no trailing component"))?;
 
     // It's critical we are only touching the final component in the path.
     // If there are any other path components we must bail.
-    if name.contains(path::MAIN_SEPARATOR) {
+    if name.as_bytes().contains(&PATH_SEPARATOR) {
         return Err(Error::SafetyViolation(
             "trailing component of pathname contains '/'",
         ))?;
@@ -251,7 +247,7 @@ impl Root {
             path: path.into(),
         };
 
-        root.check()?;
+        root.check().context("double-check new root is valid")?;
         Ok(root)
     }
 
@@ -276,7 +272,7 @@ impl Root {
             Ok(())
         } else {
             Err(Error::SafetyViolation(
-                "root directory was moved during execution",
+                "root directory doesn't match original path",
             ))?
         }
     }
@@ -328,13 +324,11 @@ impl Root {
         // the parent.
         let (parent, name) = path_split(path.as_ref())
             .context("split path into (parent, name) for inode creation")?;
+        let name = name.to_c_string().as_ptr();
         let dirfd = self
             .resolve(parent)
             .context("resolve parent directory for inode creation")?
             .as_raw_fd();
-        let name = CString::new(name)
-            .context("convert name into CString for FFI")?
-            .as_ptr();
 
         let ret = match inode_type {
             InodeType::File(_) => unreachable!(), /* we dealt with this above */
@@ -343,10 +337,7 @@ impl Root {
                 unsafe { libc::mkdirat(dirfd, name, mode) }
             }
             InodeType::Symlink(target) => {
-                let target = target
-                    .to_str()
-                    .ok_or(Error::InvalidArgument("target", "not a valid Rust string"))?;
-                let target = CString::new(target)?.as_ptr();
+                let target = target.to_c_string().as_ptr();
                 unsafe { libc::symlinkat(target, dirfd, name) }
             }
             InodeType::Hardlink(target) => {
@@ -417,13 +408,11 @@ impl Root {
         // the parent.
         let (parent, name) = path_split(path.as_ref())
             .context("split path into (parent, name) for inode creation")?;
+        let name = name.to_c_string().as_ptr();
         let dirfd = self
             .resolve(parent)
             .context("resolve parent directory for inode creation")?
             .as_raw_fd();
-        let name = CString::new(name)
-            .context("convert name into CString for FFI")?
-            .as_ptr();
 
         let fd = unsafe {
             libc::openat(
@@ -464,8 +453,8 @@ impl Root {
         // already exist, and once we have it we're safe from rename races in
         // the parent.
         let (parent, name) = path_split(path.as_ref())?;
+        let name = name.to_c_string().as_ptr();
         let dirfd = self.resolve(parent)?.as_raw_fd();
-        let name = CString::new(name)?.as_ptr();
 
         // TODO: Handle the lovely "is it a directory or file" problem.
         let ret = unsafe { libc::unlinkat(dirfd, name, 0) };

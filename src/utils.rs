@@ -30,6 +30,9 @@ use std::{fs, fs::File};
 
 use failure::{Error as FailureError, ResultExt};
 
+/// The path separator on Linux.
+pub const PATH_SEPARATOR: u8 = b'/';
+
 pub trait ToCString {
     /// Convert to a CStr.
     fn to_c_string(&self) -> CString;
@@ -40,10 +43,10 @@ impl ToCString for OsStr {
         let filtered: Vec<_> = self
             .as_bytes()
             .iter()
-            .map(|ch| *ch)
-            .filter(|ch| *ch != 0)
+            .map(|&c| c) // .copied() is in Rust >= 1.36.0
+            .take_while(|&c| c != b'\0')
             .collect();
-        CString::new(filtered).expect("nul bytes should be filtered out")
+        CString::new(filtered).expect("nul bytes should've been excluded")
     }
 }
 

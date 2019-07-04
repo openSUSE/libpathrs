@@ -35,7 +35,7 @@
 //! measures, but the final check throgh procfs should block all attack
 //! attempts.
 
-use crate::utils::{FileExt, RawFdExt, ToCString};
+use crate::utils::{FileExt, RawFdExt, ToCString, PATH_SEPARATOR};
 use crate::{Error, Handle, Root};
 
 use core::convert::TryFrom;
@@ -47,10 +47,7 @@ use std::os::unix::{
     ffi::OsStrExt,
     io::{AsRawFd, FromRawFd, RawFd},
 };
-use std::{
-    path,
-    path::{Component, Path, PathBuf},
-};
+use std::path::{Component, Path, PathBuf};
 
 use failure::{Error as FailureError, ResultExt};
 
@@ -88,7 +85,7 @@ fn openat(dirfd: RawFd, path: &Path) -> Result<File, FailureError> {
 fn readlinkat(dirfd: RawFd, path: &Path) -> Result<PathBuf, FailureError> {
     // If the contents of the symlink are larger than this, we raise a
     // SafetyViolation to avoid DoS vectors (because there is no way to get the
-    // size of a symlink, you just have to read it).
+    // size of a symlink beforehand, you just have to read it).
     let mut buffer = [0 as u8; 32 * libc::PATH_MAX as usize];
     let len = unsafe {
         libc::readlinkat(
@@ -179,6 +176,7 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
     while let Some(part) = components.pop_front() {
         // XXX: Thanks to borrowck, we can't seem to just store Component in our
         //      VecDeque. So we need to do a dirty conversion back to Component.
+        //      But we are definitely sure there is at only one component.
         let part = part
             .components()
             .next()
@@ -195,14 +193,7 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
                 // are only touching the final component in the path. If there
                 // are any other path components we must bail. This shouldn't
                 // ever happen, but it's better to be safe.
-                if part
-                    .to_str()
-                    .ok_or(Error::InvalidArgument(
-                        "path component",
-                        "not a valid Rust string",
-                    ))?
-                    .contains(path::MAIN_SEPARATOR)
-                {
+                if part.as_bytes().contains(&PATH_SEPARATOR) {
                     return Err(Error::SafetyViolation(
                         "component of path resolution contains '/'",
                     ))?;
@@ -230,8 +221,10 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
         // timing-related attacks.
         //
         // The safety argument for only needing to check ".." is identical to
-        // the kernel implementation. However, unlike the in-kernel version we
-        // don't have the luxury of only doing this check
+        // the kernel implementation (namely, walking down is safe
+        // by-definition). However, unlike the in-kernel version we don't have
+        // the luxury of only doing this check when there was a racing rename --
+        // we have to do it every time.
         if part == Component::ParentDir {
             check_current(&next, root, &expected_path)
                 .context("check next '..' component didn't escape")?;
@@ -242,7 +235,7 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
         let next_type = next.metadata().context("fstat of next")?.file_type();
 
         // If we're an ordinary dirent, we just update current and move on
-        // to the next component.
+        // to the next component. Nothing special here.
         if !next_type.is_symlink() {
             current = next;
             continue;
@@ -300,5 +293,6 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
     // Make sure the root path is still correct.
     root.check()?;
 
+    // Everything is Kosher here -- convert to a handle.
     Handle::try_from(current)
 }

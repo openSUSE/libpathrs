@@ -21,16 +21,17 @@ use crate as libpathrs;
 use libpathrs::ffi::error;
 use libpathrs::{Error, Handle, InodeType, Resolver, Root};
 
-use std::ffi::CStr;
+use std::ffi::{CStr, OsStr};
 use std::fs::{OpenOptions, Permissions};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::{
+    ffi::OsStrExt,
     fs::{OpenOptionsExt, PermissionsExt},
     io::{AsRawFd, IntoRawFd, RawFd},
 };
 use std::path::Path;
 
-use failure::{Error as FailureError, ResultExt};
+use failure::Error as FailureError;
 use libc::{c_char, c_int, c_uint, dev_t};
 
 /// This is only exported to work around a Rust compiler restriction. Consider
@@ -100,11 +101,8 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, FailureError> {
     if path.is_null() {
         Err(Error::InvalidArgument("path", "cannot be NULL"))?;
     }
-    let path = unsafe { CStr::from_ptr(path) }
-        .to_str()
-        .context("path isn't a valid UTF-8 string")?;
-    let path = Path::new(path);
-    Ok(path)
+    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
+    Ok(OsStr::from_bytes(bytes).as_ref())
 }
 
 /// Open a root handle.
