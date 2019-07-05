@@ -19,11 +19,12 @@
 //! Only used internally by libpathrs.
 #![doc(hidden)]
 
+use crate::syscalls;
+
 use std::ffi::{CString, OsStr};
-use std::io::Error as IOError;
 use std::os::unix::{
     ffi::OsStrExt,
-    io::{AsRawFd, FromRawFd, RawFd},
+    io::{AsRawFd, RawFd},
 };
 use std::path::{Path, PathBuf};
 use std::{fs, fs::File};
@@ -95,8 +96,12 @@ pub trait FileExt {
     /// path the file pointed to" and no more.
     fn as_path(&self) -> Result<PathBuf, FailureError>;
 
-    /// Basic wrapper around `fctnl(F_DUPFD_CLOEXEC)`.
-    fn dup_cloexec(&self) -> Result<File, FailureError>;
+    /// This is a fixed version of the Rust stdlib's `File::try_clone()` which
+    /// works on `O_PATH` file descriptors, added to [work around an upstream
+    /// bug][bug62314].
+    ///
+    /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
+    fn try_clone_hotfix(&self) -> Result<File, FailureError>;
 
     /// Check if the File is on a "dangerous" filesystem that might contain
     /// magic-links.
@@ -108,14 +113,8 @@ impl FileExt for File {
         self.as_raw_fd().as_path()
     }
 
-    fn dup_cloexec(&self) -> Result<File, FailureError> {
-        let fd = unsafe { libc::fcntl(self.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
-        let err = errno::errno();
-        if fd >= 0 {
-            Ok(unsafe { File::from_raw_fd(fd) })
-        } else {
-            Err(IOError::from(err)).context("dupfd cloexec")?
-        }
+    fn try_clone_hotfix(&self) -> Result<File, FailureError> {
+        syscalls::fcntl_dupfd_cloxec(self.as_raw_fd())
     }
 
     fn is_dangerous(&self) -> Result<bool, FailureError> {

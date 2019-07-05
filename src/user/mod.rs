@@ -35,88 +35,25 @@
 //! measures, but the final check throgh procfs should block all attack
 //! attempts.
 
-use crate::utils::{FileExt, RawFdExt, ToCString, PATH_SEPARATOR};
+use crate::{
+    syscalls,
+    utils::{FileExt, PATH_SEPARATOR},
+};
 use crate::{Error, Handle, Root};
 
 use core::convert::TryFrom;
 use std::collections::VecDeque;
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Error as IOError;
-use std::os::unix::{
-    ffi::OsStrExt,
-    io::{AsRawFd, FromRawFd, RawFd},
-};
+use std::os::unix::{ffi::OsStrExt, io::AsRawFd};
 use std::path::{Component, Path, PathBuf};
 
 use failure::{Error as FailureError, ResultExt};
 
-/// Basic wrapper around `openat(O_PATH | O_CLOEXEC | O_NOFOLLOW)`.
-///
-/// This is needed because Rust doesn't provide a way to access the dirfd
-/// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
-fn openat(dirfd: RawFd, path: &Path) -> Result<File, FailureError> {
-    let fd = unsafe {
-        libc::openat(
-            dirfd,
-            path.to_c_string().as_ptr(),
-            libc::O_PATH | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-        )
-    };
-    let err = errno::errno();
-    if fd >= 0 {
-        Ok(unsafe { File::from_raw_fd(fd) })
-    } else {
-        Err(Error::OsPathError {
-            syscall: "openat",
-            fd: dirfd,
-            fdpath: dirfd.as_path_lossy(),
-            path: path.into(),
-            cause: err.into(),
-        })?
-    }
-}
-
-/// Basic wrapper around `readlinkat(2)`.
-///
-/// This is needed because Rust doesn't provide a way to access the dirfd
-/// argument of `readlinkat(2)`. We need the dirfd argument, so we need a
-/// wrapper.
-fn readlinkat(dirfd: RawFd, path: &Path) -> Result<PathBuf, FailureError> {
-    // If the contents of the symlink are larger than this, we raise a
-    // SafetyViolation to avoid DoS vectors (because there is no way to get the
-    // size of a symlink beforehand, you just have to read it).
-    let mut buffer = [0 as u8; 32 * libc::PATH_MAX as usize];
-    let len = unsafe {
-        libc::readlinkat(
-            dirfd,
-            path.to_c_string().as_ptr(),
-            buffer.as_mut_ptr() as *mut i8,
-            buffer.len(),
-        )
-    };
-    let mut err: IOError = errno::errno().into();
-    let maybe_truncated = len >= (buffer.len() as isize);
-    if len < 0 || maybe_truncated {
-        if maybe_truncated {
-            err = IOError::from_raw_os_error(libc::ENAMETOOLONG);
-        }
-        Err(Error::OsPathError {
-            syscall: "readlinkat",
-            fd: dirfd,
-            fdpath: dirfd.as_path_lossy(),
-            path: path.into(),
-            cause: err,
-        })?
-    } else {
-        let content = OsStr::from_bytes(&buffer[..(len as usize)]);
-        Ok(PathBuf::from(content))
-    }
-}
-
 /// Maximum number of symlink traversals we will accept.
 const MAX_SYMLINK_TRAVERSALS: usize = 128;
 
+/// Ensure that the expected path within the root matches the current fd.
 fn check_current<P: AsRef<Path>>(
     current: &File,
     root: &Root,
@@ -164,7 +101,9 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let mut current = root.dup_cloexec().context("dup root as starting point")?;
+    let mut current = root
+        .try_clone_hotfix()
+        .context("dup root as starting point")?;
 
     // Get initial set of components from the passed path. We remove  all components
     let mut components: VecDeque<_> = path
@@ -212,8 +151,8 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
         };
 
         // Get our next element.
-        let next = openat(current.as_raw_fd(), part.as_ref())
-            .context(format!("open next component of resolution"))?;
+        let next = syscalls::openat(current.as_raw_fd(), part, libc::O_PATH, 0)
+            .context("open next component of resolution")?;
 
         // Make sure that the path is what we expect. If not, there was a racing
         // rename and we should bail out here -- otherwise we might be tricked
@@ -265,7 +204,7 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
         //      contents of the symlink. /proc/self/fd will just give us the
         //      path to the symlink. However, since readlink(2) doesn't follow
         //      symlink components we can just do it manually safely.
-        let contents = readlinkat(current.as_raw_fd(), part.as_ref())?;
+        let contents = syscalls::readlinkat(current.as_raw_fd(), part)?;
 
         // Add contents of the symlink to the set of components we are looping
         // over. The
@@ -283,7 +222,9 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
         // current back to the root.
         expected_path.pop();
         if contents.is_absolute() {
-            current = root.dup_cloexec().context("dup root as next current")?;
+            current = root
+                .try_clone_hotfix()
+                .context("dup root as next current")?;
         }
     }
 

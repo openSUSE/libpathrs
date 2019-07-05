@@ -19,12 +19,6 @@
 use std::env;
 
 fn main() {
-    // libpathrs only makes sense on Linux.
-    let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    if os != "linux" {
-        panic!("libpathrs is only supported on Linux");
-    }
-
     // Add DT_SONAME to our cdylibs.
     let name = "pathrs";
     let major = env::var("CARGO_PKG_VERSION_MAJOR").unwrap();

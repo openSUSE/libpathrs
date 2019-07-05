@@ -104,11 +104,16 @@
 //! [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
 //! [`chroot(2)`]: http://man7.org/linux/man-pages/man2/chroot.2.html
 
+// libpathrs only supports Linux at the moment.
+#![cfg(target_os = "linux")]
+
 #[macro_use]
-extern crate lazy_static;
+extern crate bitflags;
 extern crate errno;
 #[macro_use]
 extern crate failure;
+#[macro_use]
+extern crate lazy_static;
 extern crate libc;
 
 mod handle;
@@ -117,14 +122,50 @@ pub use handle::*;
 mod root;
 pub use root::*;
 
+// C-friendly API.
 mod ffi;
+// Backends.
 mod kernel;
 mod user;
+// Internally used helpers.
+mod syscalls;
 mod utils;
 
+use crate::utils::RawFdExt;
+
+use std::fmt;
 use std::io::Error as IOError;
 use std::os::unix::io::RawFd;
 use std::path::PathBuf;
+
+/// Argument types for syscalls.
+///
+/// This is primarily used to pretty-print syscall arguments.
+#[doc(hidden)]
+// No real need to expose this to users. Most people will just pretty-print the
+// errors and don't _really_ care what the syscall arguments look like.
+#[derive(Debug)]
+pub enum SyscallArg {
+    Fd(RawFd),
+    Path(PathBuf),
+    Raw(String),
+}
+
+impl fmt::Display for SyscallArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SyscallArg::Fd(fd) => {
+                if *fd >= 0 {
+                    write!(f, "[{}]{:?}", fd, fd.as_path_lossy())
+                } else {
+                    write!(f, "AT_FDCWD")
+                }
+            }
+            SyscallArg::Path(path) => write!(f, "{:?}", path),
+            SyscallArg::Raw(arg) => f.write_str(arg),
+        }
+    }
+}
 
 /// The underlying [`cause`] of the [`failure::Error`] type returned by
 /// libpathrs.
@@ -134,34 +175,58 @@ use std::path::PathBuf;
 #[derive(Fail, Debug)]
 pub enum Error {
     /// The requested feature is not yet implemented.
-    #[fail(display = "feature not yet implemented: {}", _0)]
     NotImplemented(&'static str),
 
     /// One of the provided arguments in invalid. The returned tuple is
     /// (argument name, description of error).
-    #[fail(display = "invalid {} argument: {}", _0, _1)]
     InvalidArgument(&'static str, &'static str),
 
     /// Returned whenever libpathrs has detected some form of safety requirement
     /// violation. This might be an attempted breakout by an attacker or even a
     /// bug internal to libpathrs.
-    #[fail(display = "violation of safety requirement: {}", _0)]
     SafetyViolation(&'static str),
 
     /// An operating system error during a raw-syscall execution.
-    #[fail(
-        display = "syscall error {}({}=>{:?}, {:?})",
-        syscall, fd, fdpath, path
-    )]
-    OsPathError {
-        syscall: &'static str,
-        // XXX: Ideally this would be fd: (RawFd, PathBuf) but #[fail(display)]
-        //      doesn't like referencing tuple elements in the display field.
-        //      It's apparently a compiler limitation.
-        fd: RawFd,
-        fdpath: PathBuf,
-        path: PathBuf,
+    SyscallError {
+        /// Syscall name.
+        name: &'static str,
+        /// Arguments passed to syscall.
+        ///
+        /// The docs for `SyscallArg` are hidden because users really shouldn't
+        /// be touching them (they are only used to pretty-print syscall errors
+        /// and shouldn't be used for any other purpose).
+        args: Vec<SyscallArg>,
+        /// Error returned from syscall.
+        // XXX: Arguably this shouldn't be a #[fail(cause)], because then people
+        //      can't downcast to Error. I should fix this "soon".
         #[fail(cause)]
         cause: IOError,
     },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::NotImplemented(desc) => write!(f, "not yet implemented: {}", desc)?,
+            Error::InvalidArgument(name, desc) => write!(f, "invalid {} argument: {}", name, desc)?,
+            Error::SafetyViolation(desc) => write!(f, "violation of safety requirement: {}", desc)?,
+            Error::SyscallError {
+                name,
+                args,
+                cause: _,
+            } => {
+                // Syscall name.
+                write!(f, "syscall error {}", name)?;
+                // And now the arguments.
+                if let Some((head, tail)) = args.split_first() {
+                    write!(f, "({}", head)?;
+                    for arg in tail {
+                        write!(f, ", {}", arg)?;
+                    }
+                    write!(f, ")")?;
+                }
+            }
+        }
+        Ok(())
+    }
 }

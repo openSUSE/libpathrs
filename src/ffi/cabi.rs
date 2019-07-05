@@ -18,7 +18,7 @@
 
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
-use libpathrs::ffi::error;
+use libpathrs::{ffi::error, syscalls};
 use libpathrs::{Error, Handle, InodeType, Resolver, Root};
 
 use std::ffi::{CStr, OsStr};
@@ -185,9 +185,7 @@ pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
         // Rust sets O_CLOEXEC by default, without an opt-out. We need to
         // disable it if we weren't asked to do O_CLOEXEC.
         if flags & libc::O_CLOEXEC == 0 {
-            let fd = file.as_raw_fd();
-            let old = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-            unsafe { libc::fcntl(fd, libc::F_SETFD, old & !libc::FD_CLOEXEC) };
+            syscalls::fcntl_unset_cloexec(file.as_raw_fd())?;
         }
         Ok(file.into_raw_fd())
     })

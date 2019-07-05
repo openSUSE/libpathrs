@@ -16,19 +16,19 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::utils::{FileExt, ToCString, PATH_SEPARATOR};
-use crate::{kernel, user};
+use crate::{
+    kernel, syscalls, user,
+    utils::{FileExt, PATH_SEPARATOR},
+};
 use crate::{Error, Handle};
 
 use core::convert::TryFrom;
-use std::ffi::{CString, OsStr};
 use std::fs::{File, OpenOptions, Permissions};
-use std::io::Error as IOError;
 use std::ops::Deref;
 use std::os::unix::{
     ffi::OsStrExt,
     fs::{OpenOptionsExt, PermissionsExt},
-    io::{AsRawFd, FromRawFd},
+    io::AsRawFd,
 };
 use std::path::{Path, PathBuf};
 
@@ -98,10 +98,12 @@ pub enum InodeType<'a> {
 /// The backend used for path resolution within a [`Root`] to get a [`Handle`].
 ///
 /// We don't generally recommend specifying this, since libpathrs will
-/// automatically detect the best backend for your platform. However,
+/// automatically detect the best backend for your platform (which is the value
+/// returned by [`Resolver::default`]). However, this can be useful for testing.
 ///
 /// [`Root`]: struct.Root.html
 /// [`Handle`]: struct.Handle.html
+/// [`Resolver::default`]: enum.Resolver.html
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum Resolver {
     /// Use the native `openat2(2)` backend (requires kernel support).
@@ -138,7 +140,8 @@ impl Resolver {
 
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
-fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p OsStr), FailureError> {
+fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), FailureError> {
+    // Get the parent path.
     let parent = path.parent().unwrap_or("/".as_ref());
 
     // Now construct the trailing portion of the target.
@@ -153,7 +156,32 @@ fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p OsStr), FailureError>
             "trailing component of pathname contains '/'",
         ))?;
     }
-    Ok((parent, name))
+    Ok((parent, name.as_ref()))
+}
+
+bitflags! {
+    /// Simple idiomatic wrapper around [`renameat2(2)`] flags.
+    ///
+    /// [`renameat2(2)`] might not not be supported on your kernel -- in which
+    /// case [`Root::rename`] will fail if you specify any RenameFlags. You can
+    /// verify whether [`renameat2(2)`] flags are supported by calling
+    /// [`RenameFlags::supported`].
+    ///
+    /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/rename.2.html
+    /// [`Root::rename`]: struct.Root.html#method.rename
+    /// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
+    pub struct RenameFlags: i32 {
+        const NO_REPLACE = libc::RENAME_NOREPLACE;
+        const WHITEOUT = libc::RENAME_WHITEOUT;
+        const EXCHANGE = libc::RENAME_EXCHANGE;
+    }
+}
+
+impl RenameFlags {
+    /// Is this set of RenameFlags supported by the running kernel?
+    pub fn supported(&self) -> bool {
+        self.is_empty() || *syscalls::RENAME_FLAGS_SUPPORTED
+    }
 }
 
 /// A handle to the root of a directory tree.
@@ -289,7 +317,7 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
-    pub fn resolve(&self, path: &Path) -> Result<Handle, FailureError> {
+    pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, FailureError> {
         self.check()?;
         match self.resolver {
             Resolver::Kernel => kernel::resolve(self, path),
@@ -322,51 +350,45 @@ impl Root {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
-        let (parent, name) = path_split(path.as_ref())
-            .context("split path into (parent, name) for inode creation")?;
-        let name = name.to_c_string().as_ptr();
+        let (parent, name) = path_split(path.as_ref()).context("split path into (parent, name)")?;
         let dirfd = self
             .resolve(parent)
             .context("resolve parent directory for inode creation")?
             .as_raw_fd();
 
-        let ret = match inode_type {
-            InodeType::File(_) => unreachable!(), /* we dealt with this above */
+        match inode_type {
+            InodeType::File(_) => unreachable!(), /* We dealt with this above. */
             InodeType::Directory(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                unsafe { libc::mkdirat(dirfd, name, mode) }
+                syscalls::mkdirat(dirfd, name, mode)
             }
             InodeType::Symlink(target) => {
-                let target = target.to_c_string().as_ptr();
-                unsafe { libc::symlinkat(target, dirfd, name) }
+                // I have no idea why &name is required here. it might be a
+                // compiler bug (the last argument seems to always be &&Path
+                // even if you switch around the argument order).
+                syscalls::symlinkat(target, dirfd, &name)
             }
             InodeType::Hardlink(target) => {
-                let oldfd = self
-                    .resolve(target)
-                    .context("resolve target path for hardlink")?
+                let (oldparent, oldname) =
+                    path_split(target).context("split hardlink target into (parent, name)")?;
+                let olddirfd = self
+                    .resolve(oldparent)
+                    .context("resolve target parent for hardlink")?
                     .as_raw_fd();
-                let empty_path = CString::new("")?.as_ptr();
-                unsafe { libc::linkat(oldfd, empty_path, dirfd, name, libc::AT_EMPTY_PATH) }
+                syscalls::linkat(olddirfd, oldname, dirfd, name, 0)
             }
             InodeType::Fifo(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                unsafe { libc::mknodat(dirfd, name, libc::S_IFIFO | mode, 0) }
+                syscalls::mknodat(dirfd, name, libc::S_IFIFO | mode, 0)
             }
             InodeType::CharacterDevice(perm, dev) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                unsafe { libc::mknodat(dirfd, name, libc::S_IFCHR | mode, *dev) }
+                syscalls::mknodat(dirfd, name, libc::S_IFCHR | mode, *dev)
             }
             InodeType::BlockDevice(perm, dev) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                unsafe { libc::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev) }
+                syscalls::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev)
             }
-        };
-        let err: IOError = errno::errno().into();
-
-        if ret >= 0 {
-            Ok(())
-        } else {
-            Err(err).context("root inode create failed")?
         }
     }
 
@@ -409,28 +431,13 @@ impl Root {
         // the parent.
         let (parent, name) = path_split(path.as_ref())
             .context("split path into (parent, name) for inode creation")?;
-        let name = name.to_c_string().as_ptr();
         let dirfd = self
             .resolve(parent)
             .context("resolve parent directory for inode creation")?
             .as_raw_fd();
 
-        let fd = unsafe {
-            libc::openat(
-                dirfd,
-                name,
-                libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                perm.mode(),
-            )
-        };
-        let err: IOError = errno::errno().into();
-
-        if fd >= 0 {
-            let file = unsafe { File::from_raw_fd(fd) };
-            Ok(Handle::try_from(file).context("convert O_CREAT fd to Handle")?)
-        } else {
-            Err(err).context("root file create failed")?
-        }
+        let file = syscalls::openat(dirfd, name, libc::O_CREAT | libc::O_EXCL, perm.mode())?;
+        Ok(Handle::try_from(file).context("convert O_CREAT fd to Handle")?)
     }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.
@@ -455,18 +462,25 @@ impl Root {
         // already exist, and once we have it we're safe from rename races in
         // the parent.
         let (parent, name) = path_split(path.as_ref())?;
-        let name = name.to_c_string().as_ptr();
         let dirfd = self.resolve(parent)?.as_raw_fd();
 
         // TODO: Handle the lovely "is it a directory or file" problem.
-        let ret = unsafe { libc::unlinkat(dirfd, name, 0) };
-        let err: IOError = errno::errno().into();
+        syscalls::unlinkat(dirfd, name, 0)
+    }
 
-        if ret >= 0 {
-            Ok(())
-        } else {
-            Err(err).context("root inode remove failed")?
-        }
+    pub fn rename<P: AsRef<Path>>(
+        &self,
+        source: P,
+        destination: P,
+        flags: RenameFlags,
+    ) -> Result<(), FailureError> {
+        let (src_parent, src_name) = path_split(source.as_ref())?;
+        let (dst_parent, dst_name) = path_split(destination.as_ref())?;
+
+        let src_dirfd = self.resolve(src_parent)?.as_raw_fd();
+        let dst_dirfd = self.resolve(dst_parent)?.as_raw_fd();
+
+        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.bits)
     }
 
     // TODO: mkdir_all()

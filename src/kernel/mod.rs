@@ -16,8 +16,7 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod syscall;
-use syscall::OpenHow;
+use crate::syscalls::unstable;
 
 use crate::{Handle, Root};
 
@@ -28,8 +27,10 @@ use std::path::Path;
 use failure::{Error as FailureError, ResultExt};
 
 lazy_static! {
-    #[doc(hidden)]
-    pub static ref IS_SUPPORTED: bool = OpenHow::new().open(libc::AT_FDCWD, ".").is_ok();
+    pub static ref IS_SUPPORTED: bool = {
+        let how = unstable::OpenHow::new();
+        unstable::openat2(libc::AT_FDCWD, ".", &how).is_ok()
+    };
 }
 
 /// Resolve `path` within `root` through `openat2(2)`.
@@ -38,11 +39,10 @@ pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureEr
         bail!("kernel resolution is not supported on this kernel")
     }
 
-    let file = OpenHow::new()
-        .custom_flags(libc::O_PATH | libc::O_CLOEXEC)
-        .custom_resolve(syscall::RESOLVE_IN_ROOT)
-        .open(root.as_raw_fd(), path)
-        .context("open sub-path")?;
+    let mut how = unstable::OpenHow::new();
+    how.flags = libc::O_PATH;
+    how.resolve = unstable::RESOLVE_IN_ROOT;
+    let file = unstable::openat2(root.as_raw_fd(), path, &how).context("open sub-path")?;
 
     let handle = Handle::try_from(file).context("convert RESOLVE_IN_ROOT fd to Handle")?;
     Ok(handle)
