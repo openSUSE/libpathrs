@@ -483,7 +483,7 @@ pub mod unstable {
     pub const UPGRADE_NOREAD: u16 = 0x04;
 
     #[allow(non_upper_case_globals)]
-    const SYS_openat2: i64 = 434;
+    const SYS_openat2: i64 = 437;
 
     pub fn openat2<P: AsRef<Path>>(
         dirfd: RawFd,
