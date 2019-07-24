@@ -16,7 +16,7 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::utils::FileExt;
+use crate::utils::RawFdExt;
 
 use core::convert::TryFrom;
 use std::fs::{File, OpenOptions};
@@ -77,7 +77,7 @@ impl Handle {
     pub fn reopen(&self, options: &OpenOptions) -> Result<File, FailureError> {
         // TODO: Implement re-opening with O_EMPTYPATH if it's supported.
         let file = options
-            .open(self.as_path()?)
+            .open(self.as_procfd_path()?)
             .context("reopen handle through /proc/self/fd")?;
         Ok(file)
     }

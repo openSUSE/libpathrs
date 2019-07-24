@@ -58,49 +58,64 @@ impl ToCString for Path {
 }
 
 pub trait RawFdExt {
+    /// Get a /proc/self/fd/$n path for this RawFd.
+    fn as_procfd_path(&self) -> Result<PathBuf, FailureError>;
+
     /// Get the path this RawFd is referencing.
     ///
-    /// This is done through `readlink(/proc/self/fd)` and is naturally racy, so
-    /// it's important to only use this with the understanding that it only
-    /// provides the guarantee that "at some point during execution this was the
-    /// path the fd pointed to" and no more.
-    fn as_path(&self) -> Result<PathBuf, FailureError>;
-
-    /// Get the path this RawFd is referencing, or a stock value in case of
-    /// failure.
-    fn as_path_lossy(&self) -> PathBuf;
+    ///
+    /// This is done through `readlink(/proc/self/fd)` and is naturally racy
+    /// (hence the name "unsafe"), so it's important to only use this with the
+    /// understanding that it only provides the guarantee that "at some point
+    /// during execution this was the path the fd pointed to" and
+    /// no more.
+    fn as_unsafe_path(&self) -> Result<PathBuf, FailureError>;
 }
 
 impl RawFdExt for RawFd {
-    fn as_path(&self) -> Result<PathBuf, FailureError> {
+    fn as_procfd_path(&self) -> Result<PathBuf, FailureError> {
+        if *self == libc::AT_FDCWD {
+            Ok(format!("/proc/self/cwd").into())
+        } else if self.is_positive() {
+            Ok(format!("/proc/self/fd/{}", self).into())
+        } else {
+            bail!("invalid fd: {}", self)
+        }
+    }
+
+    fn as_unsafe_path(&self) -> Result<PathBuf, FailureError> {
         if self.is_negative() {
             return Ok("<AT_FDCWD>".into());
         }
-        let path = format!("/proc/self/fd/{}", self);
+        let path = self.as_procfd_path()?;
         let path = fs::read_link(path).context("readlink /proc/self/fd")?;
         Ok(path)
     }
+}
 
-    // Can't make this a trait impl since that makes the interface uglier.
-    fn as_path_lossy(&self) -> PathBuf {
-        self.as_path().unwrap_or("<unknown>".into())
+// XXX: We can't use <T: AsRawFd> here, because Rust tells us that RawFd might
+//      have an AsRawFd in the future (and thus produce a conflicting
+//      implementations error) and so we have to manually define it for the
+//      types we are going to be using.
+
+impl RawFdExt for File {
+    fn as_procfd_path(&self) -> Result<PathBuf, FailureError> {
+        self.as_raw_fd().as_procfd_path()
+    }
+
+    fn as_unsafe_path(&self) -> Result<PathBuf, FailureError> {
+        self.as_raw_fd().as_unsafe_path()
     }
 }
 
 pub trait FileExt {
-    /// Get the path this File is referencing.
-    ///
-    /// This is done through `readlink(/proc/self/fd)` and is naturally racy, so
-    /// it's important to only use this with the understanding that it only
-    /// provides the guarantee that "at some point during execution this was the
-    /// path the file pointed to" and no more.
-    fn as_path(&self) -> Result<PathBuf, FailureError>;
-
     /// This is a fixed version of the Rust stdlib's `File::try_clone()` which
     /// works on `O_PATH` file descriptors, added to [work around an upstream
-    /// bug][bug62314].
+    /// bug][bug62314]. The [fix for this bug was merged][pr62425] and will be
+    /// available in Rust 1.37.0.
     ///
     /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
+    /// [pr62425]: https://github.com/rust-lang/rust/pull/62425
     fn try_clone_hotfix(&self) -> Result<File, FailureError>;
 
     /// Check if the File is on a "dangerous" filesystem that might contain
@@ -109,10 +124,6 @@ pub trait FileExt {
 }
 
 impl FileExt for File {
-    fn as_path(&self) -> Result<PathBuf, FailureError> {
-        self.as_raw_fd().as_path()
-    }
-
     fn try_clone_hotfix(&self) -> Result<File, FailureError> {
         syscalls::fcntl_dupfd_cloxec(self.as_raw_fd())
     }

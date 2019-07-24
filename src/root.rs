@@ -18,7 +18,7 @@
 
 use crate::{
     kernel, syscalls, user,
-    utils::{FileExt, PATH_SEPARATOR},
+    utils::{RawFdExt, PATH_SEPARATOR},
 };
 use crate::{Error, Handle};
 
@@ -296,7 +296,9 @@ impl Root {
     /// Check whether the Root is still valid.
     #[doc(hidden)]
     pub fn check(&self) -> Result<(), FailureError> {
-        if self.inner.as_path()? == self.path {
+        // `as_unsafe_path` is safe here because we are just comparing the
+        // string, and it is being done as part of a larger security check.
+        if self.inner.as_unsafe_path()? == self.path {
             Ok(())
         } else {
             Err(Error::SafetyViolation(

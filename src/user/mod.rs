@@ -37,7 +37,7 @@
 
 use crate::{
     syscalls,
-    utils::{FileExt, PATH_SEPARATOR},
+    utils::{FileExt, RawFdExt, PATH_SEPARATOR},
 };
 use crate::{Error, Handle, Root};
 
@@ -80,8 +80,11 @@ fn check_current<P: AsRef<Path>>(
     // that the path is not ordinarily resolveable). But if this check passes,
     // then we can be fairly sure (barring kernel bugs) that the path was safe
     // at least one point in time.
+    //
+    // as_unsafe_path is safe here since we're explicitly doing a string-based
+    // check to see whether the path we want is correct.
     let current_path = current
-        .as_path()
+        .as_unsafe_path()
         .context("check fd against expected path")?;
     if current_path != full_path {
         return Err(Error::SafetyViolation("fd doesn't match expected path"))?;

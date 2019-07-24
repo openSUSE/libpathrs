@@ -155,10 +155,18 @@ impl fmt::Display for SyscallArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SyscallArg::Fd(fd) => {
-                if *fd >= 0 {
-                    write!(f, "[{}]{:?}", fd, fd.as_path_lossy())
+                if *fd == libc::AT_FDCWD {
+                    write!(f, "[AT_FDCWD]")?
                 } else {
-                    write!(f, "AT_FDCWD")
+                    write!(f, "[{}]", fd)?
+                }
+                // `as_unsafe_path` is safe here since it's just printed out for
+                // debugging purposes in error messages.
+                if let Ok(path) = fd.as_unsafe_path() {
+                    write!(f, "{:?}", path)
+                } else {
+                    // Cannot bubble up errors through fmt::Display.
+                    write!(f, "<unknown>")
                 }
             }
             SyscallArg::Path(path) => write!(f, "{:?}", path),
