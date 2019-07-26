@@ -22,17 +22,47 @@
 use crate::syscalls;
 
 use std::ffi::{CString, OsStr};
+use std::fs::File;
 use std::os::unix::{
     ffi::OsStrExt,
     io::{AsRawFd, RawFd},
 };
 use std::path::{Path, PathBuf};
-use std::{fs, fs::File};
 
-use failure::{Error as FailureError, ResultExt};
+use failure::Error as FailureError;
+use libc::c_int;
 
 /// The path separator on Linux.
 pub const PATH_SEPARATOR: u8 = b'/';
+
+lazy_static! {
+    /// A handle to `/proc` which is used globally by libpathrs. This ensures
+    /// that anyone doing funny business with the `/proc` mount on the host
+    /// won't be able to impact our re-opening attempts (because this handle is
+    /// checked against PROC_SUPER_MAGIC).
+    // In future, we might need to have a separate handle for "/proc/self"
+    // because there has been discussion on splitting procfs into "the process
+    // bits" and "the other crap" -- but it's unclear if that will ever happen
+    // so we can sit on it for now.
+    static ref PROCFS_HANDLE: File = {
+        // Get a /proc handle for the lifetime of the process.
+        let proc = syscalls::openat(
+            libc::AT_FDCWD,
+            "/proc",
+            libc::O_PATH | libc::O_DIRECTORY,
+            0
+        ).expect("/proc should be available");
+
+        // Actually check that /proc isn't a sneaky exploit.
+        let stat = syscalls::fstatfs(proc.as_raw_fd()).expect("fstatfs(/proc) should work");
+        if stat.f_type != libc::PROC_SUPER_MAGIC {
+            panic!("/proc is not actually procfs (f_type is 0x{:X}, but expected 0x{:X})!", stat.f_type, libc::PROC_SUPER_MAGIC)
+        }
+
+        // All great -- this will be re-used by all "/proc" users.
+        proc
+    };
+}
 
 pub trait ToCString {
     /// Convert to a CStr.
@@ -58,8 +88,8 @@ impl ToCString for Path {
 }
 
 pub trait RawFdExt {
-    /// Get a /proc/self/fd/$n path for this RawFd.
-    fn as_procfd_path(&self) -> Result<PathBuf, FailureError>;
+    /// Re-open a file descriptor.
+    fn reopen(&self, flags: c_int) -> Result<File, FailureError>;
 
     /// Get the path this RawFd is referencing.
     ///
@@ -72,24 +102,26 @@ pub trait RawFdExt {
     fn as_unsafe_path(&self) -> Result<PathBuf, FailureError>;
 }
 
+fn proc_subpath(fd: RawFd) -> Result<PathBuf, FailureError> {
+    if fd == libc::AT_FDCWD {
+        Ok(format!("self/cwd").into())
+    } else if fd.is_positive() {
+        Ok(format!("self/fd/{}", fd).into())
+    } else {
+        bail!("invalid fd: {}", fd)
+    }
+}
+
 impl RawFdExt for RawFd {
-    fn as_procfd_path(&self) -> Result<PathBuf, FailureError> {
-        if *self == libc::AT_FDCWD {
-            Ok(format!("/proc/self/cwd").into())
-        } else if self.is_positive() {
-            Ok(format!("/proc/self/fd/{}", self).into())
-        } else {
-            bail!("invalid fd: {}", self)
-        }
+    fn reopen(&self, flags: c_int) -> Result<File, FailureError> {
+        // TODO: We should look into using O_EMPTYPATH if it's available to
+        //       avoid the /proc dependency -- though then again,
+        //       `as_unsafe_path` necessarily requires /proc.
+        syscalls::openat_follow(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?, flags, 0)
     }
 
     fn as_unsafe_path(&self) -> Result<PathBuf, FailureError> {
-        if self.is_negative() {
-            return Ok("<AT_FDCWD>".into());
-        }
-        let path = self.as_procfd_path()?;
-        let path = fs::read_link(path).context("readlink /proc/self/fd")?;
-        Ok(path)
+        syscalls::readlinkat(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?)
     }
 }
 
@@ -99,8 +131,8 @@ impl RawFdExt for RawFd {
 //      types we are going to be using.
 
 impl RawFdExt for File {
-    fn as_procfd_path(&self) -> Result<PathBuf, FailureError> {
-        self.as_raw_fd().as_procfd_path()
+    fn reopen(&self, flags: c_int) -> Result<File, FailureError> {
+        self.as_raw_fd().reopen(flags)
     }
 
     fn as_unsafe_path(&self) -> Result<PathBuf, FailureError> {

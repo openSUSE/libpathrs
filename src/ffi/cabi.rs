@@ -22,11 +22,11 @@ use libpathrs::{ffi::error, syscalls};
 use libpathrs::{Error, Handle, InodeType, Resolver, Root};
 
 use std::ffi::{CStr, OsStr};
-use std::fs::{OpenOptions, Permissions};
+use std::fs::Permissions;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::{
     ffi::OsStrExt,
-    fs::{OpenOptionsExt, PermissionsExt},
+    fs::PermissionsExt,
     io::{AsRawFd, IntoRawFd, RawFd},
 };
 use std::path::Path;
@@ -167,21 +167,7 @@ pub extern "C" fn pathrs_rfree(root: Option<&mut CRoot>) {
 #[no_mangle]
 pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
     error::ffi_wrap(-1, move || {
-        // Construct options from the C-style flags. Due to weird restrictions
-        // with OpenOptions we need to manually set the O_ACCMODE bits.
-        let mut options = OpenOptions::new();
-        let options = match flags & libc::O_ACCMODE {
-            libc::O_RDONLY => options.read(true),
-            libc::O_WRONLY => options.write(true),
-            libc::O_RDWR => options.read(true).write(true),
-            _ => Err(Error::InvalidArgument(
-                "mode",
-                "invalid reopen O_ACCMODE flags",
-            ))?,
-        }
-        .custom_flags(flags);
-
-        let file = handle.0.reopen(&options)?;
+        let file = handle.0.reopen(flags)?;
         // Rust sets O_CLOEXEC by default, without an opt-out. We need to
         // disable it if we weren't asked to do O_CLOEXEC.
         if flags & libc::O_CLOEXEC == 0 {

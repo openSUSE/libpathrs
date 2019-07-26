@@ -19,10 +19,11 @@
 use crate::utils::RawFdExt;
 
 use core::convert::TryFrom;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::ops::Deref;
 
-use failure::{Error as FailureError, ResultExt};
+use failure::Error as FailureError;
+use libc::c_int;
 
 /// A handle to an existing inode within a [`Root`].
 ///
@@ -63,24 +64,25 @@ impl Deref for Handle {
     }
 }
 
+// TODO: Maybe we should have our own bitflags! for OpenOptions, but I don't
+//       really like that idea (and the fact that O_RDONLY == 0 means that
+//       bitflags will act a bit weirdly).
+
 impl Handle {
     /// "Upgrade" the handle to a usable [`File`] handle suitable for reading
-    /// and writing, as though the file was opened with `OpenOptions`.
+    /// and writing. The flags argument is made up of `libc::O_*` flags (as in
+    /// C).
     ///
     /// This does not consume the original handle (allowing for it to be used
-    /// many times). It is recommended to `use` [`OpenOptionsExt`].
+    /// many times).
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-    /// [`OpenOptions`]: https://doc.rust-lang.org/std/fs/struct.OpenOptions.html
     /// [`Root::create`]: struct.Root.html#method.create
-    /// [`OpenOptionsExt`]: https://doc.rust-lang.org/std/os/unix/fs/trait.OpenOptionsExt.html
-    pub fn reopen(&self, options: &OpenOptions) -> Result<File, FailureError> {
-        // TODO: Implement re-opening with O_EMPTYPATH if it's supported.
-        let file = options
-            .open(self.as_procfd_path()?)
-            .context("reopen handle through /proc/self/fd")?;
-        Ok(file)
+    pub fn reopen(&self, flags: c_int) -> Result<File, FailureError> {
+        self.0.reopen(flags)
     }
+
+    // TODO: All the different stat* interfaces?
 
     // TODO: bind(). This might be safe to do (set the socket path to
     //       /proc/self/fd/...) but I'm a bit sad it'd be separate from

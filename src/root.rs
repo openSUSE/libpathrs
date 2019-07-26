@@ -23,13 +23,9 @@ use crate::{
 use crate::{Error, Handle};
 
 use core::convert::TryFrom;
-use std::fs::{File, OpenOptions, Permissions};
+use std::fs::{File, Permissions};
 use std::ops::Deref;
-use std::os::unix::{
-    ffi::OsStrExt,
-    fs::{OpenOptionsExt, PermissionsExt},
-    io::AsRawFd,
-};
+use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd};
 use std::path::{Path, PathBuf};
 
 use failure::{Error as FailureError, ResultExt};
@@ -133,7 +129,7 @@ impl Resolver {
     pub fn supported(&self) -> bool {
         match self {
             Resolver::Kernel => *kernel::IS_SUPPORTED,
-            Resolver::Emulated => true, // TODO: Should check for /proc.
+            Resolver::Emulated => true,
         }
     }
 }
@@ -263,11 +259,7 @@ impl Root {
                 .context("open root handle")?;
         }
 
-        let file = OpenOptions::new()
-            .read(true) /* Needed to avoid EINVAL by Rust. */
-            .custom_flags(libc::O_PATH | libc::O_CLOEXEC | libc::O_DIRECTORY)
-            .open(path)
-            .context("open root handle")?;
+        let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)?;
 
         let root = Root {
             inner: file,

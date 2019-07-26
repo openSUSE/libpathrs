@@ -44,8 +44,8 @@
 //! The recommended usage of libpathrs looks something like this:
 //!
 //! ```
+//! # extern crate libc;
 //! # use std::error::Error;
-//! use std::fs::OpenOptions;
 //! use std::path::Path;
 //!
 //! # fn main() -> Result<(), FailureError> {
@@ -54,11 +54,11 @@
 //! // Resolve the path.
 //! let handle = root.resolve("/etc/passwd")?;
 //! // Upgrade the handle to a full std::fs::File.
-//! let file = handle.reopen(OpenOptions::new().read(true))?;
+//! let file = handle.reopen(libc::O_RDONLY)?;
 //!
 //! // Or, in one line:
 //! let file = root.resolve("/etc/passwd")?
-//!                .reopen(OpenOptions::new().read(true))?;
+//!                .reopen(libc::O_RDONLY)?;
 //! # Ok(())
 //! # }
 //! ```

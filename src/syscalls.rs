@@ -33,7 +33,7 @@ use std::os::unix::{
 use std::path::{Path, PathBuf};
 
 use failure::Error as FailureError;
-use libc::{c_int, dev_t, mode_t};
+use libc::{c_int, dev_t, mode_t, statfs};
 
 // XXX: We might want to switch to nix at some point, but the interfaces
 //      provided by nix are slightly non-ergonomic. I much prefer these simpler
@@ -86,6 +86,7 @@ pub fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
 
     let new = old & !libc::FD_CLOEXEC;
     let ret = unsafe { libc::fcntl(fd, libc::F_SETFD, new) };
+    let err = errno::errno();
 
     if ret >= 0 {
         Ok(())
@@ -102,11 +103,11 @@ pub fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
     }
 }
 
-/// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOFOLLOW`.
+/// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC`.
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
-pub fn openat<P: AsRef<Path>>(
+pub fn openat_follow<P: AsRef<Path>>(
     dirfd: RawFd,
     path: P,
     flags: c_int,
@@ -117,7 +118,7 @@ pub fn openat<P: AsRef<Path>>(
         libc::openat(
             dirfd,
             path.to_c_string().as_ptr(),
-            libc::O_CLOEXEC | libc::O_NOFOLLOW | flags,
+            libc::O_CLOEXEC | flags,
             mode,
         )
     };
@@ -137,6 +138,19 @@ pub fn openat<P: AsRef<Path>>(
             cause: err.into(),
         })?
     }
+}
+
+/// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOFOLLOW`.
+///
+/// This is needed because Rust doesn't provide a way to access the dirfd
+/// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
+pub fn openat<P: AsRef<Path>>(
+    dirfd: RawFd,
+    path: P,
+    flags: c_int,
+    mode: mode_t,
+) -> Result<File, FailureError> {
+    openat_follow(dirfd, path, libc::O_NOFOLLOW | flags, mode)
 }
 
 /// Wrapper for `readlinkat(2)`.
@@ -176,6 +190,10 @@ pub fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBuf, Fail
     }
 }
 
+/// Wrapper for `mkdirat(2)`.
+///
+/// This is needed because Rust doesn't provide a way to access the dirfd
+/// argument of `mkdirat(2)`. We need the dirfd argument, so we need a wrapper.
 pub fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Result<(), FailureError> {
     let path = path.as_ref();
     let ret = unsafe { libc::mkdirat(dirfd, path.to_c_string().as_ptr(), mode) };
@@ -196,6 +214,10 @@ pub fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Result<()
     }
 }
 
+/// Wrapper for `mknodat(2)`.
+///
+/// This is needed because Rust doesn't provide a way to access the dirfd
+/// argument of `mknodat(2)`. We need the dirfd argument, so we need a wrapper.
 pub fn mknodat<P: AsRef<Path>>(
     dirfd: RawFd,
     path: P,
@@ -222,6 +244,10 @@ pub fn mknodat<P: AsRef<Path>>(
     }
 }
 
+/// Wrapper for `unlinkat(2)`.
+///
+/// This is needed because Rust doesn't provide a way to access the dirfd
+/// argument of `unlinkat(2)`. We need the dirfd argument, so we need a wrapper.
 pub fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> Result<(), FailureError> {
     let path = path.as_ref();
     let ret = unsafe { libc::unlinkat(dirfd, path.to_c_string().as_ptr(), flags) };
@@ -242,6 +268,10 @@ pub fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> Result<(
     }
 }
 
+/// Wrapper for `linkat(2)`.
+///
+/// This is needed because Rust doesn't provide a way to access the dirfd
+/// argument of `linkat(2)`. We need the dirfd argument, so we need a wrapper.
 pub fn linkat<P: AsRef<Path>>(
     olddirfd: RawFd,
     oldpath: P,
@@ -278,6 +308,11 @@ pub fn linkat<P: AsRef<Path>>(
     }
 }
 
+/// Wrapper for `symlinkat(2)`.
+///
+/// This is needed because Rust doesn't provide a way to access the dirfd
+/// argument of `symlinkat(2)`. We need the dirfd argument, so we need a
+/// wrapper.
 pub fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Result<(), FailureError> {
     let (target, path) = (target.as_ref(), path.as_ref());
     let ret = unsafe {
@@ -304,6 +339,10 @@ pub fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Result<(),
     }
 }
 
+/// Wrapper for `renameat(2)`.
+///
+/// This is needed because Rust doesn't provide a way to access the dirfd
+/// argument of `renameat(2)`. We need the dirfd argument, so we need a wrapper.
 pub fn renameat<P: AsRef<Path>>(
     olddirfd: RawFd,
     oldpath: P,
@@ -352,6 +391,10 @@ lazy_static! {
     };
 }
 
+/// Wrapper for `renameat2(2)`.
+///
+/// This is needed because Rust doesn't provide any interface for `renameat2(2)`
+/// (especially not an interface for the dirfd).
 pub fn renameat2<P: AsRef<Path>>(
     olddirfd: RawFd,
     oldpath: P,
@@ -394,6 +437,26 @@ pub fn renameat2<P: AsRef<Path>>(
     }
 }
 
+/// Wrapper for `fstatfs(2)`.
+///
+/// This is needed because Rust doesn't provide any interface for `fstatfs(2)`.
+pub fn fstatfs(fd: RawFd) -> Result<statfs, FailureError> {
+    // repr(C) struct without internal references is definitely valid.
+    let mut buf: statfs = unsafe { std::mem::zeroed() };
+    let ret = unsafe { libc::fstatfs(fd, &mut buf as *mut statfs) };
+    let err = errno::errno();
+
+    if ret >= 0 {
+        Ok(buf)
+    } else {
+        Err(Error::SyscallError {
+            name: "fstatfs",
+            args: vec![SyscallArg::Fd(fd)],
+            cause: err.into(),
+        })?
+    }
+}
+
 /// WARNING: The ABI for this syscall is still being ironed out upstream. This
 /// will almost certainly not work on your machine, and may cause other problems
 /// depending on what syscall is using the syscall number this code will call.
@@ -430,7 +493,7 @@ pub mod unstable {
     impl OpenHow {
         #[inline]
         pub fn new() -> Self {
-            // #[repr(C)] struct without internal references is definitely valid.
+            // repr(C) struct without internal references is definitely valid.
             unsafe { std::mem::zeroed() }
         }
     }
