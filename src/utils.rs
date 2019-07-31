@@ -102,11 +102,11 @@ pub trait RawFdExt {
     fn as_unsafe_path(&self) -> Result<PathBuf, FailureError>;
 }
 
-fn proc_subpath(fd: RawFd) -> Result<PathBuf, FailureError> {
+fn proc_subpath(fd: RawFd) -> Result<String, FailureError> {
     if fd == libc::AT_FDCWD {
-        Ok(format!("self/cwd").into())
+        Ok(format!("self/cwd"))
     } else if fd.is_positive() {
-        Ok(format!("self/fd/{}", fd).into())
+        Ok(format!("self/fd/{}", fd))
     } else {
         bail!("invalid fd: {}", fd)
     }

@@ -41,11 +41,8 @@ pub struct CError {
 impl Default for CError {
     #[inline]
     fn default() -> Self {
-        // We could do std::mem::zeroed but let's avoid unsafe blocks.
-        CError {
-            errno: 0,
-            description: [0; 1024],
-        }
+        // repr(C) struct with no references is always safe.
+        unsafe { std::mem::zeroed() }
     }
 }
 
@@ -90,7 +87,6 @@ fn to_cerror(err: &Error) -> Result<CError, Error> {
         .iter_causes()
         .fold(fail.to_string(), |prev, next| format!("{}: {}", prev, next));
 
-    // A repr(C) struct with no references is always safe.
     let mut cerr: CError = Default::default();
     {
         // Create a C-compatible string, and truncate it to the size of our

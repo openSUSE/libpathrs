@@ -146,27 +146,30 @@ use std::path::PathBuf;
 // errors and don't _really_ care what the syscall arguments look like.
 #[derive(Debug)]
 pub enum SyscallArg {
-    Fd(RawFd),
+    FrozenFd(RawFd, Option<PathBuf>),
     Path(PathBuf),
     Raw(String),
+}
+
+impl SyscallArg {
+    pub fn from_fd(fd: RawFd) -> Self {
+        // `as_unsafe_path` is safe here since it is only used for
+        // pretty-printing error messages and no real logic.
+        SyscallArg::FrozenFd(fd, fd.as_unsafe_path().ok())
+    }
 }
 
 impl fmt::Display for SyscallArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SyscallArg::Fd(fd) => {
-                if *fd == libc::AT_FDCWD {
-                    write!(f, "[AT_FDCWD]")?
-                } else {
-                    write!(f, "[{}]", fd)?
-                }
-                // `as_unsafe_path` is safe here since it's just printed out for
-                // debugging purposes in error messages.
-                if let Ok(path) = fd.as_unsafe_path() {
-                    write!(f, "{:?}", path)
-                } else {
-                    // Cannot bubble up errors through fmt::Display.
-                    write!(f, "<unknown>")
+            SyscallArg::FrozenFd(fd, path) => {
+                match *fd {
+                    libc::AT_FDCWD => write!(f, "[AT_FDCWD]")?,
+                    _ => write!(f, "[{}]", fd)?,
+                };
+                match path {
+                    Some(path) => write!(f, "{:?}", path),
+                    None => write!(f, "<unknown>"),
                 }
             }
             SyscallArg::Path(path) => write!(f, "{:?}", path),

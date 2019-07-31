@@ -57,7 +57,7 @@ pub fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, FailureError> {
         Err(Error::SyscallError {
             name: "fcntl",
             args: vec![
-                SyscallArg::Fd(fd),
+                SyscallArg::from_fd(fd),
                 SyscallArg::Raw("F_DUPFD_CLOEXEC".into()),
                 SyscallArg::Raw("0".into()),
             ],
@@ -79,7 +79,7 @@ pub fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
     if old < 0 {
         return Err(Error::SyscallError {
             name: "fcntl",
-            args: vec![SyscallArg::Fd(fd), SyscallArg::Raw("F_GETFD".into())],
+            args: vec![SyscallArg::from_fd(fd), SyscallArg::Raw("F_GETFD".into())],
             cause: err.into(),
         })?;
     }
@@ -94,7 +94,7 @@ pub fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
         Err(Error::SyscallError {
             name: "fcntl",
             args: vec![
-                SyscallArg::Fd(fd),
+                SyscallArg::from_fd(fd),
                 SyscallArg::Raw("F_SETFD".into()),
                 SyscallArg::Raw(format!("0x{:x}", new)),
             ],
@@ -130,7 +130,7 @@ pub fn openat_follow<P: AsRef<Path>>(
         Err(Error::SyscallError {
             name: "openat",
             args: vec![
-                SyscallArg::Fd(dirfd),
+                SyscallArg::from_fd(dirfd),
                 SyscallArg::Path(path.into()),
                 SyscallArg::Raw(format!("0x{:x}", flags)),
                 SyscallArg::Raw(format!("0o{:o}", mode)),
@@ -181,7 +181,7 @@ pub fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBuf, Fail
         }
         Err(Error::SyscallError {
             name: "readlinkat",
-            args: vec![SyscallArg::Fd(dirfd), SyscallArg::Path(path.into())],
+            args: vec![SyscallArg::from_fd(dirfd), SyscallArg::Path(path.into())],
             cause: err,
         })?
     } else {
@@ -205,7 +205,7 @@ pub fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Result<()
         Err(Error::SyscallError {
             name: "mkdirat",
             args: vec![
-                SyscallArg::Fd(dirfd),
+                SyscallArg::from_fd(dirfd),
                 SyscallArg::Path(path.into()),
                 SyscallArg::Raw(format!("{:o}", mode)),
             ],
@@ -234,7 +234,7 @@ pub fn mknodat<P: AsRef<Path>>(
         Err(Error::SyscallError {
             name: "mknodat",
             args: vec![
-                SyscallArg::Fd(dirfd),
+                SyscallArg::from_fd(dirfd),
                 SyscallArg::Path(path.into()),
                 SyscallArg::Raw(format!("0o{:o}", mode)),
                 SyscallArg::Raw(format!("0x{:x}", dev)), // TODO: Print {major, minor}.
@@ -259,7 +259,7 @@ pub fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> Result<(
         Err(Error::SyscallError {
             name: "unlinkat",
             args: vec![
-                SyscallArg::Fd(dirfd),
+                SyscallArg::from_fd(dirfd),
                 SyscallArg::Path(path.into()),
                 SyscallArg::Raw(format!("0x{:x}", flags)),
             ],
@@ -297,9 +297,9 @@ pub fn linkat<P: AsRef<Path>>(
         Err(Error::SyscallError {
             name: "linkat",
             args: vec![
-                SyscallArg::Fd(olddirfd),
+                SyscallArg::from_fd(olddirfd),
                 SyscallArg::Path(oldpath.into()),
-                SyscallArg::Fd(newdirfd),
+                SyscallArg::from_fd(newdirfd),
                 SyscallArg::Path(newpath.into()),
                 SyscallArg::Raw(format!("0x{:x}", flags)),
             ],
@@ -331,7 +331,7 @@ pub fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Result<(),
             name: "symlinkat",
             args: vec![
                 SyscallArg::Path(target.into()),
-                SyscallArg::Fd(dirfd),
+                SyscallArg::from_fd(dirfd),
                 SyscallArg::Path(path.into()),
             ],
             cause: err.into(),
@@ -366,9 +366,9 @@ pub fn renameat<P: AsRef<Path>>(
         Err(Error::SyscallError {
             name: "renameat",
             args: vec![
-                SyscallArg::Fd(olddirfd),
+                SyscallArg::from_fd(olddirfd),
                 SyscallArg::Path(oldpath.into()),
-                SyscallArg::Fd(newdirfd),
+                SyscallArg::from_fd(newdirfd),
                 SyscallArg::Path(newpath.into()),
             ],
             cause: err.into(),
@@ -426,9 +426,9 @@ pub fn renameat2<P: AsRef<Path>>(
         Err(Error::SyscallError {
             name: "renameat2",
             args: vec![
-                SyscallArg::Fd(olddirfd),
+                SyscallArg::from_fd(olddirfd),
                 SyscallArg::Path(oldpath.into()),
-                SyscallArg::Fd(newdirfd),
+                SyscallArg::from_fd(newdirfd),
                 SyscallArg::Path(newpath.into()),
                 SyscallArg::Raw(format!("0x{:x}", flags)),
             ],
@@ -451,7 +451,7 @@ pub fn fstatfs(fd: RawFd) -> Result<statfs, FailureError> {
     } else {
         Err(Error::SyscallError {
             name: "fstatfs",
-            args: vec![SyscallArg::Fd(fd)],
+            args: vec![SyscallArg::from_fd(fd)],
             cause: err.into(),
         })?
     }
@@ -579,7 +579,7 @@ pub mod unstable {
             Err(Error::SyscallError {
                 name: "openat2",
                 args: vec![
-                    SyscallArg::Fd(dirfd),
+                    SyscallArg::from_fd(dirfd),
                     SyscallArg::Path(path.into()),
                     SyscallArg::Raw(how.to_string()),
                 ],
