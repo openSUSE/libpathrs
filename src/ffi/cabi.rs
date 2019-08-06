@@ -36,10 +36,10 @@ use libc::{c_char, c_int, c_uint, dev_t};
 
 /// This is only exported to work around a Rust compiler restriction. Consider
 /// it an implementation detail and don't make use of it.
-// Wrapping struct which we can given C a pointer to. `&T` isn't an option,
-// because DSTs (fat pointers) like `dyn T` (and thus `&dyn T`) have no
-// FFI-safe representation. So we need to hide it within an FFI-safe pointer
-// (such as a trivial struct).
+// Wrapping struct which we can given C a pointer to. &T isn't an option,
+// because DSTs (fat pointers) like dyn T (and thus &dyn T) have no FFI-safe
+// representation. So we need to hide it within an FFI-safe pointer (such as a
+// trivial struct).
 pub struct CPointer<T>(T);
 
 // Private trait necessary to work around the "orphan trait" restriction.

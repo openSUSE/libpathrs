@@ -36,6 +36,9 @@
 //! at least one libpathrs backend. At time of writing, those are:
 //!
 //! * A working `/proc` mount, such that `/proc/self/fd/` operates correctly.
+//!   libpathrs will explicitly verify that the `/proc` mount is actually a
+//!   bone-fide `procfs` instance (to avoid potential trickery) and abort if
+//!   `/proc` is not actually `procfs`.
 //! * Native Backend:
 //!   - `openat2` support.
 //!
@@ -151,8 +154,8 @@ pub enum SyscallArg {
 
 impl SyscallArg {
     pub fn from_fd(fd: RawFd) -> Self {
-        // `as_unsafe_path` is safe here since it is only used for
-        // pretty-printing error messages and no real logic.
+        // as_unsafe_path is safe here since it is only used for pretty-printing
+        // error messages and no real logic.
         SyscallArg::FrozenFd(fd, fd.as_unsafe_path().ok())
     }
 }

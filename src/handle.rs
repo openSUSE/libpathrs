@@ -91,7 +91,7 @@ impl OpenFlags {
     }
 
     /// Does the access mode imply write access? Note that there are several
-    /// other bits (such as O_TRUNC) which imply write access but are not part
+    /// other bits (such as `O_TRUNC`) which imply write access but are not part
     /// of the access mode, and thus a `false` value from `.wants_write()` does
     /// not guarantee that the kernel will not do a `MAY_WRITE` check.
     #[inline]

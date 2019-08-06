@@ -39,10 +39,31 @@ lazy_static! {
     /// that anyone doing funny business with the `/proc` mount on the host
     /// won't be able to impact our re-opening attempts (because this handle is
     /// checked against PROC_SUPER_MAGIC).
-    // In future, we might need to have a separate handle for "/proc/self"
-    // because there has been discussion on splitting procfs into "the process
-    // bits" and "the other crap" -- but it's unclear if that will ever happen
-    // so we can sit on it for now.
+    // TODO: This "grab a handle to /proc" setup is not ideal, for several
+    //       reasons -- and we should seriously improve it.
+    //
+    //       First of all, it doesn't completely defend against the potential
+    //       attack scenario. An attacker could just mount over /proc/self or
+    //       /proc/self/fd to re-enact the same attack scenario.
+    //
+    //       A naive solution might be to open /proc/self (or /proc/self/fd).
+    //       However, this doesn't solve the problem -- any subpath could still
+    //       be mounted over. However, this scenario actually reveals an even
+    //       more serious attack that shows that PROC_SUPER_MAGIC checks aren't
+    //       sufficient -- what if the attacker bind-mounts /proc/$pid over
+    //       /proc/self in order to trick us into re-opening *their* fds?
+    //
+    //       And finally, will this type of check break "good" examples of proc
+    //       over-mounting such as LXCFS. LXCFS doesn't touch /proc/$pid at time
+    //       of writing (because it operates by bind-mounting the FUSE files
+    //       over specific /proc files instead of over all of /proc), but it's
+    //       something to keep in mind.
+    //
+    //       RESOLVE_NO_XDEV blocks all of this, but unfortunately depending on
+    //       it would break the whole idea of having a secure library for
+    //       pre-5.X kernels. The one silver lining is that these kinds of
+    //       attacks likely require privileges and thus are not of huge concern
+    //       for now.
     static ref PROCFS_HANDLE: File = {
         // Get a /proc handle for the lifetime of the process.
         let proc = syscalls::openat(
@@ -114,8 +135,8 @@ fn proc_subpath(fd: RawFd) -> Result<String, FailureError> {
 impl RawFdExt for RawFd {
     fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
         // TODO: We should look into using O_EMPTYPATH if it's available to
-        //       avoid the /proc dependency -- though then again,
-        //       `as_unsafe_path` necessarily requires /proc.
+        //       avoid the /proc dependency -- though then again, as_unsafe_path
+        //       necessarily requires /proc.
         syscalls::openat_follow(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?, flags.0, 0)
     }
 

@@ -84,10 +84,10 @@ pub enum InodeType<'a> {
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     BlockDevice(&'a Permissions, dev_t),
+    // XXX: Does this really make sense?
     //// "Detached" unix socket, as in [`mknod(2)`] with `S_IFSOCK`.
     ////
     //// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
-    // TODO: In principle we could do this safely by doing the `mknod` and then See if we can even do bind(2) safely for a Socket() type.
     //DetachedSocket(),
 }
 
@@ -285,8 +285,8 @@ impl Root {
     /// Check whether the Root is still valid.
     #[doc(hidden)]
     pub fn check(&self) -> Result<(), FailureError> {
-        // `as_unsafe_path` is safe here because we are just comparing the
-        // string, and it is being done as part of a larger security check.
+        // as_unsafe_path is safe here because we are just comparing the string,
+        // and it is being done as part of a larger security check.
         if self.inner.as_unsafe_path()? == self.path {
             Ok(())
         } else {
@@ -459,6 +459,16 @@ impl Root {
         syscalls::unlinkat(dirfd, name, 0)
     }
 
+    /// Within the [`Root`]'s tree, perform a rename with the given `source` and
+    /// `directory`. The `flags` argument is passed directly to
+    /// [`renameat2(2)`].
+    ///
+    /// # Errors
+    ///
+    /// The error rules are identical to [`renameat2(2)`].
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
     pub fn rename<P: AsRef<Path>>(
         &self,
         source: P,
