@@ -107,7 +107,7 @@ pub fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
     }
 }
 
-/// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC`.
+/// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
@@ -122,7 +122,7 @@ pub fn openat_follow<P: AsRef<Path>>(
         libc::openat(
             dirfd,
             path.to_c_string().as_ptr(),
-            libc::O_CLOEXEC | flags,
+            libc::O_CLOEXEC | libc::O_NOCTTY | flags,
             mode,
         )
     };
@@ -144,7 +144,7 @@ pub fn openat_follow<P: AsRef<Path>>(
     }
 }
 
-/// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOFOLLOW`.
+/// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOCTTY | O_NOFOLLOW`.
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.

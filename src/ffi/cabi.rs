@@ -164,6 +164,10 @@ pub extern "C" fn pathrs_rfree(root: Option<&mut CRoot>) {
 /// It should be noted that the use of O_CREAT *is not* supported (and will
 /// result in an error). Handles only refer to *existing* files. Instead you
 /// need to use inroot_creat().
+///
+/// In addition, O_NOCTTY is automatically set when opening the path. If you
+/// want to use the path as a controlling terminal, you will have to do
+/// ioctl(fd, TIOCSCTTY, 0) yourself.
 #[no_mangle]
 pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
     let flags = OpenFlags(flags);

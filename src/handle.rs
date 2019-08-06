@@ -106,6 +106,15 @@ impl Handle {
     /// and writing. This does not consume the original handle (allowing for it
     /// to be used many times).
     ///
+    /// The handle will be opened with `O_NOCTTY` and `O_CLOEXEC` set,
+    /// regardless of whether those flags are present in the `flags` argument.
+    /// You can correct these yourself if these defaults are not ideal for you:
+    ///
+    /// 1. `fcntl(fd, F_SETFD, 0)` will let you unset `O_CLOEXEC`.
+    /// 2. `ioctl(fd, TIOCSCTTY, 0)` will set the fd as the controlling
+    ///    terminal (if you don't have one already, and the fd references a
+    ///    TTY).
+    ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create
     pub fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
