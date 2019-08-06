@@ -19,7 +19,7 @@
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
 use libpathrs::{ffi::error, syscalls};
-use libpathrs::{Error, Handle, InodeType, Resolver, Root};
+use libpathrs::{Error, Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root};
 
 use std::ffi::{CStr, OsStr};
 use std::fs::Permissions;
@@ -166,11 +166,13 @@ pub extern "C" fn pathrs_rfree(root: Option<&mut CRoot>) {
 /// need to use inroot_creat().
 #[no_mangle]
 pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
+    let flags = OpenFlags(flags);
+
     error::ffi_wrap(-1, move || {
         let file = handle.0.reopen(flags)?;
         // Rust sets O_CLOEXEC by default, without an opt-out. We need to
         // disable it if we weren't asked to do O_CLOEXEC.
-        if flags & libc::O_CLOEXEC == 0 {
+        if flags.0 & libc::O_CLOEXEC == 0 {
             syscalls::fcntl_unset_cloexec(file.as_raw_fd())?;
         }
         Ok(file.into_raw_fd())
@@ -195,6 +197,24 @@ pub extern "C" fn pathrs_inroot_resolve(
         root.resolve(parse_path(path)?)
             .map(CPointer::new)
             .map(Option::Some)
+    })
+}
+
+/// Within the given root's tree, perform the rename (with all symlinks being
+/// scoped to the root). The flags argument is identical to the renameat2(2)
+/// flags that are supported on the system.
+#[no_mangle]
+pub extern "C" fn pathrs_inroot_rename(
+    root: &CRoot,
+    src: *const c_char,
+    dst: *const c_char,
+    flags: c_int,
+) -> c_int {
+    let flags = RenameFlags(flags);
+
+    error::ffi_wrap(-1, move || {
+        root.rename(parse_path(src)?, parse_path(dst)?, flags)
+            .and(Ok(0))
     })
 }
 

@@ -29,7 +29,7 @@ use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd};
 use std::path::{Path, PathBuf};
 
 use failure::{Error as FailureError, ResultExt};
-use libc::dev_t;
+use libc::{c_int, dev_t};
 
 /// An inode type to be created with [`Root::create`].
 ///
@@ -155,28 +155,25 @@ fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), FailureError> 
     Ok((parent, name.as_ref()))
 }
 
-bitflags! {
-    /// Simple idiomatic wrapper around [`renameat2(2)`] flags.
-    ///
-    /// [`renameat2(2)`] might not not be supported on your kernel -- in which
-    /// case [`Root::rename`] will fail if you specify any RenameFlags. You can
-    /// verify whether [`renameat2(2)`] flags are supported by calling
-    /// [`RenameFlags::supported`].
-    ///
-    /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/rename.2.html
-    /// [`Root::rename`]: struct.Root.html#method.rename
-    /// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
-    pub struct RenameFlags: i32 {
-        const NO_REPLACE = libc::RENAME_NOREPLACE;
-        const WHITEOUT = libc::RENAME_WHITEOUT;
-        const EXCHANGE = libc::RENAME_EXCHANGE;
-    }
-}
+/// Wrapper for the underlying `libc`'s `RENAME_*` flags. The flag values and
+/// their meaning is identical to the description in the [`renameat2(2)`] man
+/// page.
+///
+/// [`renameat2(2)`] might not not be supported on your kernel -- in which
+/// case [`Root::rename`] will fail if you specify any RenameFlags. You can
+/// verify whether [`renameat2(2)`] flags are supported by calling
+/// [`RenameFlags::supported`].
+///
+/// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/rename.2.html
+/// [`Root::rename`]: struct.Root.html#method.rename
+/// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RenameFlags(pub c_int);
 
 impl RenameFlags {
     /// Is this set of RenameFlags supported by the running kernel?
     pub fn supported(&self) -> bool {
-        self.is_empty() || *syscalls::RENAME_FLAGS_SUPPORTED
+        self.0 == 0 || *syscalls::RENAME_FLAGS_SUPPORTED
     }
 }
 
@@ -474,7 +471,7 @@ impl Root {
         let src_dirfd = self.resolve(src_parent)?.as_raw_fd();
         let dst_dirfd = self.resolve(dst_parent)?.as_raw_fd();
 
-        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.bits)
+        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0)
     }
 
     // TODO: mkdir_all()

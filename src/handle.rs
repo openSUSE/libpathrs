@@ -64,21 +64,51 @@ impl Deref for Handle {
     }
 }
 
-// TODO: Maybe we should have our own bitflags! for OpenOptions, but I don't
-//       really like that idea (and the fact that O_RDONLY == 0 means that
-//       bitflags will act a bit weirdly).
+/// Wrapper for the underlying `libc`'s `O_*` flags. The flag values and their
+/// meaning is identical to the description in the `open(2)` man page.
+///
+/// # Caveats
+///
+/// For historical reasons, the first three bits of `open(2)`'s flags are for
+/// the access mode and are actually treated as a 2-bit number. So, it is
+/// incorrect to attempt to do any checks on the access mode without masking it
+/// correctly. So some helpers were added to make usage more ergonomic.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OpenFlags(pub c_int);
+
+impl OpenFlags {
+    /// Grab the access mode bits from the flags.
+    #[inline]
+    pub fn access_mode(&self) -> c_int {
+        self.0 & libc::O_ACCMODE
+    }
+
+    /// Does the access mode imply read access?
+    #[inline]
+    pub fn wants_read(&self) -> bool {
+        let acc = self.access_mode();
+        acc == libc::O_RDONLY || acc == libc::O_RDWR
+    }
+
+    /// Does the access mode imply write access? Note that there are several
+    /// other bits (such as O_TRUNC) which imply write access but are not part
+    /// of the access mode, and thus a `false` value from `.wants_write()` does
+    /// not guarantee that the kernel will not do a `MAY_WRITE` check.
+    #[inline]
+    pub fn wants_write(&self) -> bool {
+        let acc = self.access_mode();
+        acc == libc::O_WRONLY || acc == libc::O_RDWR
+    }
+}
 
 impl Handle {
     /// "Upgrade" the handle to a usable [`File`] handle suitable for reading
-    /// and writing. The flags argument is made up of `libc::O_*` flags (as in
-    /// C).
-    ///
-    /// This does not consume the original handle (allowing for it to be used
-    /// many times).
+    /// and writing. This does not consume the original handle (allowing for it
+    /// to be used many times).
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create
-    pub fn reopen(&self, flags: c_int) -> Result<File, FailureError> {
+    pub fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
         self.0.reopen(flags)
     }
 

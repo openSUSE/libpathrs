@@ -42,7 +42,6 @@ lto = true
 panic = "abort"
 
 [dependencies]
-bitflags = "^1.1"
 errno = "^0.2"
 failure = "^0.1"
 lazy_static = "^1.3"

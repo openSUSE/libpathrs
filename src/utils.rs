@@ -19,7 +19,7 @@
 //! Only used internally by libpathrs.
 #![doc(hidden)]
 
-use crate::syscalls;
+use crate::{syscalls, OpenFlags};
 
 use std::ffi::{CString, OsStr};
 use std::fs::File;
@@ -30,7 +30,6 @@ use std::os::unix::{
 use std::path::{Path, PathBuf};
 
 use failure::Error as FailureError;
-use libc::c_int;
 
 /// The path separator on Linux.
 pub const PATH_SEPARATOR: u8 = b'/';
@@ -89,7 +88,7 @@ impl ToCString for Path {
 
 pub trait RawFdExt {
     /// Re-open a file descriptor.
-    fn reopen(&self, flags: c_int) -> Result<File, FailureError>;
+    fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError>;
 
     /// Get the path this RawFd is referencing.
     ///
@@ -113,11 +112,11 @@ fn proc_subpath(fd: RawFd) -> Result<String, FailureError> {
 }
 
 impl RawFdExt for RawFd {
-    fn reopen(&self, flags: c_int) -> Result<File, FailureError> {
+    fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
         // TODO: We should look into using O_EMPTYPATH if it's available to
         //       avoid the /proc dependency -- though then again,
         //       `as_unsafe_path` necessarily requires /proc.
-        syscalls::openat_follow(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?, flags, 0)
+        syscalls::openat_follow(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?, flags.0, 0)
     }
 
     fn as_unsafe_path(&self) -> Result<PathBuf, FailureError> {
@@ -131,7 +130,7 @@ impl RawFdExt for RawFd {
 //      types we are going to be using.
 
 impl RawFdExt for File {
-    fn reopen(&self, flags: c_int) -> Result<File, FailureError> {
+    fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
         self.as_raw_fd().reopen(flags)
     }
 

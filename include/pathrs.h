@@ -123,6 +123,16 @@ int pathrs_inroot_mknod(const pathrs_root_t *root,
                         dev_t dev);
 
 /**
+ * Within the given root's tree, perform the rename (with all symlinks being
+ * scoped to the root). The flags argument is identical to the renameat2(2)
+ * flags that are supported on the system.
+ */
+int pathrs_inroot_rename(const pathrs_root_t *root,
+                         const char *src,
+                         const char *dst,
+                         int flags);
+
+/**
  * Within the given root's tree, resolve the given path (with all symlinks
  * being scoped to the root) and return a handle to that path. The path *must
  * already exist*, otherwise an error will occur.

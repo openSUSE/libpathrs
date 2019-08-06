@@ -107,8 +107,6 @@
 // libpathrs only supports Linux at the moment.
 #![cfg(target_os = "linux")]
 
-#[macro_use]
-extern crate bitflags;
 extern crate errno;
 #[macro_use]
 extern crate failure;

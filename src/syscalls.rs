@@ -85,6 +85,10 @@ pub fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
     }
 
     let new = old & !libc::FD_CLOEXEC;
+    if new == old {
+        return Ok(());
+    }
+
     let ret = unsafe { libc::fcntl(fd, libc::F_SETFD, new) };
     let err = errno::errno();
 
