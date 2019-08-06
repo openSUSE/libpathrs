@@ -154,13 +154,31 @@ pub trait FileExt {
     fn is_dangerous(&self) -> Result<bool, FailureError>;
 }
 
+lazy_static! {
+    /// Set of filesystems' magic numbers that are considered "dangerous" (in
+    /// that they can contain magic-links). This list should hopefully be
+    /// exhaustive, but there's no real way of being sure since `nd_jump_link()`
+    /// can be used by any non-mainline filesystem.
+    // XXX: This list is only correct for Linux 5.2. We should go back into old
+    //      kernel versions to see who else used nd_jump_link() in the past.
+    static ref DANGEROUS_FILESYSTEMS: Vec<i64> = vec![
+        libc::PROC_SUPER_MAGIC,            // procfs
+        0x5a3c69f0 /* libc::AAFS_MAGIC */, // apparmorfs
+    ];
+}
+
 impl FileExt for File {
     fn try_clone_hotfix(&self) -> Result<File, FailureError> {
         syscalls::fcntl_dupfd_cloxec(self.as_raw_fd())
     }
 
     fn is_dangerous(&self) -> Result<bool, FailureError> {
-        // TODO: Implement this.
-        Ok(false)
+        // There isn't a marker on a filesystem level to indicate whether
+        // nd_jump_link() is used internally. So, we just have to make an
+        // educated guess based on which mainline filesystems expose
+        // magic-links.
+
+        let stat = syscalls::fstatfs(self.as_raw_fd())?;
+        Ok(DANGEROUS_FILESYSTEMS.contains(&stat.f_type))
     }
 }
