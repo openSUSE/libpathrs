@@ -455,8 +455,40 @@ impl Root {
         let (parent, name) = path_split(path.as_ref())?;
         let dirfd = self.resolve(parent)?.as_raw_fd();
 
-        // TODO: Handle the lovely "is it a directory or file" problem.
-        syscalls::unlinkat(dirfd, name, 0)
+        // There is no kernel API to "just remove this inode please". You need
+        // to know ahead-of-time what inode type it is. So we will try a couple
+        // of times and bail if we managed to hit an inode-type race multiple
+        // times.
+        let mut last_error: Option<FailureError> = None;
+        for _ in 0..16 {
+            // XXX: A try-block would be super useful here but that's not a
+            //     thing in Rust unfortunately. So we need to manage last_error
+            //     ourselves the old fashioned way.
+
+            let stat = match syscalls::fstatat(dirfd, name) {
+                Ok(stat) => stat,
+                Err(err) => {
+                    last_error = Some(err);
+                    continue;
+                }
+            };
+
+            let mut flags = 0;
+            if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
+                flags |= libc::AT_REMOVEDIR;
+            }
+
+            match syscalls::unlinkat(dirfd, name, flags) {
+                Ok(_) => return Ok(()),
+                Err(err) => {
+                    last_error = Some(err);
+                    continue;
+                }
+            }
+        }
+
+        // If we ever are here, then last_error must be Some.
+        Err(last_error.expect("unlinkat loop failed so last_error must exist"))
     }
 
     /// Within the [`Root`]'s tree, perform a rename with the given `source` and

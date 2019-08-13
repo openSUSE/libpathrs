@@ -33,7 +33,7 @@ use std::os::unix::{
 use std::path::{Path, PathBuf};
 
 use failure::Error as FailureError;
-use libc::{c_int, dev_t, mode_t, statfs};
+use libc::{c_int, dev_t, mode_t, stat, statfs};
 
 // XXX: We might want to switch to nix at some point, but the interfaces
 //      provided by nix are slightly non-ergonomic. I much prefer these simpler
@@ -456,6 +456,35 @@ pub fn fstatfs(fd: RawFd) -> Result<statfs, FailureError> {
         Err(Error::SyscallError {
             name: "fstatfs",
             args: vec![SyscallArg::from_fd(fd)],
+            cause: err.into(),
+        })?
+    }
+}
+
+/// Wrapper for `fstatat(2)`, which auto-sets `AT_NO_AUTOMOUNT |
+/// AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH`.
+///
+/// This is needed because Rust doesn't provide any interface for `fstatat(2)`.
+pub fn fstatat<P: AsRef<Path>>(fd: RawFd, path: P) -> Result<stat, FailureError> {
+    // repr(C) struct without internal references is definitely valid.
+    let mut buf: stat = unsafe { std::mem::zeroed() };
+    let path = path.as_ref();
+    let ret = unsafe {
+        libc::fstatat(
+            fd,
+            path.to_c_string().as_ptr(),
+            &mut buf as *mut stat,
+            libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH,
+        )
+    };
+    let err = errno::errno();
+
+    if ret >= 0 {
+        Ok(buf)
+    } else {
+        Err(Error::SyscallError {
+            name: "fstatat",
+            args: vec![SyscallArg::from_fd(fd), SyscallArg::Path(path.into())],
             cause: err.into(),
         })?
     }
