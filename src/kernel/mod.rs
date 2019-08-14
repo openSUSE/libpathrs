@@ -27,14 +27,14 @@ use std::path::Path;
 use failure::{Error as FailureError, ResultExt};
 
 lazy_static! {
-    pub static ref IS_SUPPORTED: bool = {
+    pub(crate) static ref IS_SUPPORTED: bool = {
         let how = unstable::OpenHow::new();
         unstable::openat2(libc::AT_FDCWD, ".", &how).is_ok()
     };
 }
 
 /// Resolve `path` within `root` through `openat2(2)`.
-pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureError> {
+pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureError> {
     if !*IS_SUPPORTED {
         bail!("kernel resolution is not supported on this kernel")
     }

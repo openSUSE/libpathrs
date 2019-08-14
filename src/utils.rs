@@ -16,9 +16,6 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! Only used internally by libpathrs.
-#![doc(hidden)]
-
 use crate::{syscalls, OpenFlags};
 
 use std::ffi::{CString, OsStr};
@@ -32,7 +29,7 @@ use std::path::{Path, PathBuf};
 use failure::Error as FailureError;
 
 /// The path separator on Linux.
-pub const PATH_SEPARATOR: u8 = b'/';
+pub(crate) const PATH_SEPARATOR: u8 = b'/';
 
 lazy_static! {
     /// A handle to `/proc` which is used globally by libpathrs. This ensures
@@ -84,7 +81,7 @@ lazy_static! {
     };
 }
 
-pub trait ToCString {
+pub(crate) trait ToCString {
     /// Convert to a CStr.
     fn to_c_string(&self) -> CString;
 }
@@ -107,7 +104,7 @@ impl ToCString for Path {
     }
 }
 
-pub trait RawFdExt {
+pub(crate) trait RawFdExt {
     /// Re-open a file descriptor.
     fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError>;
 
@@ -160,7 +157,7 @@ impl RawFdExt for File {
     }
 }
 
-pub trait FileExt {
+pub(crate) trait FileExt {
     /// This is a fixed version of the Rust stdlib's `File::try_clone()` which
     /// works on `O_PATH` file descriptors, added to [work around an upstream
     /// bug][bug62314]. The [fix for this bug was merged][pr62425] and will be

@@ -93,7 +93,7 @@ fn check_current<P: AsRef<Path>>(
 }
 
 /// Resolve `path` within `root` through user-space emulation.
-pub fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureError> {
+pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureError> {
     let path = path.as_ref();
 
     // What is the final path we expect to get after we do the final open? This

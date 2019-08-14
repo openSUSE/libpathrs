@@ -209,6 +209,7 @@ pub struct Root {
 }
 
 // Only used internally by libpathrs.
+// TODO: Remove the need for this (it can be used to subvert libpathrs).
 #[doc(hidden)]
 impl AsRef<Path> for Root {
     fn as_ref(&self) -> &Path {
@@ -217,6 +218,7 @@ impl AsRef<Path> for Root {
 }
 
 // Only used internally by libpathrs.
+// TODO: Remove the need for this (it can be used to subvert libpathrs).
 #[doc(hidden)]
 impl Deref for Root {
     type Target = File;
@@ -283,8 +285,7 @@ impl Root {
     }
 
     /// Check whether the Root is still valid.
-    #[doc(hidden)]
-    pub fn check(&self) -> Result<(), FailureError> {
+    pub(crate) fn check(&self) -> Result<(), FailureError> {
         // as_unsafe_path is safe here because we are just comparing the string,
         // and it is being done as part of a larger security check.
         if self.inner.as_unsafe_path()? == self.path {

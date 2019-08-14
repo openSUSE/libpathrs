@@ -46,6 +46,7 @@ use libc::c_int;
 pub struct Handle(File);
 
 // Only used internally by libpathrs.
+// TODO: Remove the need for this (it can be used to subvert libpathrs).
 #[doc(hidden)]
 impl TryFrom<File> for Handle {
     type Error = FailureError;
@@ -56,6 +57,7 @@ impl TryFrom<File> for Handle {
 }
 
 // Only used internally by libpathrs.
+// TODO: Remove the need for this (it can be used to subvert libpathrs).
 #[doc(hidden)]
 impl Deref for Handle {
     type Target = File;
