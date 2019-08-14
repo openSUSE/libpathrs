@@ -59,6 +59,34 @@ out:
 }
 ```
 
+### Outstanding Items ###
+
+`libpathrs` is still being developed, and so there are still several aspects
+that have yet to be implemented and are considered important before it can be
+released to the public (items will be removed from the list as they are
+implemented).
+
+* Switch wholesale to [`snafu`][snafu] (which is apparently what you're
+  supposed to use these days as an error-wrapping library).
+* Helper functions to make commonly-used functions easier to implement:
+  - `Root::remove_all` (similar to `rm -rf` or Go's `os.RemoveAll`).
+  - `Root::mkdir_all` (similar `mkdir -p` or Go's `os.MkdirAll`).
+  - `Root::walk` (and similar infrastructure). It's unclear how we'd be able to
+	handle (for instance) a safe way to remove a `Handle` from the tree.
+  - And more to come...
+* Verify that `umoci unpack --rootless` could actually be ported to `libpathrs`
+  (either by reimplementing the underlying tricks, or making sure that an
+  unprivileged user namespace setup is compatible with `libpathrs`).
+* A robust test suite, which tests known (and plausible) attack scenarios both
+  in native Rust and using the language bindings. Obviously the tests need to
+  exercise all of the resolver backends.
+* A `hardcore` resolver which uses `pivot_root` and namespaces to fetch a file
+  descriptor completely correctly. This would require a fair amount of finesse
+  to make sure it works on as many systems as possible (and we shouldn't use
+  `newuidmap` because that smells very bad to me).
+
+[snafu]: https://docs.rs/snafu/
+
 ### License ###
 
 `libpathrs` is licensed under the GNU LGPLv3 (or any later version).
