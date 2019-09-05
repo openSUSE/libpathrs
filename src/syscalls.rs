@@ -528,9 +528,11 @@ pub(crate) mod unstable {
         pub access: Access,
         /// RESOLVE_* flags (`-EINVAL` on unknown flags).
         pub resolve: u16,
-        /// Reserved for future extensions, must be zeroed.
-        _reserved: [u64; 7],
     }
+
+    /// `sizeof(struct open_how)` to be passed to `openat2(2)` to allow for
+    /// backwards and forwards compatbility with syscall extensions.
+    const OPEN_HOW_SIZE: usize = std::mem::size_of::<OpenHow>();
 
     impl OpenHow {
         #[inline]
@@ -608,6 +610,7 @@ pub(crate) mod unstable {
                 dirfd,
                 path.to_c_string().as_ptr(),
                 &how as *const OpenHow,
+                OPEN_HOW_SIZE,
             )
         } as RawFd;
         let err = errno::errno();
@@ -624,6 +627,7 @@ pub(crate) mod unstable {
                     SyscallArg::from_fd(dirfd),
                     SyscallArg::Path(path.into()),
                     SyscallArg::Raw(how.to_string()),
+                    SyscallArg::Raw(OPEN_HOW_SIZE.to_string()),
                 ],
                 cause: err.into(),
             })?
