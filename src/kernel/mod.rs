@@ -17,10 +17,11 @@
  */
 
 use crate::syscalls::unstable;
-
+use crate::user;
 use crate::{Handle, Root};
 
 use core::convert::TryFrom;
+use std::io::Error as IOError;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
@@ -42,8 +43,34 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
     let mut how = unstable::OpenHow::new();
     how.flags = libc::O_PATH;
     how.resolve = unstable::RESOLVE_IN_ROOT;
-    let file = unstable::openat2(root.as_raw_fd(), path, &how).context("open sub-path")?;
 
-    let handle = Handle::try_from(file).context("convert RESOLVE_IN_ROOT fd to Handle")?;
-    Ok(handle)
+    // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
+    // *anywhere on the system*. This can happen pretty frequently, so what we
+    // do is attempt the openat2(2) a couple of times, and then fall-back to
+    // userspace emulation.
+    let mut handle: Option<Handle> = None;
+    for _ in 0..16 {
+        let file = unstable::openat2(root.as_raw_fd(), path.as_ref(), &how);
+        match file {
+            Ok(file) => {
+                handle =
+                    Some(Handle::try_from(file).context("convert RESOLVE_IN_ROOT fd to Handle")?);
+                break;
+            }
+            Err(err) => {
+                match err
+                    .find_root_cause()
+                    .downcast_ref::<IOError>()
+                    .map(|ioerr| ioerr.raw_os_error())
+                {
+                    Some(Some(libc::EAGAIN)) => continue,
+                    _ => return Err(err).context("open sub-path")?,
+                }
+            }
+        }
+    }
+
+    Ok(handle.unwrap_or(
+        user::resolve(root, path).context("fallback user-space resolution for RESOLVE_IN_ROOT")?,
+    ))
 }
