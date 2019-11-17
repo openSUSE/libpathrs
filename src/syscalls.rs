@@ -505,29 +505,19 @@ pub(crate) fn fstatat<P: AsRef<Path>>(fd: RawFd, path: P) -> Result<stat, Failur
 pub(crate) mod unstable {
     use super::*;
 
-    /// `OpenHow.access` field definition.
-    #[repr(C)]
-    #[derive(Copy, Clone)]
-    pub union Access {
-        /// O_CREAT file mode (ignored otherwise).
-        pub mode: u16,
-        /// Restrict how the O_PATH may be re-opened (ignored otherwise).
-        pub upgrade_mask: u16,
-    }
-
     /// Arguments for how `openat2` should open the target path.
-    ///
-    /// If `extra` is zero, then `openat2` is identical to `openat`. Only one of the
-    /// members of access may be set at any given time.
     #[repr(C)]
+    #[repr(align(8))]
     #[derive(Clone)]
     pub struct OpenHow {
-        /// O_* flags (unknown flags ignored).
-        pub flags: i32,
-        /// Access settings (ignored otherwise).
-        pub access: Access,
+        /// O_* flags (`-EINVAL` on unknown or incompatible flags).
+        pub flags: u64,
+        /// O_CREAT or O_TMPFILE file mode (must be zero otherwise).
+        pub mode: u16,
+        /// Padding -- must be zeroed.
+        pub __padding: [u16; 3],
         /// RESOLVE_* flags (`-EINVAL` on unknown flags).
-        pub resolve: u16,
+        pub resolve: u64,
     }
 
     /// `sizeof(struct open_how)` to be passed to `openat2(2)` to allow for
@@ -546,13 +536,8 @@ pub(crate) mod unstable {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             // self.flags
             write!(f, "{{ flags: 0x{:x}, ", self.flags)?;
-            // self.access
-            if self.flags & libc::O_PATH != 0 {
-                write!(f, "upgrade_mask: 0x{:x}, ", unsafe {
-                    self.access.upgrade_mask
-                })?;
-            } else if self.flags & (libc::O_CREAT | libc::O_TMPFILE) != 0 {
-                write!(f, "mode: 0o{:o}, ", unsafe { self.access.mode })?;
+            if self.flags & (libc::O_CREAT | libc::O_TMPFILE) as u64 != 0 {
+                write!(f, "mode: 0o{:o}, ", self.mode)?;
             }
             // self.resolve
             write!(f, "resolve: 0x{:x} }}", self.resolve)
@@ -561,33 +546,25 @@ pub(crate) mod unstable {
 
     /// Block mount-point crossings (including bind-mounts).
     #[allow(unused)]
-    pub const RESOLVE_NO_XDEV: u16 = 0x01;
+    pub const RESOLVE_NO_XDEV: u64 = 0x01;
 
     /// Block traversal through procfs-style "magic links".
     #[allow(unused)]
-    pub const RESOLVE_NO_MAGICLINKS: u16 = 0x02;
+    pub const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
 
     /// Block traversal through all symlinks (implies RESOLVE_NO_MAGICLINKS).
     #[allow(unused)]
-    pub const RESOLVE_NO_SYMLINKS: u16 = 0x04;
+    pub const RESOLVE_NO_SYMLINKS: u64 = 0x04;
 
     /// Block "lexical" trickery like "..", symlinks-to-"/", and absolute paths
     /// which escape the dirfd.
     #[allow(unused)]
-    pub const RESOLVE_BENEATH: u16 = 0x08;
+    pub const RESOLVE_BENEATH: u64 = 0x08;
 
     /// Make all jumps to "/" or ".." be scoped inside the dirfd (similar to
     /// `chroot`).
     #[allow(unused)]
-    pub const RESOLVE_IN_ROOT: u16 = 0x10;
-
-    /// Block re-opening with MAY_READ.
-    #[allow(unused)]
-    pub const UPGRADE_NOWRITE: u16 = 0x02;
-
-    /// Block re-opening with MAY_READ.
-    #[allow(unused)]
-    pub const UPGRADE_NOREAD: u16 = 0x04;
+    pub const RESOLVE_IN_ROOT: u64 = 0x10;
 
     #[allow(non_upper_case_globals)]
     const SYS_openat2: i64 = 437;
@@ -602,7 +579,7 @@ pub(crate) mod unstable {
         // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
         // RESOLVE_IN_ROOT handles that correctly in a race-free way.
         let mut how = how.clone();
-        how.flags |= libc::O_CLOEXEC;
+        how.flags |= libc::O_CLOEXEC as u64;
 
         let fd = unsafe {
             libc::syscall(

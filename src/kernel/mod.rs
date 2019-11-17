@@ -41,8 +41,12 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
     }
 
     let mut how = unstable::OpenHow::new();
-    how.flags = libc::O_PATH;
-    how.resolve = unstable::RESOLVE_IN_ROOT;
+    how.flags = libc::O_PATH as u64;
+    // RESOLVE_IN_ROOT does exactly what we want, but we also want to avoid
+    // resolving magic-links. RESOLVE_IN_ROOT already blocks magic-link
+    // crossings, but that may change in the future (if the magic-links are
+    // considered "safe") but we should still explicitly avoid them entirely.
+    how.resolve = unstable::RESOLVE_IN_ROOT | unstable::RESOLVE_NO_MAGICLINKS;
 
     // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
     // *anywhere on the system*. This can happen pretty frequently, so what we
