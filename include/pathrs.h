@@ -115,7 +115,7 @@ typedef __pathrs_root_t pathrs_root_t;
  * stored error, the contents of buffer are undefined and 0 is returned. If an
  * internal error occurs during processing, -1 is returned.
  */
-int pathrs_error(pathrs_error_t *buffer);
+int pathrs_error(pathrs_type_t ptr_type, void *ptr, pathrs_error_t *buffer);
 
 /**
  * Free a libpathrs object. It is critical that users pass the correct @type --
@@ -123,19 +123,19 @@ int pathrs_error(pathrs_error_t *buffer);
  */
 void pathrs_free(pathrs_type_t ptr_type, void *ptr);
 
-pathrs_handle_t *pathrs_inroot_creat(const pathrs_root_t *root,
+pathrs_handle_t *pathrs_inroot_creat(pathrs_root_t *root,
                                      const char *path,
                                      unsigned int mode);
 
-int pathrs_inroot_hardlink(const pathrs_root_t *root,
+int pathrs_inroot_hardlink(pathrs_root_t *root,
                            const char *path,
                            const char *target);
 
-int pathrs_inroot_mkdir(const pathrs_root_t *root,
+int pathrs_inroot_mkdir(pathrs_root_t *root,
                         const char *path,
                         unsigned int mode);
 
-int pathrs_inroot_mknod(const pathrs_root_t *root,
+int pathrs_inroot_mknod(pathrs_root_t *root,
                         const char *path,
                         unsigned int mode,
                         dev_t dev);
@@ -145,7 +145,7 @@ int pathrs_inroot_mknod(const pathrs_root_t *root,
  * scoped to the root). The flags argument is identical to the renameat2(2)
  * flags that are supported on the system.
  */
-int pathrs_inroot_rename(const pathrs_root_t *root,
+int pathrs_inroot_rename(pathrs_root_t *root,
                          const char *src,
                          const char *dst,
                          int flags);
@@ -155,10 +155,9 @@ int pathrs_inroot_rename(const pathrs_root_t *root,
  * being scoped to the root) and return a handle to that path. The path *must
  * already exist*, otherwise an error will occur.
  */
-pathrs_handle_t *pathrs_inroot_resolve(const pathrs_root_t *root,
-                                       const char *path);
+pathrs_handle_t *pathrs_inroot_resolve(pathrs_root_t *root, const char *path);
 
-int pathrs_inroot_symlink(const pathrs_root_t *root,
+int pathrs_inroot_symlink(pathrs_root_t *root,
                           const char *path,
                           const char *target);
 
@@ -189,7 +188,7 @@ pathrs_root_t *pathrs_open(const char *path);
  * want to use the path as a controlling terminal, you will have to do
  * ioctl(fd, TIOCSCTTY, 0) yourself.
  */
-int pathrs_reopen(const pathrs_handle_t *handle, int flags);
+int pathrs_reopen(pathrs_handle_t *handle, int flags);
 
 /**
  * Switch the resolver for the given root handle.
