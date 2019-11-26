@@ -34,6 +34,20 @@
 #include <sys/types.h>
 
 /**
+ * The type of object being passed to "object agnostic" libpathrs functions.
+ */
+typedef enum {
+    /**
+     * `pathrs_root_t`
+     */
+    PATHRS_ROOT,
+    /**
+     * `pathrs_handle_t`
+     */
+    PATHRS_HANDLE,
+} pathrs_type_t;
+
+/**
  * The backend used for path resolution within a pathrs_root_t to get a
  * pathrs_handle_t.
  */
@@ -74,6 +88,7 @@ typedef struct {
  * already-resolved path which can be used for only one purpose -- to "re-open"
  * the handle and get an actual fs::File which can be used for ordinary
  * operations.
+ *
  * It is critical for the safety of users of this library that *at no point* do
  * you use interfaces like libc::openat directly on file descriptors you get
  * from using this library (or extract the RawFd from a fs::File). You must
@@ -84,6 +99,7 @@ typedef __pathrs_handle_t pathrs_handle_t;
 /**
  * A handle to the root of a directory tree to resolve within. The only purpose
  * of this "root handle" is to get Handles to inodes within the directory tree.
+ *
  * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
  * inside a possibly-attacker-controlled directory tree. While we do have
  * protections that should defend against it (for both drivers), it's far more
@@ -94,6 +110,7 @@ typedef __pathrs_root_t pathrs_root_t;
 
 /**
  * Copy the currently-stored infomation into the provided buffer.
+ *
  * If there was a stored error, a positive value is returned. If there was no
  * stored error, the contents of buffer are undefined and 0 is returned. If an
  * internal error occurs during processing, -1 is returned.
@@ -101,9 +118,10 @@ typedef __pathrs_root_t pathrs_root_t;
 int pathrs_error(pathrs_error_t *buffer);
 
 /**
- * Free a handle.
+ * Free a libpathrs object. It is critical that users pass the correct @type --
+ * not doing so will certainly trigger memory unsafety bugs.
  */
-void pathrs_hfree(pathrs_handle_t *handle);
+void pathrs_free(pathrs_type_t ptr_type, void *ptr);
 
 pathrs_handle_t *pathrs_inroot_creat(const pathrs_root_t *root,
                                      const char *path,
@@ -146,9 +164,11 @@ int pathrs_inroot_symlink(const pathrs_root_t *root,
 
 /**
  * Open a root handle.
+ *
  * The default resolver is automatically chosen based on the running kernel.
  * You can switch the resolver used with pathrs_set_resolver() -- though this
  * is not strictly recommended unless you have a good reason to do it.
+ *
  * The provided path must be an existing directory. If using the emulated
  * driver, it also must be the fully-expanded path to a real directory (with no
  * symlink components) because the given path is used to double-check that the
@@ -160,19 +180,16 @@ pathrs_root_t *pathrs_open(const char *path);
  * "Upgrade" the handle to a usable fd, suitable for reading and writing. This
  * does not consume the original handle (allowing for it to be used many
  * times).
+ *
  * It should be noted that the use of O_CREAT *is not* supported (and will
  * result in an error). Handles only refer to *existing* files. Instead you
  * need to use inroot_creat().
+ *
  * In addition, O_NOCTTY is automatically set when opening the path. If you
  * want to use the path as a controlling terminal, you will have to do
  * ioctl(fd, TIOCSCTTY, 0) yourself.
  */
 int pathrs_reopen(const pathrs_handle_t *handle, int flags);
-
-/**
- * Free a root handle.
- */
-void pathrs_rfree(pathrs_root_t *root);
 
 /**
  * Switch the resolver for the given root handle.

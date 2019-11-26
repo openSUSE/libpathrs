@@ -32,7 +32,7 @@ use std::os::unix::{
 use std::path::Path;
 
 use failure::Error as FailureError;
-use libc::{c_char, c_int, c_uint, dev_t};
+use libc::{c_char, c_int, c_uint, c_void, dev_t};
 
 /// This is only exported to work around a Rust compiler restriction. Consider
 /// it an implementation detail and don't make use of it.
@@ -151,10 +151,30 @@ pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) {
     root.with_resolver(resolver.into());
 }
 
-/// Free a root handle.
+/// The type of object being passed to "object agnostic" libpathrs functions.
+#[repr(C)]
+#[allow(non_camel_case_types, dead_code)]
+pub enum CPointerType {
+    /// `pathrs_root_t`
+    PATHRS_ROOT,
+    /// `pathrs_handle_t`
+    PATHRS_HANDLE,
+}
+
+/// Free a libpathrs object. It is critical that users pass the correct @type --
+/// not doing so will certainly trigger memory unsafety bugs.
 #[no_mangle]
-pub extern "C" fn pathrs_rfree(root: Option<&mut CRoot>) {
-    root.map(CPointer::free);
+pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
+    if ptr.is_null() {
+        return;
+    }
+
+    // Both of these casts and dereferences are safe because the C caller has
+    // assured us that the type passed is correct.
+    match ptr_type {
+        CPointerType::PATHRS_ROOT => unsafe { &mut *(ptr as *mut CRoot) }.free(),
+        CPointerType::PATHRS_HANDLE => unsafe { &mut *(ptr as *mut CHandle) }.free(),
+    }
 }
 
 /// "Upgrade" the handle to a usable fd, suitable for reading and writing. This
@@ -181,12 +201,6 @@ pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
         }
         Ok(file.into_raw_fd())
     })
-}
-
-/// Free a handle.
-#[no_mangle]
-pub extern "C" fn pathrs_hfree(handle: Option<&mut CHandle>) {
-    handle.map(CPointer::free);
 }
 
 /// Within the given root's tree, resolve the given path (with all symlinks

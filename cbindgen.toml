@@ -76,5 +76,6 @@ exclude = [
 "CHandle" = "pathrs_handle_t"
 "CPointer_Handle" = "__pathrs_handle_t"
 "CResolver" = "pathrs_resolver_t"
+"CPointerType" = "pathrs_type_t"
 "CError" = "pathrs_error_t"
 "RawFd" = "int"
