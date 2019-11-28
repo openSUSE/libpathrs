@@ -38,6 +38,10 @@
  */
 typedef enum {
     /**
+     * `pathrs_error_t`
+     */
+    PATHRS_ERROR,
+    /**
      * `pathrs_root_t`
      */
     PATHRS_ROOT,
@@ -75,12 +79,78 @@ typedef struct __pathrs_handle_t __pathrs_handle_t;
 typedef struct __pathrs_root_t __pathrs_root_t;
 
 /**
- * An error description and (optionally) the underlying errno value that
- * triggered it (if there is no underlying errno, it is 0).
+ * Represents a single entry in a Rust backtrace in C. This structure is
+ * owned by the relevant `pathrs_error_t`.
  */
 typedef struct {
+    /**
+     * Instruction pointer at time of backtrace.
+     */
+    const void *ip;
+    /**
+     * Address of the enclosing symbol at time of backtrace.
+     */
+    const void *symbol_address;
+    /**
+     * Symbol name for @symbol_address (or NULL if none could be resolved).
+     */
+    const char *symbol_name;
+    /**
+     * Filename in which the symbol is defined (or NULL if none could be
+     * resolved -- usually due to lack of debugging symbols).
+     */
+    const char *symbol_file;
+    /**
+     * Line within @symbol_file on which the symbol is defined (will only make
+     * sense if @symbol_file is non-NULL).
+     */
+    uint32_t symbol_lineno;
+} __pathrs_backtrace_entry_t;
+
+/**
+ * Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
+ * the FFI user does not modify *any* of these fields.
+ */
+typedef struct {
+    /**
+     * LeakedPointer to the head of the vector.
+     */
+    const __pathrs_backtrace_entry_t *head;
+    /**
+     * The number of elements in the vector.
+     */
+    uintptr_t length;
+    /**
+     * The capacity of the vector.
+     */
+    uintptr_t __capacity;
+} __pathrs_backtrace_t;
+
+/**
+ * This is only exported to work around a Rust compiler restriction. Consider
+ * it an implementation detail and don't make use of it.
+ */
+typedef __pathrs_backtrace_t pathrs_backtrace_t;
+
+/**
+ * Attempts to represent a Rust Error type in C. This structure must be freed
+ * using `pathrs_free(PATHRS_ERROR)`.
+ */
+typedef struct {
+    /**
+     * Raw errno(3) value of the underlying error (or 0 if the source of the
+     * error was not due to a syscall error).
+     */
     int32_t errno;
-    unsigned char description[1024];
+    /**
+     * Textual description of the error.
+     */
+    const char *description;
+    /**
+     * Backtrace captured at the error site (or NULL if backtraces have been
+     * disabled at libpathrs build-time or through an environment variable).
+     */
+    pathrs_backtrace_t *backtrace;
 } pathrs_error_t;
 
 /**
@@ -115,7 +185,7 @@ typedef __pathrs_root_t pathrs_root_t;
  * stored error, the contents of buffer are undefined and 0 is returned. If an
  * internal error occurs during processing, -1 is returned.
  */
-int pathrs_error(pathrs_type_t ptr_type, void *ptr, pathrs_error_t *buffer);
+pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, void *ptr);
 
 /**
  * Free a libpathrs object. It is critical that users pass the correct @type --

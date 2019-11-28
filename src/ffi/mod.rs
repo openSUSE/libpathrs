@@ -30,9 +30,60 @@ use std::os::unix::{
     io::{AsRawFd, IntoRawFd, RawFd},
 };
 use std::path::Path;
+use std::{mem, ptr};
 
+use backtrace::Backtrace;
 use failure::Error as FailureError;
-use libc::{c_char, c_int, c_uchar, c_uint, c_void, dev_t};
+use libc::{c_char, c_int, c_uint, c_void, dev_t};
+
+trait Leakable {
+    /// Leak a structure such that it can be passed through C-FFI.
+    fn leak(self) -> &'static mut Self;
+
+    /// Given a structure leaked through Leakable::leak, un-leak it. Callers
+    /// must be sure to only ever call this once on a given pointer (otherwise
+    /// memory corruption will occur).
+    fn unleak(&'static mut self) -> Self;
+
+    /// Shorthand for `std::mem::drop(self.unleak())`.
+    fn free(&'static mut self);
+}
+
+/// A macro to implement the trivial methods of Leakable -- due to a restriction
+/// of the Rust compiler (you cannot have default trait methods that use Self
+/// directly, because the size of Self is not known by the trait).
+macro_rules! leakable {
+    (...) => {
+        fn leak(self) -> &'static mut Self {
+            Box::leak(Box::new(self))
+        }
+
+        fn unleak(&'static mut self) -> Self {
+            // Box::from_raw is safe because the C caller guarantees that the
+            // pointer we get is the same one we gave them, and it will only ever be
+            // called once with the same pointer.
+            *unsafe { Box::from_raw(self as *mut Self) }
+        }
+
+        fn free(&'static mut self) {
+            let _ = self.unleak();
+            // drop Self
+        }
+    };
+
+    (impl Leakable for $type:ty ;) => {
+        impl Leakable for $type {
+            leakable!(...);
+        }
+    };
+
+    // Use [] instead of <> to get around a macro_rules! limitation.
+    (impl [$($generics:tt),+] Leakable for $type:ty ;) => {
+        impl<$($generics),+> Leakable for $type {
+            leakable!(...);
+        }
+    };
+}
 
 /// This is only exported to work around a Rust compiler restriction. Consider
 /// it an implementation detail and don't make use of it.
@@ -45,27 +96,16 @@ pub struct CPointer<T> {
     last_error: Option<FailureError>,
 }
 
-// Private trait necessary to work around the "orphan trait" restriction.
-trait Pointer<T: ?Sized> {
-    fn new(inner: T) -> &'static mut Self;
-    fn free(&mut self);
+leakable! {
+    impl[T] Leakable for CPointer<T>;
 }
 
-// A basic way of having consistent and simple errors when passing NULL
-// incorrectly to a libpathrs API call, and freeing it later.
-impl<T> Pointer<T> for CPointer<T> {
-    // Heap-allocate a new CPointer, but then leak it for C FFI usage.
-    fn new(inner: T) -> &'static mut Self {
-        Box::leak(Box::new(CPointer {
+impl<T> From<T> for CPointer<T> {
+    fn from(inner: T) -> Self {
+        CPointer {
             inner: inner,
             last_error: None,
-        }))
-    }
-
-    // Take an already-leaked CPointer and un-leak it so we can drop it in Rust.
-    fn free(&mut self) {
-        unsafe { Box::from_raw(self as *mut Self) };
-        // drop the Box
+        }
     }
 }
 
@@ -134,57 +174,226 @@ impl ErrorWrap for Option<FailureError> {
     }
 }
 
-/// An error description and (optionally) the underlying errno value that
-/// triggered it (if there is no underlying errno, it is 0).
+/// Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
+/// the FFI user does not modify *any* of these fields.
+#[repr(C)]
+pub struct CVec<T> {
+    /// Pointer to the head of the vector.
+    pub head: *const T,
+    /// The number of elements in the vector.
+    pub length: usize,
+    /// The capacity of the vector.
+    pub __capacity: usize,
+}
+
+leakable! {
+    impl[T] Leakable for CVec<T>;
+}
+
+impl<T> From<Vec<T>> for CVec<T> {
+    fn from(vec: Vec<T>) -> Self {
+        let head = vec.as_ptr();
+        let length = vec.len();
+        let capacity = vec.capacity();
+
+        // We now in charge of Vec's memory.
+        mem::forget(vec);
+
+        CVec {
+            head: head,
+            length: length,
+            __capacity: capacity,
+        }
+    }
+}
+
+impl<T> Drop for CVec<T> {
+    fn drop(&mut self) {
+        if self.head.is_null() {
+            // Vec::from_raw_parts is safe because the C caller guarantees that the
+            // (pointer, length, capacity) tuple is unchanged from when we created
+            // the CVec.
+            let _ =
+                unsafe { Vec::from_raw_parts(self.head as *mut T, self.length, self.__capacity) };
+            // Clear the pointer to avoid double-frees.
+            self.head = ptr::null_mut();
+            // drop the Vec and all its contents
+        }
+    }
+}
+
+/// Represents a single entry in a Rust backtrace in C. This structure is
+/// owned by the relevant `pathrs_error_t`.
+#[repr(C)]
+pub struct CBacktraceEntry {
+    /// Instruction pointer at time of backtrace.
+    pub ip: *const c_void,
+
+    /// Address of the enclosing symbol at time of backtrace.
+    pub symbol_address: *const c_void,
+
+    /// Symbol name for @symbol_address (or NULL if none could be resolved).
+    pub symbol_name: *const c_char,
+
+    /// Filename in which the symbol is defined (or NULL if none could be
+    /// resolved -- usually due to lack of debugging symbols).
+    pub symbol_file: *const c_char,
+
+    /// Line within @symbol_file on which the symbol is defined (will only make
+    /// sense if @symbol_file is non-NULL).
+    pub symbol_lineno: u32,
+}
+
+impl Drop for CBacktraceEntry {
+    fn drop(&mut self) {
+        if !self.symbol_name.is_null() {
+            // CString::from_raw is safe because the C caller guarantees that
+            // the pointer we get is the same one we gave them.
+            let _ = unsafe { CString::from_raw(self.symbol_name as *mut c_char) };
+            // Clear the pointer to avoid double-frees.
+            self.symbol_name = ptr::null_mut();
+            // drop the CString
+        }
+        if !self.symbol_file.is_null() {
+            // CString::from_raw is safe because the C caller guarantees that
+            // the pointer we get is the same one we gave them.
+            let _ = unsafe { CString::from_raw(self.symbol_file as *mut c_char) };
+            // Clear the pointer to avoid double-frees.
+            self.symbol_file = ptr::null_mut();
+            // drop the CString
+        }
+    }
+}
+
+/// This is only exported to work around a Rust compiler restriction. Consider
+/// it an implementation detail and don't make use of it.
+pub type CBacktrace = CVec<CBacktraceEntry>;
+
+impl From<Backtrace> for CBacktrace {
+    fn from(mut backtrace: Backtrace) -> Self {
+        // Make sure we've resolved as many symbols as possible.
+        backtrace.resolve();
+
+        // Construct a Vec<CBacktraceEntry> for leaking.
+        backtrace
+            .frames()
+            .iter()
+            .map(|frame| {
+                let symbol = frame.symbols().last();
+
+                // XXX: Option::flatten is in Rust 1.40.0 stable.
+
+                let (name, file, lineno) = match symbol {
+                    Some(symbol) => {
+                        let name = symbol.name().map(|name| {
+                            CString::new(name.to_string()).expect(
+                                "CString::new(symbol_name) failed in CBacktraceEntry generation",
+                            )
+                        });
+
+                        let file = symbol.filename().map(|file| {
+                            CString::new(file.as_os_str().as_bytes()).expect(
+                                "CString::new(symbol_file) failed in CBacktraceEntry generation",
+                            )
+                        });
+
+                        (name, file, symbol.lineno())
+                    }
+                    None => (None, None, None),
+                };
+
+                CBacktraceEntry {
+                    ip: frame.ip(),
+                    symbol_address: frame.symbol_address(),
+                    symbol_name: name.map(CString::into_raw).unwrap_or(ptr::null_mut())
+                        as *const c_char,
+                    symbol_file: file.map(CString::into_raw).unwrap_or(ptr::null_mut())
+                        as *const c_char,
+                    symbol_lineno: lineno.unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>()
+            .into()
+    }
+}
+
+/// Attempts to represent a Rust Error type in C. This structure must be freed
+/// using `pathrs_free(PATHRS_ERROR)`.
 #[repr(C)]
 pub struct CError {
+    /// Raw errno(3) value of the underlying error (or 0 if the source of the
+    /// error was not due to a syscall error).
     pub errno: i32,
-    // TODO: Ideally, we would have a dynamically-sized struct here but Rust
-    //       really doesn't like doing this. We could probably do it manually
-    //       with libc::calloc(), but I'm not a huge fan of this idea.
-    pub description: [c_uchar; 1024],
+
+    /// Textual description of the error.
+    pub description: *const c_char,
+
+    /// Backtrace captured at the error site (or NULL if backtraces have been
+    /// disabled at libpathrs build-time or through an environment variable).
+    pub backtrace: Option<&'static mut CBacktrace>,
 }
 
-impl Default for CError {
-    #[inline]
-    fn default() -> Self {
-        // repr(C) struct with no references is always safe.
-        unsafe { std::mem::zeroed() }
+leakable! {
+    impl Leakable for CError;
+}
+
+impl From<&FailureError> for CError {
+    /// Construct a new CError struct based on the given error. The description
+    /// is pretty-printed in a C-like manner (causes are appended to one another
+    /// with separating colons). In addition, if the root-cause of the error is
+    /// an IOError then errno is populated with that value.
+    fn from(err: &FailureError) -> Self {
+        let fail = err.as_fail();
+        let desc = err
+            .iter_causes()
+            .fold(fail.to_string(), |prev, next| format!("{}: {}", prev, next));
+
+        // Create a C-compatible string for CError.description.
+        let desc =
+            CString::new(desc).expect("CString::new(description) failed in CError generation");
+
+        let errno = match fail.find_root_cause().downcast_ref::<IOError>() {
+            Some(err) => err.raw_os_error().unwrap_or(0),
+            _ => 0,
+        };
+
+        // TODO: Actually have a backtrace created at error-creation time. In
+        //       order to do this nicely we will need to switch to snafu, so
+        //       this is just used as a PoC.
+        let backtrace: CBacktrace = Backtrace::new().into();
+
+        CError {
+            errno: errno,
+            description: desc.into_raw(),
+            backtrace: backtrace.leak().into(),
+        }
     }
 }
 
-/// Construct a new CError struct based on the given error. The description is
-/// pretty-printed in a C-like manner (causes are appended to one another with
-/// separating colons). In addition, if the root-cause of the error is an
-/// IOError then errno is populated with that value.
-fn to_cerror(err: &FailureError) -> Result<CError, FailureError> {
-    let fail = err.as_fail();
-    let desc = err
-        .iter_causes()
-        .fold(fail.to_string(), |prev, next| format!("{}: {}", prev, next));
+impl Drop for CError {
+    fn drop(&mut self) {
+        if !self.description.is_null() {
+            // CString::from_raw is safe because the C caller guarantees that
+            // the pointer we get is the same one we gave them.
+            let _ = unsafe { CString::from_raw(self.description as *mut c_char) };
+            // Clear the pointer to avoid double-frees.
+            self.description = ptr::null_mut();
+            // drop the CString
+        }
 
-    let mut cerr: CError = Default::default();
-    {
-        // Create a C-compatible string, and truncate it to the size of our
-        // fixed-length description slot. There's not much we can usefully do if
-        // the error message is larger than 1K.
-        let desc = CString::new(desc)?
-            .into_bytes()
-            .into_iter()
-            .take(cerr.description.len() - 1)
-            .chain(vec![0])
-            .collect::<Vec<_>>();
-        assert!(desc.len() <= cerr.description.len());
-
-        // memcpy into the fixed buffer.
-        let (prefix, _) = cerr.description.split_at_mut(desc.len());
-        prefix.copy_from_slice(desc.as_slice());
+        if let Some(ref mut backtrace) = self.backtrace {
+            // The following is an exceptionally dirty hack to deal with the
+            // fact that we cannot move a &'static mut in this context. However,
+            // this is all okay because the &'static mut is being used as a
+            // pointer to a leaked CBacktrace.
+            let backtrace = *backtrace as *mut CBacktrace;
+            // Remove self.backtrace reference before we do free it. We don't
+            // want something to dereference it.
+            self.backtrace = None;
+            // An finally, free the backtrace.
+            unsafe { &mut *backtrace }.free();
+        }
     }
-    cerr.errno = match fail.find_root_cause().downcast_ref::<IOError>() {
-        Some(err) => err.raw_os_error().unwrap_or(0),
-        _ => 0,
-    };
-    Ok(cerr)
 }
 
 /// Copy the currently-stored infomation into the provided buffer.
@@ -196,15 +405,15 @@ fn to_cerror(err: &FailureError) -> Result<CError, FailureError> {
 pub extern "C" fn pathrs_error(
     ptr_type: CPointerType,
     ptr: *mut c_void,
-    buffer: *mut CError,
-) -> c_int {
-    if buffer.is_null() {
-        return -libc::EINVAL;
+) -> Option<&'static mut CError> {
+    if ptr.is_null() {
+        return None;
     }
 
     // Both of these casts and dereferences are safe because the C caller has
     // assured us that the type passed is correct.
     let last_error = match ptr_type {
+        CPointerType::PATHRS_ERROR => return None,
         CPointerType::PATHRS_ROOT => {
             let root = unsafe { &mut *(ptr as *mut CRoot) };
             &mut root.last_error
@@ -215,20 +424,7 @@ pub extern "C" fn pathrs_error(
         }
     };
 
-    match last_error {
-        Some(error) => {
-            let cerr = match to_cerror(&error) {
-                Ok(cerr) => cerr,
-                Err(_) => return -libc::ENOTRECOVERABLE, // TODO: Log a warning.
-            };
-            unsafe { *buffer = cerr };
-
-            // Only clear the error after we're sure that caller has it.
-            *last_error = None;
-            std::mem::size_of::<CError>() as c_int
-        }
-        None => 0,
-    }
+    last_error.as_ref().map(CError::from).map(Leakable::leak)
 }
 
 fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, FailureError> {
@@ -252,11 +448,13 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, FailureError> {
 #[no_mangle]
 pub extern "C" fn pathrs_open(path: *const c_char) -> Option<&'static mut CRoot> {
     // Leak the box so we can return the pointer to the caller.
+    // TODO: Return the error back to the caller somehow.
     let mut _error: Option<FailureError> = None;
     _error.wrap(None, move || {
         Root::open(parse_path(path)?)
-            .map(CPointer::new)
-            .map(Option::Some)
+            .map(CRoot::from)
+            .map(Leakable::leak)
+            .map(Option::from)
     })
 }
 
@@ -290,6 +488,8 @@ pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) {
 #[repr(C)]
 #[allow(non_camel_case_types, dead_code)]
 pub enum CPointerType {
+    /// `pathrs_error_t`
+    PATHRS_ERROR,
     /// `pathrs_root_t`
     PATHRS_ROOT,
     /// `pathrs_handle_t`
@@ -307,6 +507,7 @@ pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
     // Both of these casts and dereferences are safe because the C caller has
     // assured us that the type passed is correct.
     match ptr_type {
+        CPointerType::PATHRS_ERROR => unsafe { &mut *(ptr as *mut CError) }.free(),
         CPointerType::PATHRS_ROOT => unsafe { &mut *(ptr as *mut CRoot) }.free(),
         CPointerType::PATHRS_HANDLE => unsafe { &mut *(ptr as *mut CHandle) }.free(),
     }
@@ -354,8 +555,9 @@ pub extern "C" fn pathrs_inroot_resolve(
     root.last_error.wrap(None, move || {
         inner
             .resolve(parse_path(path)?)
-            .map(CPointer::new)
-            .map(Option::Some)
+            .map(CHandle::from)
+            .map(Leakable::leak)
+            .map(Option::from)
     })
 }
 
@@ -400,8 +602,9 @@ pub extern "C" fn pathrs_inroot_creat(
     root.last_error.wrap(None, move || {
         inner
             .create_file(parse_path(path)?, &perm)
-            .map(CPointer::new)
-            .map(Option::Some)
+            .map(CHandle::from)
+            .map(Leakable::leak)
+            .map(Option::from)
     })
 }
 

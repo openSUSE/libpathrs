@@ -71,11 +71,22 @@ exclude = [
 
 # Clean up the naming of structs.
 [export.rename]
-"CRoot" = "pathrs_root_t"
-"CPointer_Root" = "__pathrs_root_t"
-"CHandle" = "pathrs_handle_t"
-"CPointer_Handle" = "__pathrs_handle_t"
 "CResolver" = "pathrs_resolver_t"
 "CPointerType" = "pathrs_type_t"
-"CError" = "pathrs_error_t"
+
+# libc
 "RawFd" = "int"
+
+# CPointer<Root>
+"CRoot" = "pathrs_root_t"
+"CPointer_Root" = "__pathrs_root_t"
+
+# CPointer<Handle>
+"CHandle" = "pathrs_handle_t"
+"CPointer_Handle" = "__pathrs_handle_t"
+
+# CError and family.
+"CBacktraceEntry" = "__pathrs_backtrace_entry_t"
+"CVec_CBacktraceEntry" = "__pathrs_backtrace_t"
+"CBacktrace" = "pathrs_backtrace_t"
+"CError" = "pathrs_error_t"

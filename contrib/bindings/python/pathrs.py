@@ -41,11 +41,18 @@ def objtype(obj):
 		raise PathrsError("internal error: %r is not a pathrs object" % (obj,))
 
 def error(obj):
-	err = ffi.new("pathrs_error_t *")
-	ret = libpathrs_so.pathrs_error(objtype(obj), obj.inner, err)
-	if ret <= 0:
-		raise PathrsError("internal error", errno=-ret)
-	return PathrsError(pystr(err.description), errno=err.errno or None)
+	err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
+	if err == ffi.NULL:
+		raise PathrsError("internal error in pathrs_error")
+
+	errno = err.errno
+	description = pystr(err.description)
+	# TODO: Handle backtrace. Python doesn't allow you to add fake entries to
+	#       the backtrace, so there's no native way to represent such traces.
+	libpathrs_so.pathrs_free(libpathrs_so.PATHRS_ERROR, err)
+	del err
+
+	return PathrsError(description, errno=errno or None)
 
 
 class PathrsError(Exception):
