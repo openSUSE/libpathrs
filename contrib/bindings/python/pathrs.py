@@ -20,7 +20,7 @@ import os
 import sys
 import cffi
 
-__all__ = ["Root", "Handle"]
+__all__ = ["Root", "Handle", "Error"]
 
 # Resolvers supported by pathrs -- can be configured with PATHRS_RESOLVER.
 KERNEL_RESOLVER = "kernel"
@@ -32,45 +32,117 @@ def cstr(pystr):
 def pystr(cstr):
 	return ffi.string(cstr).decode("utf8")
 
+def pyptr(cptr):
+	return int(ffi.cast("uintptr_t", cptr))
+
 def objtype(obj):
 	if isinstance(obj, Root):
 		return libpathrs_so.PATHRS_ROOT
 	elif isinstance(obj, Handle):
 		return libpathrs_so.PATHRS_HANDLE
 	else:
-		raise PathrsError("internal error: %r is not a pathrs object" % (obj,))
-
-def error(obj):
-	err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
-	if err == ffi.NULL:
-		raise PathrsError("internal error in pathrs_error")
-
-	errno = err.errno
-	description = pystr(err.description)
-	# TODO: Handle backtrace. Python doesn't allow you to add fake entries to
-	#       the backtrace, so there's no native way to represent such traces.
-	libpathrs_so.pathrs_free(libpathrs_so.PATHRS_ERROR, err)
-	del err
-
-	return PathrsError(description, errno=errno or None)
+		raise Error("internal error: %r is not a pathrs object" % (obj,))
 
 
-class PathrsError(Exception):
-	def __init__(self, message, errno=None):
+class Error(Exception):
+	def __init__(self, message, *_, errno=None, backtrace=None):
 		# Construct Exception.
 		super().__init__(message)
+
 		# Basic arguments.
 		self.message = message
 		self.errno = errno
+		self.backtrace = backtrace
+
+		# Pre-format the errno.
+		self.strerror = None
+		if self.errno is not None:
+			try:
+				self.strerror = os.strerror(errno)
+			except ValueError:
+				self.strerror = str(errno)
 
 	def __str__(self):
 		if self.errno is None:
 			return self.message
 		else:
-			return "%s (errno=%d)" % (self.message, self.errno)
+			return "%s (%s)" % (self.message, self.strerror)
 
 	def __repr__(self):
-		return "PathrsError(%r, errno=%r)" % (self.message, self.errno)
+		return "Error(%r, errno=%r)" % (self.message, self.errno)
+
+	def pprint(self, out=sys.stdout):
+		# Basic error information.
+		if self.errno is None:
+			print("pathrs error:", file=out)
+		else:
+			print("pathrs error [%s]:" % (self.strerror,), file=out)
+		print("  %s" % (self.message,), file=out)
+
+		# Backtrace if available.
+		if self.backtrace:
+			print("rust backtrace:", file=out)
+		for entry in self.backtrace:
+			print("  %s" % (entry,), file=out)
+
+
+class BacktraceSymbol(object):
+	def __init__(self, c_entry):
+		self.address = pyptr(c_entry.symbol_address)
+
+		self.name = None
+		if c_entry.symbol_name != ffi.NULL:
+			self.name = pystr(c_entry.symbol_name)
+
+		self.file = None
+		self.lineno = None
+		if c_entry.symbol_file != ffi.NULL:
+			self.file = pystr(c_entry.symbol_file)
+			self.lineno = c_entry.symbol_lineno
+
+	def __str__(self):
+		string = "<0x%x>" % (self.address,)
+		if self.name is not None:
+			string = "'%s'@%s" % (self.name, string)
+		if self.file is not None:
+			string = "[file '%s':%d] %s" % (self.file, self.lineno, string)
+		return string
+
+
+class BacktraceEntry(object):
+	def __init__(self, c_entry):
+		self.ip = pyptr(c_entry.ip)
+		self.symbol = BacktraceSymbol(c_entry)
+
+	def __str__(self):
+		return "%s+0x%x" % (self.symbol, self.ip - self.symbol.address)
+
+
+class Backtrace(list):
+	def __init__(self, c_backtrace):
+		super().__init__()
+
+		if c_backtrace == ffi.NULL:
+			return
+
+		for idx in range(c_backtrace.length):
+			c_entry = c_backtrace.head[idx]
+			self.append(BacktraceEntry(c_entry))
+
+
+def error(obj):
+	err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
+	if err == ffi.NULL:
+		raise Error("internal error in pathrs_error")
+
+	errno = err.errno
+	description = pystr(err.description)
+	backtrace = Backtrace(err.backtrace)
+
+	libpathrs_so.pathrs_free(libpathrs_so.PATHRS_ERROR, err)
+	del err
+
+	return Error(description, backtrace=backtrace or None, errno=errno or None)
 
 
 class Handle(object):
@@ -97,7 +169,7 @@ class Root(object):
 		path = cstr(path)
 		root = libpathrs_so.pathrs_open(path)
 		if root == ffi.NULL:
-			raise PathrsError("pathrs_root allocation failed")
+			raise Error("pathrs_root allocation failed")
 		# Check the environment for any default resolver override.
 		if resolver is None:
 			resolver = os.environ.get("PATHRS_RESOLVER")
@@ -179,7 +251,7 @@ def __do_load():
 	if not os.path.exists(include_path):
 		include_path = os.path.join(ROOT_DIR, "include/pathrs.h")
 	if not os.path.exists(include_path):
-		raise PathrsError("Cannot find 'libpathrs' header.")
+		raise Error("Cannot find 'libpathrs' header.")
 
 	with open(include_path) as f:
 		# Strip out #-lines.
@@ -198,7 +270,7 @@ def __do_load():
 			if os.path.exists(so_path):
 				paths.append(so_path)
 		if not paths:
-			raise PathrsError("Cannot find 'libpathrs' library.")
+			raise Error("Cannot find 'libpathrs' library.")
 
 		# Use the last-modified library, since that's presumably what we want.
 		paths = sorted(paths, key=lambda path: -os.path.getmtime(path))
