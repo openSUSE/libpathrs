@@ -113,15 +113,15 @@ typedef struct {
  */
 typedef struct {
     /**
-     * LeakedPointer to the head of the vector.
+     * Pointer to the head of the vector.
      */
     const __pathrs_backtrace_entry_t *head;
     /**
-     * The number of elements in the vector.
+     * Number of elements in the vector (must not be modified).
      */
     uintptr_t length;
     /**
-     * The capacity of the vector.
+     * Capacity of the vector (must not be modified).
      */
     uintptr_t __capacity;
 } __pathrs_backtrace_t;
@@ -141,7 +141,7 @@ typedef struct {
      * Raw errno(3) value of the underlying error (or 0 if the source of the
      * error was not due to a syscall error).
      */
-    int32_t errno;
+    int32_t saved_errno;
     /**
      * Textual description of the error.
      */

@@ -180,9 +180,9 @@ impl ErrorWrap for Option<FailureError> {
 pub struct CVec<T> {
     /// Pointer to the head of the vector.
     pub head: *const T,
-    /// The number of elements in the vector.
+    /// Number of elements in the vector (must not be modified).
     pub length: usize,
-    /// The capacity of the vector.
+    /// Capacity of the vector (must not be modified).
     pub __capacity: usize,
 }
 
@@ -323,7 +323,10 @@ impl From<Backtrace> for CBacktrace {
 pub struct CError {
     /// Raw errno(3) value of the underlying error (or 0 if the source of the
     /// error was not due to a syscall error).
-    pub errno: i32,
+    // We can't call this field "errno" because glibc defines errno(3) as a
+    // macro, causing all sorts of problems if you have a struct with an "errno"
+    // field. Best to avoid those headaches.
+    pub saved_errno: i32,
 
     /// Textual description of the error.
     pub description: *const c_char,
@@ -363,7 +366,7 @@ impl From<&FailureError> for CError {
         let backtrace: CBacktrace = Backtrace::new().into();
 
         CError {
-            errno: errno,
+            saved_errno: errno,
             description: desc.into_raw(),
             backtrace: backtrace.leak().into(),
         }

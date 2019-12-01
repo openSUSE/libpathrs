@@ -84,6 +84,8 @@ class Error(Exception):
 			print("rust backtrace:", file=out)
 		for entry in self.backtrace:
 			print("  %s" % (entry,), file=out)
+			if entry.symbol.file is not None:
+				print("    in file '%s':%d" % (entry.symbol.file, entry.symbol.lineno), file=out)
 
 
 class BacktraceSymbol(object):
@@ -104,8 +106,6 @@ class BacktraceSymbol(object):
 		string = "<0x%x>" % (self.address,)
 		if self.name is not None:
 			string = "'%s'@%s" % (self.name, string)
-		if self.file is not None:
-			string = "[file '%s':%d] %s" % (self.file, self.lineno, string)
 		return string
 
 
@@ -133,9 +133,10 @@ class Backtrace(list):
 def error(obj):
 	err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
 	if err == ffi.NULL:
-		raise Error("internal error in pathrs_error")
+		# TODO: Figure out a better way of handling pathrs_error errors.
+		raise Error("pathrs_error failed when grabbing error")
 
-	errno = err.errno
+	errno = err.saved_errno
 	description = pystr(err.description)
 	backtrace = Backtrace(err.backtrace)
 
@@ -169,6 +170,7 @@ class Root(object):
 		path = cstr(path)
 		root = libpathrs_so.pathrs_open(path)
 		if root == ffi.NULL:
+			# TODO: Figure out a better way of handling root open errors.
 			raise Error("pathrs_root allocation failed")
 		# Check the environment for any default resolver override.
 		if resolver is None:
