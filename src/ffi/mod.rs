@@ -210,13 +210,13 @@ impl<T> From<Vec<T>> for CVec<T> {
 impl<T> Drop for CVec<T> {
     fn drop(&mut self) {
         if self.head.is_null() {
+            let head = self.head as *mut T;
+            // Clear the pointer to avoid double-frees.
+            self.head = ptr::null_mut();
             // Vec::from_raw_parts is safe because the C caller guarantees that the
             // (pointer, length, capacity) tuple is unchanged from when we created
             // the CVec.
-            let _ =
-                unsafe { Vec::from_raw_parts(self.head as *mut T, self.length, self.__capacity) };
-            // Clear the pointer to avoid double-frees.
-            self.head = ptr::null_mut();
+            let _ = unsafe { Vec::from_raw_parts(head, self.length, self.__capacity) };
             // drop the Vec and all its contents
         }
     }
@@ -247,19 +247,21 @@ pub struct CBacktraceEntry {
 impl Drop for CBacktraceEntry {
     fn drop(&mut self) {
         if !self.symbol_name.is_null() {
-            // CString::from_raw is safe because the C caller guarantees that
-            // the pointer we get is the same one we gave them.
-            let _ = unsafe { CString::from_raw(self.symbol_name as *mut c_char) };
+            let symbol_name = self.symbol_name as *mut c_char;
             // Clear the pointer to avoid double-frees.
             self.symbol_name = ptr::null_mut();
+            // CString::from_raw is safe because the C caller guarantees that
+            // the pointer we get is the same one we gave them.
+            let _ = unsafe { CString::from_raw(symbol_name) };
             // drop the CString
         }
         if !self.symbol_file.is_null() {
-            // CString::from_raw is safe because the C caller guarantees that
-            // the pointer we get is the same one we gave them.
-            let _ = unsafe { CString::from_raw(self.symbol_file as *mut c_char) };
+            let symbol_file = self.symbol_file as *mut c_char;
             // Clear the pointer to avoid double-frees.
             self.symbol_file = ptr::null_mut();
+            // CString::from_raw is safe because the C caller guarantees that
+            // the pointer we get is the same one we gave them.
+            let _ = unsafe { CString::from_raw(symbol_file as *mut c_char) };
             // drop the CString
         }
     }
@@ -274,7 +276,7 @@ impl From<Backtrace> for CBacktrace {
         // Make sure we've resolved as many symbols as possible.
         backtrace.resolve();
 
-        // Construct a Vec<CBacktraceEntry> for leaking.
+        // Construct a CVec<CBacktraceEntry> for leaking.
         backtrace
             .frames()
             .iter()
@@ -376,11 +378,12 @@ impl From<&FailureError> for CError {
 impl Drop for CError {
     fn drop(&mut self) {
         if !self.description.is_null() {
-            // CString::from_raw is safe because the C caller guarantees that
-            // the pointer we get is the same one we gave them.
-            let _ = unsafe { CString::from_raw(self.description as *mut c_char) };
+            let description = self.description as *mut c_char;
             // Clear the pointer to avoid double-frees.
             self.description = ptr::null_mut();
+            // CString::from_raw is safe because the C caller guarantees that
+            // the pointer we get is the same one we gave them.
+            let _ = unsafe { CString::from_raw(description) };
             // drop the CString
         }
 
