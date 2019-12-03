@@ -525,7 +525,7 @@ pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
 ///
 /// It should be noted that the use of O_CREAT *is not* supported (and will
 /// result in an error). Handles only refer to *existing* files. Instead you
-/// need to use inroot_creat().
+/// need to use creat().
 ///
 /// In addition, O_NOCTTY is automatically set when opening the path. If you
 /// want to use the path as a controlling terminal, you will have to do
@@ -551,7 +551,7 @@ pub extern "C" fn pathrs_reopen(handle: &mut CHandle, flags: c_int) -> RawFd {
 /// being scoped to the root) and return a handle to that path. The path *must
 /// already exist*, otherwise an error will occur.
 #[no_mangle]
-pub extern "C" fn pathrs_inroot_resolve(
+pub extern "C" fn pathrs_resolve(
     root: &mut CRoot,
     path: *const c_char,
 ) -> Option<&'static mut CHandle> {
@@ -571,7 +571,7 @@ pub extern "C" fn pathrs_inroot_resolve(
 /// scoped to the root). The flags argument is identical to the renameat2(2)
 /// flags that are supported on the system.
 #[no_mangle]
-pub extern "C" fn pathrs_inroot_rename(
+pub extern "C" fn pathrs_rename(
     root: &mut CRoot,
     src: *const c_char,
     dst: *const c_char,
@@ -590,12 +590,12 @@ pub extern "C" fn pathrs_inroot_rename(
 
 // Within the root, create an inode at the path with the given mode. If the
 // path already exists, an error is returned (effectively acting as though
-// O_EXCL is always set). Each inroot_* corresponds to the matching syscall.
+// O_EXCL is always set). Each pathrs_* corresponds to the matching syscall.
 
-// TODO: Replace all the inroot_* stuff with macros. It's quite repetitive.
+// TODO: Replace all these wrappers with macros. It's quite repetitive.
 
 #[no_mangle]
-pub extern "C" fn pathrs_inroot_creat(
+pub extern "C" fn pathrs_creat(
     root: &mut CRoot,
     path: *const c_char,
     mode: c_uint,
@@ -615,18 +615,14 @@ pub extern "C" fn pathrs_inroot_creat(
 }
 
 #[no_mangle]
-pub extern "C" fn pathrs_inroot_mkdir(
-    root: &mut CRoot,
-    path: *const c_char,
-    mode: c_uint,
-) -> c_int {
+pub extern "C" fn pathrs_mkdir(root: &mut CRoot, path: *const c_char, mode: c_uint) -> c_int {
     let mode = mode & !libc::S_IFMT;
 
-    pathrs_inroot_mknod(root, path, libc::S_IFDIR | mode, 0)
+    pathrs_mknod(root, path, libc::S_IFDIR | mode, 0)
 }
 
 #[no_mangle]
-pub extern "C" fn pathrs_inroot_mknod(
+pub extern "C" fn pathrs_mknod(
     root: &mut CRoot,
     path: *const c_char,
     mode: c_uint,
@@ -653,7 +649,7 @@ pub extern "C" fn pathrs_inroot_mknod(
 }
 
 #[no_mangle]
-pub extern "C" fn pathrs_inroot_symlink(
+pub extern "C" fn pathrs_symlink(
     root: &mut CRoot,
     path: *const c_char,
     target: *const c_char,
@@ -670,7 +666,7 @@ pub extern "C" fn pathrs_inroot_symlink(
 }
 
 #[no_mangle]
-pub extern "C" fn pathrs_inroot_hardlink(
+pub extern "C" fn pathrs_hardlink(
     root: &mut CRoot,
     path: *const c_char,
     target: *const c_char,

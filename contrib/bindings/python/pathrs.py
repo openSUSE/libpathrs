@@ -190,7 +190,7 @@ class Root(object):
 
 	def resolve(self, path):
 		path = cstr(path)
-		handle = libpathrs_so.pathrs_inroot_resolve(self.inner, path)
+		handle = libpathrs_so.pathrs_resolve(self.inner, path)
 		if handle == ffi.NULL:
 			raise error(self)
 		return Handle(handle)
@@ -198,40 +198,40 @@ class Root(object):
 	def rename(self, src, dst, flags=0):
 		src = cstr(src)
 		dst = cstr(dst)
-		err = libpathrs_so.pathrs_inroot_rename(self.inner, src, dst, flags)
+		err = libpathrs_so.pathrs_rename(self.inner, src, dst, flags)
 		if err < 0:
 			raise error(self)
 
 	def creat(self, path, mode):
 		path = cstr(path)
-		handle = libpathrs_so.pathrs_inroot_creat(self.inner, path, mode)
+		handle = libpathrs_so.pathrs_creat(self.inner, path, mode)
 		if handle == ffi.NULL:
 			raise error(self)
 		return Handle(handle)
 
 	def mkdir(self, path, mode):
 		path = cstr(path)
-		err = libpathrs_so.pathrs_inroot_mkdir(self.inner, path, mode)
+		err = libpathrs_so.pathrs_mkdir(self.inner, path, mode)
 		if err < 0:
 			raise error(self)
 
 	def mknod(self, path, mode, dev):
 		path = cstr(path)
-		err = libpathrs_so.pathrs_inroot_mknod(self.inner, path, mode, dev)
+		err = libpathrs_so.pathrs_mknod(self.inner, path, mode, dev)
 		if err < 0:
 			raise error(self)
 
 	def hardlink(self, path, target):
 		path = cstr(path)
 		target = cstr(target)
-		err = libpathrs_so.pathrs_inroot_hardlink(self.inner, path, target)
+		err = libpathrs_so.pathrs_hardlink(self.inner, path, target)
 		if err < 0:
 			raise error(self)
 
 	def symlink(self, path, target):
 		path = cstr(path)
 		target = cstr(target)
-		err = libpathrs_so.pathrs_inroot_symlink(self.inner, path, target)
+		err = libpathrs_so.pathrs_symlink(self.inner, path, target)
 		if err < 0:
 			raise error(self)
 

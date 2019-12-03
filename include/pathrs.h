@@ -79,6 +79,31 @@ typedef struct __pathrs_handle_t __pathrs_handle_t;
 typedef struct __pathrs_root_t __pathrs_root_t;
 
 /**
+ * A handle to a path within a given Root. This handle references an
+ * already-resolved path which can be used for only one purpose -- to "re-open"
+ * the handle and get an actual fs::File which can be used for ordinary
+ * operations.
+ *
+ * It is critical for the safety of users of this library that *at no point* do
+ * you use interfaces like libc::openat directly on file descriptors you get
+ * from using this library (or extract the RawFd from a fs::File). You must
+ * always use operations through a Root.
+ */
+typedef __pathrs_handle_t pathrs_handle_t;
+
+/**
+ * A handle to the root of a directory tree to resolve within. The only purpose
+ * of this "root handle" is to get Handles to inodes within the directory tree.
+ *
+ * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
+ * inside a possibly-attacker-controlled directory tree. While we do have
+ * protections that should defend against it (for both drivers), it's far more
+ * dangerous than just opening a directory tree which is not inside a
+ * potentially-untrusted directory.
+ */
+typedef __pathrs_root_t pathrs_root_t;
+
+/**
  * Represents a single entry in a Rust backtrace in C. This structure is
  * owned by the relevant `pathrs_error_t`.
  */
@@ -153,30 +178,9 @@ typedef struct {
     pathrs_backtrace_t *backtrace;
 } pathrs_error_t;
 
-/**
- * A handle to a path within a given Root. This handle references an
- * already-resolved path which can be used for only one purpose -- to "re-open"
- * the handle and get an actual fs::File which can be used for ordinary
- * operations.
- *
- * It is critical for the safety of users of this library that *at no point* do
- * you use interfaces like libc::openat directly on file descriptors you get
- * from using this library (or extract the RawFd from a fs::File). You must
- * always use operations through a Root.
- */
-typedef __pathrs_handle_t pathrs_handle_t;
-
-/**
- * A handle to the root of a directory tree to resolve within. The only purpose
- * of this "root handle" is to get Handles to inodes within the directory tree.
- *
- * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
- * inside a possibly-attacker-controlled directory tree. While we do have
- * protections that should defend against it (for both drivers), it's far more
- * dangerous than just opening a directory tree which is not inside a
- * potentially-untrusted directory.
- */
-typedef __pathrs_root_t pathrs_root_t;
+pathrs_handle_t *pathrs_creat(pathrs_root_t *root,
+                              const char *path,
+                              unsigned int mode);
 
 /**
  * Copy the currently-stored infomation into the provided buffer.
@@ -193,43 +197,14 @@ pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, void *ptr);
  */
 void pathrs_free(pathrs_type_t ptr_type, void *ptr);
 
-pathrs_handle_t *pathrs_inroot_creat(pathrs_root_t *root,
-                                     const char *path,
-                                     unsigned int mode);
+int pathrs_hardlink(pathrs_root_t *root, const char *path, const char *target);
 
-int pathrs_inroot_hardlink(pathrs_root_t *root,
-                           const char *path,
-                           const char *target);
+int pathrs_mkdir(pathrs_root_t *root, const char *path, unsigned int mode);
 
-int pathrs_inroot_mkdir(pathrs_root_t *root,
-                        const char *path,
-                        unsigned int mode);
-
-int pathrs_inroot_mknod(pathrs_root_t *root,
-                        const char *path,
-                        unsigned int mode,
-                        dev_t dev);
-
-/**
- * Within the given root's tree, perform the rename (with all symlinks being
- * scoped to the root). The flags argument is identical to the renameat2(2)
- * flags that are supported on the system.
- */
-int pathrs_inroot_rename(pathrs_root_t *root,
-                         const char *src,
-                         const char *dst,
-                         int flags);
-
-/**
- * Within the given root's tree, resolve the given path (with all symlinks
- * being scoped to the root) and return a handle to that path. The path *must
- * already exist*, otherwise an error will occur.
- */
-pathrs_handle_t *pathrs_inroot_resolve(pathrs_root_t *root, const char *path);
-
-int pathrs_inroot_symlink(pathrs_root_t *root,
-                          const char *path,
-                          const char *target);
+int pathrs_mknod(pathrs_root_t *root,
+                 const char *path,
+                 unsigned int mode,
+                 dev_t dev);
 
 /**
  * Open a root handle.
@@ -246,13 +221,23 @@ int pathrs_inroot_symlink(pathrs_root_t *root,
 pathrs_root_t *pathrs_open(const char *path);
 
 /**
+ * Within the given root's tree, perform the rename (with all symlinks being
+ * scoped to the root). The flags argument is identical to the renameat2(2)
+ * flags that are supported on the system.
+ */
+int pathrs_rename(pathrs_root_t *root,
+                  const char *src,
+                  const char *dst,
+                  int flags);
+
+/**
  * "Upgrade" the handle to a usable fd, suitable for reading and writing. This
  * does not consume the original handle (allowing for it to be used many
  * times).
  *
  * It should be noted that the use of O_CREAT *is not* supported (and will
  * result in an error). Handles only refer to *existing* files. Instead you
- * need to use inroot_creat().
+ * need to use creat().
  *
  * In addition, O_NOCTTY is automatically set when opening the path. If you
  * want to use the path as a controlling terminal, you will have to do
@@ -261,8 +246,17 @@ pathrs_root_t *pathrs_open(const char *path);
 int pathrs_reopen(pathrs_handle_t *handle, int flags);
 
 /**
+ * Within the given root's tree, resolve the given path (with all symlinks
+ * being scoped to the root) and return a handle to that path. The path *must
+ * already exist*, otherwise an error will occur.
+ */
+pathrs_handle_t *pathrs_resolve(pathrs_root_t *root, const char *path);
+
+/**
  * Switch the resolver for the given root handle.
  */
 void pathrs_set_resolver(pathrs_root_t *root, pathrs_resolver_t resolver);
+
+int pathrs_symlink(pathrs_root_t *root, const char *path, const char *target);
 
 #endif /* LIBPATHRS_H */
