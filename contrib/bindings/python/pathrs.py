@@ -133,8 +133,7 @@ class Backtrace(list):
 def error(obj):
 	err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
 	if err == ffi.NULL:
-		# TODO: Figure out a better way of handling pathrs_error errors.
-		raise Error("pathrs_error failed when grabbing error")
+		return None
 
 	errno = err.saved_errno
 	description = pystr(err.description)
@@ -170,8 +169,15 @@ class Root(object):
 		path = cstr(path)
 		root = libpathrs_so.pathrs_open(path)
 		if root == ffi.NULL:
-			# TODO: Figure out a better way of handling root open errors.
+			# This should never actually happen.
 			raise Error("pathrs_root allocation failed")
+		self.inner = root
+
+		# If there was an error in pathrs_open, we find out now.
+		err = error(self)
+		if err:
+			raise err
+
 		# Check the environment for any default resolver override.
 		if resolver is None:
 			resolver = os.environ.get("PATHRS_RESOLVER")
@@ -181,8 +187,9 @@ class Root(object):
 				KERNEL_RESOLVER: libpathrs_so.PATHRS_KERNEL_RESOLVER,
 				EMULATED_RESOLVER: libpathrs_so.PATHRS_EMULATED_RESOLVER,
 			}[resolver]
-			libpathrs_so.pathrs_set_resolver(root, resolver)
-		self.inner = root
+			ret = libpathrs_so.pathrs_set_resolver(self.inner, resolver)
+			if ret < 0:
+				raise error(self)
 
 	def __del__(self):
 		if self.inner is not None:

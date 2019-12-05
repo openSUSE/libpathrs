@@ -40,15 +40,15 @@ typedef enum {
     /**
      * `pathrs_error_t`
      */
-    PATHRS_ERROR,
+    PATHRS_ERROR = 57344,
     /**
      * `pathrs_root_t`
      */
-    PATHRS_ROOT,
+    PATHRS_ROOT = 57345,
     /**
      * `pathrs_handle_t`
      */
-    PATHRS_HANDLE,
+    PATHRS_HANDLE = 57346,
 } pathrs_type_t;
 
 /**
@@ -59,11 +59,11 @@ typedef enum {
     /**
      * Use the native openat2(2) backend (requires kernel support).
      */
-    PATHRS_KERNEL_RESOLVER,
+    PATHRS_KERNEL_RESOLVER = 61440,
     /**
      * Use the userspace "emulated" backend.
      */
-    PATHRS_EMULATED_RESOLVER,
+    PATHRS_EMULATED_RESOLVER = 61441,
 } pathrs_resolver_t;
 
 /**
@@ -183,17 +183,26 @@ pathrs_handle_t *pathrs_creat(pathrs_root_t *root,
                               unsigned int mode);
 
 /**
- * Copy the currently-stored infomation into the provided buffer.
+ * Retrieve the error stored by a pathrs object.
  *
- * If there was a stored error, a positive value is returned. If there was no
- * stored error, the contents of buffer are undefined and 0 is returned. If an
- * internal error occurs during processing, -1 is returned.
+ * Whenever an error occurs during an operation on a pathrs object, the object
+ * will store the error for retrieval with pathrs_error(). Note that performing
+ * any subsequent operations will clear the stored error -- so the error must
+ * immediately be fetched by the caller.
+ *
+ * If there is no error associated with the object, NULL is returned (thus you
+ * can safely check for whether an error occurred with pathrs_error).
+ *
+ * It is critical that the correct pathrs_type_t is provided for the given
+ * pointer (otherwise memory corruption will almost certainly occur).
  */
 pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, void *ptr);
 
 /**
- * Free a libpathrs object. It is critical that users pass the correct @type --
- * not doing so will certainly trigger memory unsafety bugs.
+ * Free a libpathrs object.
+ *
+ * It is critical that the correct pathrs_type_t is provided for the given
+ * pointer (otherwise memory corruption will almost certainly occur).
  */
 void pathrs_free(pathrs_type_t ptr_type, void *ptr);
 
@@ -217,6 +226,20 @@ int pathrs_mknod(pathrs_root_t *root,
  * driver, it also must be the fully-expanded path to a real directory (with no
  * symlink components) because the given path is used to double-check that the
  * open operation was not affected by an attacker.
+ *
+ * NOTE: Unlike other libpathrs methods, pathrs_open will *always* return a
+ *       pathrs_root_t (but in the case of an error, the returned root handle
+ *       will be a "dummy" which is just used to store the error encountered
+ *       during setup). Errors during pathrs_open() can only be detected by
+ *       immediately calling pathrs_error() with the returned root handle --
+ *       and as with valid root handles, the caller must free it with
+ *       pathrs_free().
+ *
+ *       This unfortunate API wart is necessary because there is no obvious
+ *       place to store a libpathrs error when first creating an root handle
+ *       (other than using thread-local storage but that opens several other
+ *       cans of worms). This approach was chosen because in principle users
+ *       could call pathrs_error() after every libpathrs API call.
  */
 pathrs_root_t *pathrs_open(const char *path);
 
@@ -253,9 +276,9 @@ int pathrs_reopen(pathrs_handle_t *handle, int flags);
 pathrs_handle_t *pathrs_resolve(pathrs_root_t *root, const char *path);
 
 /**
- * Switch the resolver for the given root handle.
+ * Switch the resolver for a pathrs_root_t handle.
  */
-void pathrs_set_resolver(pathrs_root_t *root, pathrs_resolver_t resolver);
+int pathrs_set_resolver(pathrs_root_t *root, pathrs_resolver_t resolver);
 
 int pathrs_symlink(pathrs_root_t *root, const char *path, const char *target);
 

@@ -77,7 +77,7 @@ macro_rules! leakable {
         }
     };
 
-    // Use [] instead of <> to get around a macro_rules! limitation.
+    // Use [A,B,C] instead of <A,B,C> to get around a macro_rules! limitation.
     (impl [$($generics:tt),+] Leakable for $type:ty ;) => {
         impl<$($generics),+> Leakable for $type {
             leakable!(...);
@@ -92,7 +92,7 @@ macro_rules! leakable {
 // representation. So we need to hide it within an FFI-safe pointer (such as a
 // trivial struct).
 pub struct CPointer<T> {
-    inner: T,
+    inner: Option<T>,
     last_error: Option<FailureError>,
 }
 
@@ -103,7 +103,7 @@ leakable! {
 impl<T> From<T> for CPointer<T> {
     fn from(inner: T) -> Self {
         CPointer {
-            inner: inner,
+            inner: Some(inner),
             last_error: None,
         }
     }
@@ -402,11 +402,18 @@ impl Drop for CError {
     }
 }
 
-/// Copy the currently-stored infomation into the provided buffer.
+/// Retrieve the error stored by a pathrs object.
 ///
-/// If there was a stored error, a positive value is returned. If there was no
-/// stored error, the contents of buffer are undefined and 0 is returned. If an
-/// internal error occurs during processing, -1 is returned.
+/// Whenever an error occurs during an operation on a pathrs object, the object
+/// will store the error for retrieval with pathrs_error(). Note that performing
+/// any subsequent operations will clear the stored error -- so the error must
+/// immediately be fetched by the caller.
+///
+/// If there is no error associated with the object, NULL is returned (thus you
+/// can safely check for whether an error occurred with pathrs_error).
+///
+/// It is critical that the correct pathrs_type_t is provided for the given
+/// pointer (otherwise memory corruption will almost certainly occur).
 #[no_mangle]
 pub extern "C" fn pathrs_error(
     ptr_type: CPointerType,
@@ -451,28 +458,45 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, FailureError> {
 /// driver, it also must be the fully-expanded path to a real directory (with no
 /// symlink components) because the given path is used to double-check that the
 /// open operation was not affected by an attacker.
+///
+/// NOTE: Unlike other libpathrs methods, pathrs_open will *always* return a
+///       pathrs_root_t (but in the case of an error, the returned root handle
+///       will be a "dummy" which is just used to store the error encountered
+///       during setup). Errors during pathrs_open() can only be detected by
+///       immediately calling pathrs_error() with the returned root handle --
+///       and as with valid root handles, the caller must free it with
+///       pathrs_free().
+///
+///       This unfortunate API wart is necessary because there is no obvious
+///       place to store a libpathrs error when first creating an root handle
+///       (other than using thread-local storage but that opens several other
+///       cans of worms). This approach was chosen because in principle users
+///       could call pathrs_error() after every libpathrs API call.
 #[no_mangle]
-pub extern "C" fn pathrs_open(path: *const c_char) -> Option<&'static mut CRoot> {
-    // Leak the box so we can return the pointer to the caller.
-    // TODO: Return the error back to the caller somehow.
-    let mut _error: Option<FailureError> = None;
-    _error.wrap(None, move || {
-        Root::open(parse_path(path)?)
-            .map(CRoot::from)
-            .map(Leakable::leak)
-            .map(Option::from)
-    })
+pub extern "C" fn pathrs_open(path: *const c_char) -> &'static mut CRoot {
+    match parse_path(path).and_then(Root::open) {
+        Ok(root) => CRoot {
+            inner: Some(root),
+            last_error: None,
+        },
+        Err(err) => CRoot {
+            inner: None,
+            last_error: Some(err),
+        },
+    }
+    .leak()
 }
 
 /// The backend used for path resolution within a pathrs_root_t to get a
 /// pathrs_handle_t.
 #[repr(C)]
 #[allow(non_camel_case_types, dead_code)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum CResolver {
     /// Use the native openat2(2) backend (requires kernel support).
-    PATHRS_KERNEL_RESOLVER,
+    PATHRS_KERNEL_RESOLVER = 0xF000,
     /// Use the userspace "emulated" backend.
-    PATHRS_EMULATED_RESOLVER,
+    PATHRS_EMULATED_RESOLVER = 0xF001,
 }
 
 impl Into<Resolver> for CResolver {
@@ -484,26 +508,38 @@ impl Into<Resolver> for CResolver {
     }
 }
 
-/// Switch the resolver for the given root handle.
+/// Switch the resolver for a pathrs_root_t handle.
 #[no_mangle]
-pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) {
-    root.inner.with_resolver(resolver.into());
+pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) -> c_int {
+    let inner = &mut root.inner;
+
+    root.last_error.wrap(-1, move || {
+        inner
+            .as_mut()
+            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .with_resolver(resolver.into());
+        Ok(0)
+    })
 }
 
 /// The type of object being passed to "object agnostic" libpathrs functions.
+// The values of the enum are baked into the API, you can only append to it.
 #[repr(C)]
 #[allow(non_camel_case_types, dead_code)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum CPointerType {
     /// `pathrs_error_t`
-    PATHRS_ERROR,
+    PATHRS_ERROR = 0xE000,
     /// `pathrs_root_t`
-    PATHRS_ROOT,
+    PATHRS_ROOT = 0xE001,
     /// `pathrs_handle_t`
-    PATHRS_HANDLE,
+    PATHRS_HANDLE = 0xE002,
 }
 
-/// Free a libpathrs object. It is critical that users pass the correct @type --
-/// not doing so will certainly trigger memory unsafety bugs.
+/// Free a libpathrs object.
+///
+/// It is critical that the correct pathrs_type_t is provided for the given
+/// pointer (otherwise memory corruption will almost certainly occur).
 #[no_mangle]
 pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
     if ptr.is_null() {
@@ -537,7 +573,10 @@ pub extern "C" fn pathrs_reopen(handle: &mut CHandle, flags: c_int) -> RawFd {
     let inner = &handle.inner;
 
     handle.last_error.wrap(-1, || {
-        let file = inner.reopen(flags)?;
+        let file = inner
+            .as_ref()
+            .ok_or(Error::InvalidArgument("handle", "invalid pathrs object"))?
+            .reopen(flags)?;
         // Rust sets O_CLOEXEC by default, without an opt-out. We need to
         // disable it if we weren't asked to do O_CLOEXEC.
         if flags.0 & libc::O_CLOEXEC == 0 {
@@ -560,6 +599,8 @@ pub extern "C" fn pathrs_resolve(
 
     root.last_error.wrap(None, move || {
         inner
+            .as_ref()
+            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
             .resolve(parse_path(path)?)
             .map(CHandle::from)
             .map(Leakable::leak)
@@ -583,6 +624,8 @@ pub extern "C" fn pathrs_rename(
 
     root.last_error.wrap(-1, move || {
         inner
+            .as_ref()
+            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
             .rename(parse_path(src)?, parse_path(dst)?, flags)
             .and(Ok(0))
     })
@@ -607,6 +650,8 @@ pub extern "C" fn pathrs_creat(
 
     root.last_error.wrap(None, move || {
         inner
+            .as_ref()
+            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
             .create_file(parse_path(path)?, &perm)
             .map(CHandle::from)
             .map(Leakable::leak)
@@ -644,7 +689,11 @@ pub extern "C" fn pathrs_mknod(
             libc::S_IFSOCK => Err(Error::NotImplemented("mknod(S_IFSOCK)"))?,
             _ => Err(Error::InvalidArgument("mode", "invalid S_IFMT mask"))?,
         };
-        inner.create(path, &inode_type).and(Ok(0))
+        inner
+            .as_ref()
+            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .create(path, &inode_type)
+            .and(Ok(0))
     })
 }
 
@@ -661,7 +710,11 @@ pub extern "C" fn pathrs_symlink(
         let path = parse_path(path)?;
         let target = parse_path(target)?;
 
-        inner.create(path, &InodeType::Symlink(target)).and(Ok(0))
+        inner
+            .as_ref()
+            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .create(path, &InodeType::Symlink(target))
+            .and(Ok(0))
     })
 }
 
@@ -678,6 +731,10 @@ pub extern "C" fn pathrs_hardlink(
         let path = parse_path(path)?;
         let target = parse_path(target)?;
 
-        inner.create(path, &InodeType::Hardlink(target)).and(Ok(0))
+        inner
+            .as_ref()
+            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .create(path, &InodeType::Hardlink(target))
+            .and(Ok(0))
     })
 }
