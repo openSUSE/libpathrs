@@ -69,35 +69,44 @@
 //! The corresponding C example would be:
 //!
 //! ```c
+//! #include <pathrs.h>
+//!
 //! int get_my_fd(void)
 //! {
 //!     int fd = -1;
 //!     pathrs_root_t *root = NULL;
 //!     pathrs_handle_t *handle = NULL;
-//!     pathrs_error_t error = {};
+//!     pathrs_error_t *error = NULL;
 //!
 //!     root = pathrs_open("/path/to/root");
 //!     if (!root)
+//!         abort(); /* will never happen */
+//!     error = pathrs_error(PATHRS_ROOT, root);
+//!     if (error)
 //!         goto err;
 //!
-//!     handle = pathrs_inroot_resolve(root, "/etc/passwd");
-//!     if (!handle)
+//!     handle = pathrs_resolve(root, "/etc/passwd");
+//!     if (!handle) {
+//!         error = pathrs_error(PATHRS_ROOT, root);
 //!         goto err;
+//!     }
 //!
 //!     fd = pathrs_reopen(handle, O_RDONLY);
-//!     if (fd < 0)
+//!     if (fd < 0) {
+//!         error = pathrs_error(PATHRS_HANDLE, handle);
 //!         goto err;
+//!     }
 //!
 //!     goto out;
 //!
 //! err:
-//!     if (pathrs_error(&error) <= 0)
-//!         abort();
-//!     fprintf(stderr, "got error (errno=%d): %s\n", error.errno, error.description);
+//!     fprintf(stderr, "Uh-oh: %s (errno=%d)\n", error->description, error->saved_errno);
+//!     /* Optionally, print out the backtrace... */
 //!
 //! out:
-//!     pathrs_hfree(handle);
-//!     pathrs_rfree(root);
+//!     pathrs_free(PATHRS_ROOT, root);
+//!     pathrs_free(PATHRS_HANDLE, handle);
+//!     pathrs_free(PATHRS_ERROR, error);
 //!     return fd;
 //! }
 //! ```
