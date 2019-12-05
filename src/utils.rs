@@ -22,6 +22,7 @@ use std::ffi::{CString, OsStr};
 use std::fs::File;
 use std::os::unix::{
     ffi::OsStrExt,
+    fs::MetadataExt,
     io::{AsRawFd, RawFd},
 };
 use std::path::{Path, PathBuf};
@@ -30,6 +31,9 @@ use failure::Error as FailureError;
 
 /// The path separator on Linux.
 pub(crate) const PATH_SEPARATOR: u8 = b'/';
+
+// This is part of Linux's ABI.
+const PROC_ROOT_INO: u64 = 1;
 
 lazy_static! {
     /// A handle to `/proc` which is used globally by libpathrs. This ensures
@@ -71,9 +75,17 @@ lazy_static! {
         ).expect("/proc should be available");
 
         // Actually check that /proc isn't a sneaky exploit.
-        let stat = syscalls::fstatfs(proc.as_raw_fd()).expect("fstatfs(/proc) should work");
-        if stat.f_type != libc::PROC_SUPER_MAGIC {
-            panic!("/proc is not actually procfs (f_type is 0x{:X}, but expected 0x{:X})!", stat.f_type, libc::PROC_SUPER_MAGIC)
+        let fs_type = syscalls::fstatfs(proc.as_raw_fd()).expect("fstatfs(/proc) should work").f_type;
+        if fs_type != libc::PROC_SUPER_MAGIC {
+            panic!("/proc is not procfs (f_type is 0x{:X}, not 0x{:X})", fs_type, libc::PROC_SUPER_MAGIC)
+        }
+
+        // And make sure it's the root of procfs. The root directory is
+        // guaranteed to have an inode number of PROC_ROOT_INO. If this check
+        // ever stops working, it's a kernel regression.
+        let ino = proc.metadata().expect("fstat(/proc) should work").ino();
+        if ino != PROC_ROOT_INO {
+            panic!("/proc is not root of a procfs mount (ino is 0x{:X}, not 0x{:X})", ino, PROC_ROOT_INO)
         }
 
         // All great -- this will be re-used by all "/proc" users.
@@ -177,7 +189,7 @@ lazy_static! {
     /// that they can contain magic-links). This list should hopefully be
     /// exhaustive, but there's no real way of being sure since `nd_jump_link()`
     /// can be used by any non-mainline filesystem.
-    // XXX: This list is only correct for Linux 5.2. We should go back into old
+    // XXX: This list is only correct for Linux 5.4. We should go back into old
     //      kernel versions to see who else used nd_jump_link() in the past.
     static ref DANGEROUS_FILESYSTEMS: Vec<i64> = vec![
         libc::PROC_SUPER_MAGIC,            // procfs
