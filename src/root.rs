@@ -204,8 +204,8 @@ impl RenameFlags {
 /// [`Error::SafetyViolation`]: enum.Error.html#variant.SafetyViolation
 pub struct Root {
     inner: File,
-    resolver: Resolver,
     path: PathBuf,
+    pub resolver: Resolver,
 }
 
 // Only used internally by libpathrs.
@@ -233,7 +233,7 @@ impl Root {
     /// The [`Resolver`] used by this handle is chosen at runtime based on which
     /// resolvers are supported by the running kernel (the default [`Resolver`]
     /// is always `Resolver::default()`). You can change the [`Resolver`] used
-    /// with [`Root::with_resolver`], though this is not recommended.
+    /// by changing `Root.resolver`, though this is not recommended.
     ///
     /// # Errors
     ///
@@ -242,7 +242,6 @@ impl Root {
     /// might be relaxed in the future.
     ///
     /// [`Root`]: struct.Root.html
-    /// [`Root::with_resolver`]: struct.Root.html#method.with_resolver
     /// [`Resolver`]: enum.Resolver.html
     // TODO: We really need to provide a dirfd as a source, though the main
     //       problem here is that it's unclear what the "correct" path is for
@@ -268,20 +267,6 @@ impl Root {
 
         root.check().context("double-check new root is valid")?;
         Ok(root)
-    }
-
-    /// Change the [`Resolver`] used by this [`Root`] instance.
-    ///
-    /// Using this option is not recommended, but it can be useful for testing
-    /// or specifically ensuring that a particular backend is used to work
-    /// around issues in another backend.
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Root::with_resolver`]: struct.Root.html#method.with_resolver
-    /// [`Resolver`]: enum.Resolver.html
-    pub fn with_resolver(&mut self, resolver: Resolver) -> &mut Self {
-        self.resolver = resolver;
-        self
     }
 
     /// Check whether the Root is still valid.

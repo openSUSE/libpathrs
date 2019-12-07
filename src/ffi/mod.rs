@@ -517,7 +517,7 @@ pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) -> 
         inner
             .as_mut()
             .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
-            .with_resolver(resolver.into());
+            .resolver = resolver.into();
         Ok(0)
     })
 }
