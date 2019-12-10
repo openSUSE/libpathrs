@@ -82,10 +82,10 @@ class Error(Exception):
 		# Backtrace if available.
 		if self.backtrace:
 			print("rust backtrace:", file=out)
-		for entry in self.backtrace:
-			print("  %s" % (entry,), file=out)
-			if entry.symbol.file is not None:
-				print("    in file '%s':%d" % (entry.symbol.file, entry.symbol.lineno), file=out)
+			for entry in self.backtrace:
+				print("  %s" % (entry,), file=out)
+				if entry.symbol.file is not None:
+					print("    in file '%s':%d" % (entry.symbol.file, entry.symbol.lineno), file=out)
 
 
 class BacktraceSymbol(object):
