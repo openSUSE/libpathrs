@@ -20,7 +20,6 @@ use crate::syscalls::unstable;
 use crate::{errors, errors::ErrorExt, user};
 use crate::{Error, Handle, Root};
 
-use core::convert::TryFrom;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
@@ -51,9 +50,9 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     // userspace emulation.
     let mut handle: Option<Handle> = None;
     for _ in 0..16 {
-        match unstable::openat2(root.as_raw_fd(), path.as_ref(), &how) {
+        match unstable::openat2(root.inner.as_raw_fd(), path.as_ref(), &how) {
             Ok(file) => {
-                handle = Some(Handle::try_from(file).wrap("convert RESOLVE_IN_ROOT fd to Handle")?);
+                handle = Some(Handle::new(file).wrap("convert RESOLVE_IN_ROOT fd to Handle")?);
                 break;
             }
             Err(err) => match err.root_cause().raw_os_error() {

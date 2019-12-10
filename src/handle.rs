@@ -18,9 +18,7 @@
 
 use crate::{utils::RawFdExt, Error};
 
-use core::convert::TryFrom;
 use std::fs::File;
-use std::ops::Deref;
 
 use libc::c_int;
 
@@ -42,26 +40,14 @@ use libc::c_int;
 /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
 /// [`RawFd`]: https://doc.rust-lang.org/std/os/unix/io/type.RawFd.html
 /// [`libc::openat`]: https://docs.rs/libc/latest/libc/fn.openat.html
-pub struct Handle(File);
-
-// Only used internally by libpathrs.
-// TODO: Remove the need for this (it can be used to subvert libpathrs).
-#[doc(hidden)]
-impl TryFrom<File> for Handle {
-    type Error = Error;
-    fn try_from(file: File) -> Result<Self, Self::Error> {
-        // TODO: Check if the file is valid.
-        Ok(Handle(file))
-    }
+pub struct Handle {
+    pub(crate) inner: File,
 }
 
-// Only used internally by libpathrs.
-// TODO: Remove the need for this (it can be used to subvert libpathrs).
-#[doc(hidden)]
-impl Deref for Handle {
-    type Target = File;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl Handle {
+    pub(crate) fn new(file: File) -> Result<Self, Error> {
+        // TODO: Check if the file is valid.
+        Ok(Handle { inner: file })
     }
 }
 
@@ -119,7 +105,7 @@ impl Handle {
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create
     pub fn reopen(&self, flags: OpenFlags) -> Result<File, Error> {
-        self.0.reopen(flags)
+        self.inner.reopen(flags)
     }
 
     // TODO: All the different stat* interfaces?

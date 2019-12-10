@@ -24,9 +24,7 @@ use crate::{
 };
 use crate::{Error, Handle};
 
-use core::convert::TryFrom;
 use std::fs::{File, Permissions};
-use std::ops::Deref;
 use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd};
 use std::path::{Path, PathBuf};
 
@@ -207,28 +205,11 @@ impl RenameFlags {
 /// [`Root`]: struct.Root.html
 /// [`Error::SafetyViolation`]: enum.Error.html#variant.SafetyViolation
 pub struct Root {
-    inner: File,
-    path: PathBuf,
+    pub(crate) inner: File,
+    // TODO: Root.path handling really needs to be relaxed. Really, we should
+    //       just store the root path as a cache and re-fetch it if it changes.
+    pub(crate) path: PathBuf,
     pub resolver: Resolver,
-}
-
-// Only used internally by libpathrs.
-// TODO: Remove the need for this (it can be used to subvert libpathrs).
-#[doc(hidden)]
-impl AsRef<Path> for Root {
-    fn as_ref(&self) -> &Path {
-        self.path.as_ref()
-    }
-}
-
-// Only used internally by libpathrs.
-// TODO: Remove the need for this (it can be used to subvert libpathrs).
-#[doc(hidden)]
-impl Deref for Root {
-    type Target = File;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
 }
 
 impl Root {
@@ -255,9 +236,6 @@ impl Root {
     //       that path in the first place?
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let path = path.as_ref();
-
-        // TODO: All of this should be relaxed. Really, we should just store the
-        //       root path as a cache and re-fetch it if it changes.
 
         ensure!(
             path.is_absolute(),
@@ -352,6 +330,7 @@ impl Root {
         let dirfd = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
+            .inner
             .as_raw_fd();
 
         match inode_type {
@@ -372,6 +351,7 @@ impl Root {
                 let olddirfd = self
                     .resolve(oldparent)
                     .wrap("resolve hardlink source parent for hardlink")?
+                    .inner
                     .as_raw_fd();
                 syscalls::linkat(olddirfd, oldname, dirfd, name, 0)
             }
@@ -435,6 +415,7 @@ impl Root {
         let dirfd = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
+            .inner
             .as_raw_fd();
 
         // TODO: openat2(2) supports doing O_CREAT on trailing symlinks without
@@ -445,7 +426,7 @@ impl Root {
             .context(errors::RawOsError {
                 operation: "pathrs create_file",
             })?;
-        Ok(Handle::try_from(file).wrap("convert O_CREAT fd to Handle")?)
+        Ok(Handle::new(file).wrap("convert O_CREAT fd to Handle")?)
     }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.
@@ -474,6 +455,7 @@ impl Root {
         let dirfd = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
+            .inner
             .as_raw_fd();
 
         // There is no kernel API to "just remove this inode please". You need
@@ -540,10 +522,12 @@ impl Root {
         let src_dirfd = self
             .resolve(src_parent)
             .wrap("resolve source path for rename")?
+            .inner
             .as_raw_fd();
         let dst_dirfd = self
             .resolve(dst_parent)
             .wrap("resolve target path for rename")?
+            .inner
             .as_raw_fd();
 
         syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0).context(

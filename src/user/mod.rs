@@ -43,7 +43,6 @@ use crate::{
 };
 use crate::{Error, Handle, Root};
 
-use core::convert::TryFrom;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Error as IOError;
@@ -59,7 +58,7 @@ const MAX_SYMLINK_TRAVERSALS: usize = 128;
 fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Result<(), Error> {
     // Combine the root path and our expected_path to get the full path to
     // compare current against.
-    let full_path: PathBuf = root.as_ref().join(
+    let full_path: PathBuf = root.path.join(
         expected
             .as_ref()
             .components()
@@ -105,7 +104,10 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let mut current = root.try_clone_hotfix().wrap("dup root as starting point")?;
+    let mut current = root
+        .inner
+        .try_clone_hotfix()
+        .wrap("dup root as starting point")?;
 
     // Get initial set of components from the passed path. We remove  all components
     let mut components: VecDeque<_> = path
@@ -238,7 +240,10 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
         // current back to the root.
         expected_path.pop();
         if contents.is_absolute() {
-            current = root.try_clone_hotfix().wrap("dup root as next current")?;
+            current = root
+                .inner
+                .try_clone_hotfix()
+                .wrap("dup root as next current")?;
         }
     }
 
@@ -249,5 +254,5 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     root.check()?;
 
     // Everything is Kosher here -- convert to a handle.
-    Handle::try_from(current)
+    Handle::new(current)
 }
