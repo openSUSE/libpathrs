@@ -49,8 +49,6 @@
 //! ```
 //! # extern crate libc;
 //! # use crate::Error;
-//! use std::path::Path;
-//!
 //! # fn main() -> Result<(), Error> {
 //! // Get a root handle for resolution.
 //! let root = Root::open("/path/to/root")?;
@@ -151,12 +149,19 @@ mod errors {
     use std::error::Error as StdError;
     use std::io::Error as IOError;
 
-    /// The primary error type returned by libpathrs. All public interfaces of
-    /// libpathrs will return this error in `Result`s.
+    /// The primary error type returned by libpathrs.
+    ///
+    /// All public interfaces of libpathrs will return this error in `Result`s.
     ///
     /// # Caveats
     /// Until [`Error::chain`] is stabilised, it will be necessary for callers
     /// to manually implement their own version of this feature.
+    ///
+    /// Also note that currently (due to the `snafu` API), in order to enable
+    /// error backtraces the environment must contain `RUST_LIB_BACKTRACE=1` or
+    /// `RUST_BACKTRACE=1` before the first `snafu`-based error is generated
+    /// (the environment is only checked once). Otherwise errors will not
+    /// contain backtraces.
     ///
     /// [`Error::chain`]: https://doc.rust-lang.org/nightly/std/error/trait.Error.html#method.chain
     #[derive(Snafu, Debug)]
@@ -167,6 +172,7 @@ mod errors {
         NotImplemented {
             /// Feature which is not implemented.
             feature: &'static str,
+            /// Backtrace captured at time of error.
             backtrace: Option<Backtrace>,
         },
 
@@ -175,6 +181,7 @@ mod errors {
         NotSupported {
             /// Feature which is not supported.
             feature: &'static str,
+            /// Backtrace captured at time of error.
             backtrace: Option<Backtrace>,
         },
 
@@ -185,50 +192,70 @@ mod errors {
             name: &'static str,
             /// Description of what makes the argument invalid.
             description: &'static str,
+            /// Backtrace captured at time of error.
             backtrace: Option<Backtrace>,
         },
 
-        /// libpathrs has detected some form of safety requirement violation. This
-        /// might be an attempted breakout by an attacker or even a bug internal to
-        /// libpathrs.
+        /// libpathrs has detected some form of safety requirement violation.
+        /// This might be an attempted breakout by an attacker or even a bug
+        /// internal to libpathrs.
         #[snafu(display("violation of safety requirement: {}", description))]
         SafetyViolation {
             /// Description of safety requirement which was violated.
             description: &'static str,
+            /// Backtrace captured at time of error.
             backtrace: Option<Backtrace>,
         },
 
-        /// The requested libpathrs operation directly resulted in an operating
-        /// system error. This should be contrasted with [`InternalOsError`] (which
-        /// is an error triggered internally by libpathrs while servicing the user
-        /// request).
+        /// The requested libpathrs operation resulted in an [`IOError`]. This
+        /// should be contrasted with [`RawOsError`] -- which indicates an error
+        /// triggered by one of libpathrs's syscall wrappers.
         ///
-        /// [`InternalOsError`]: enum.Error.html#variant.InternalOsError
+        /// [`IOError`]: https://doc.rust-lang.org/std/io/struct.Error.html
+        /// [`RawOsError`]: enum.Error.html#variant.RawOsError
+        // TODO: Remove the OsError and RawOsError distinction.
         #[snafu(display("{} failed", operation))]
         OsError {
+            /// Operation which was being attempted.
             operation: &'static str,
+            /// Underlying error.
             source: IOError,
+            /// Backtrace captured at time of error.
             backtrace: Option<Backtrace>,
         },
 
         /// The requested libpathrs operation directly resulted in an operating
-        /// system error. This should be contrasted with [`InternalOsError`] (which
-        /// is an error triggered internally by libpathrs while servicing the user
-        /// request).
+        /// system error. This should be contrasted with [`InternalOsError`]
+        /// (which is an error triggered internally by libpathrs while servicing
+        /// the user request).
         ///
-        /// [`InternalOsError`]: enum.Error.html#variant.InternalOsError
+        /// The requested libpathrs operation resulted in a [`SyscallError`] by
+        /// one of libpathrs's syscall wrappers. This should be contrasted with
+        /// [`OsError`] -- which indicates an error triggered by a Rust stdlib
+        /// function.
+        ///
+        /// [`IOError`]: https://doc.rust-lang.org/std/io/struct.Error.html
+        /// [`OsError`]: enum.Error.html#variant.OsError
+        // TODO: Remove the OsError and RawOsError distinction.
         #[snafu(display("{} failed", operation))]
         RawOsError {
+            /// Operation which was being attempted.
             operation: &'static str,
+            /// Underlying syscall wrapper error.
             #[snafu(backtrace)]
             source: super::SyscallError,
         },
 
         /// Wrapped represents an Error which has some simple string-wrapping
-        /// information.
+        /// information. This is used to allow for some additional context to be
+        /// added at call-sites.
+        // XXX: Arguably this is super ugly and we should have a separate
+        //      context selector for each callsite but that's just ridiculous.
         #[snafu(display("{}", context))]
         Wrapped {
+            /// Additional context information about the contained error.
             context: String,
+            /// Underlying wrapped error.
             #[snafu(backtrace)]
             #[snafu(source(from(Error, Box::new)))]
             source: Box<Error>,

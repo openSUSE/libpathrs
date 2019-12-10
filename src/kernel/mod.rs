@@ -58,6 +58,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
             Err(err) => match err.root_cause().raw_os_error() {
                 Some(libc::ENOSYS) => break, // shouldn't happen
                 Some(libc::EAGAIN) => continue,
+                // TODO: Add wrapper for known-bad openat2 return codes.
+                //Some(libc::EXDEV) | Some(libc::ELOOP) => { ... }
                 _ => {
                     return Err(err).context(errors::RawOsError {
                         operation: "openat2 subpath",

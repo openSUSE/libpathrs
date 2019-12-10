@@ -51,8 +51,10 @@ impl Handle {
     }
 }
 
-/// Wrapper for the underlying `libc`'s `O_*` flags. The flag values and their
-/// meaning is identical to the description in the `open(2)` man page.
+/// Wrapper for the underlying `libc`'s `O_*` flags.
+///
+/// The flag values and their meaning is identical to the description in the
+/// `open(2)` man page.
 ///
 /// # Caveats
 ///

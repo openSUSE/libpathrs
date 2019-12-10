@@ -157,9 +157,10 @@ fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), Error> {
     Ok((parent, name.as_ref()))
 }
 
-/// Wrapper for the underlying `libc`'s `RENAME_*` flags. The flag values and
-/// their meaning is identical to the description in the [`renameat2(2)`] man
-/// page.
+/// Wrapper for the underlying `libc`'s `RENAME_*` flags.
+///
+/// The flag values and their meaning is identical to the description in the
+/// [`renameat2(2)`] man page.
 ///
 /// [`renameat2(2)`] might not not be supported on your kernel -- in which
 /// case [`Root::rename`] will fail if you specify any RenameFlags. You can

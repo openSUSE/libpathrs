@@ -58,6 +58,14 @@ impl fmt::Display for FrozenFd {
     }
 }
 
+/// Internal error returned by libpathrs's syscall wrappers.
+///
+/// The primary thing of note is that these errors contain detailed debugging
+/// information about the arguments to each given syscall. Users would most
+/// often not interact with these error variants directly and instead would make
+/// use of the top-level [`Error`] type.
+///
+/// [`Error`]: enum.Error.html
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("fcntl({}, F_DUPFD_CLOEXEC, 0)", fd))]
@@ -722,8 +730,6 @@ pub(crate) mod unstable {
         if fd >= 0 {
             Ok(unsafe { File::from_raw_fd(fd) })
         } else {
-            // TODO: Wrap libc::EXDEV.
-            //       --> err.raw_os_error() != Some(libc::EXDEV),
             return Err(err).context(Openat2 {
                 dirfd: dirfd,
                 path: path,
