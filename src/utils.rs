@@ -16,7 +16,7 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{syscalls, OpenFlags};
+use crate::{errors, syscalls, Error, OpenFlags};
 
 use std::ffi::{CString, OsStr};
 use std::fs::File;
@@ -27,7 +27,7 @@ use std::os::unix::{
 };
 use std::path::{Path, PathBuf};
 
-use failure::Error as FailureError;
+use snafu::ResultExt;
 
 /// The path separator on Linux.
 pub(crate) const PATH_SEPARATOR: u8 = b'/';
@@ -93,6 +93,7 @@ lazy_static! {
     };
 }
 
+// Private trait necessary to work around the "orphan trait" restriction.
 pub(crate) trait ToCString {
     /// Convert to a CStr.
     fn to_c_string(&self) -> CString;
@@ -118,7 +119,7 @@ impl ToCString for Path {
 
 pub(crate) trait RawFdExt {
     /// Re-open a file descriptor.
-    fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError>;
+    fn reopen(&self, flags: OpenFlags) -> Result<File, Error>;
 
     /// Get the path this RawFd is referencing.
     ///
@@ -128,29 +129,40 @@ pub(crate) trait RawFdExt {
     /// understanding that it only provides the guarantee that "at some point
     /// during execution this was the path the fd pointed to" and
     /// no more.
-    fn as_unsafe_path(&self) -> Result<PathBuf, FailureError>;
+    fn as_unsafe_path(&self) -> Result<PathBuf, Error>;
 }
 
-fn proc_subpath(fd: RawFd) -> Result<String, FailureError> {
+fn proc_subpath(fd: RawFd) -> Result<String, Error> {
     if fd == libc::AT_FDCWD {
         Ok(format!("self/cwd"))
     } else if fd.is_positive() {
         Ok(format!("self/fd/{}", fd))
     } else {
-        bail!("invalid fd: {}", fd)
+        errors::InvalidArgument {
+            name: "fd",
+            description: "must be positive or AT_FDCWD",
+        }
+        .fail()
     }
 }
 
 impl RawFdExt for RawFd {
-    fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
+    fn reopen(&self, flags: OpenFlags) -> Result<File, Error> {
         // TODO: We should look into using O_EMPTYPATH if it's available to
         //       avoid the /proc dependency -- though then again, as_unsafe_path
         //       necessarily requires /proc.
         syscalls::openat_follow(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?, flags.0, 0)
+            .context(errors::RawOsError {
+                operation: "reopen fd through procfs",
+            })
     }
 
-    fn as_unsafe_path(&self) -> Result<PathBuf, FailureError> {
-        syscalls::readlinkat(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?)
+    fn as_unsafe_path(&self) -> Result<PathBuf, Error> {
+        syscalls::readlinkat(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?).context(
+            errors::RawOsError {
+                operation: "get fd's path through procfs",
+            },
+        )
     }
 }
 
@@ -160,11 +172,11 @@ impl RawFdExt for RawFd {
 //      types we are going to be using.
 
 impl RawFdExt for File {
-    fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
+    fn reopen(&self, flags: OpenFlags) -> Result<File, Error> {
         self.as_raw_fd().reopen(flags)
     }
 
-    fn as_unsafe_path(&self) -> Result<PathBuf, FailureError> {
+    fn as_unsafe_path(&self) -> Result<PathBuf, Error> {
         self.as_raw_fd().as_unsafe_path()
     }
 }
@@ -177,11 +189,11 @@ pub(crate) trait FileExt {
     ///
     /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
     /// [pr62425]: https://github.com/rust-lang/rust/pull/62425
-    fn try_clone_hotfix(&self) -> Result<File, FailureError>;
+    fn try_clone_hotfix(&self) -> Result<File, Error>;
 
     /// Check if the File is on a "dangerous" filesystem that might contain
     /// magic-links.
-    fn is_dangerous(&self) -> Result<bool, FailureError>;
+    fn is_dangerous(&self) -> Result<bool, Error>;
 }
 
 lazy_static! {
@@ -198,17 +210,20 @@ lazy_static! {
 }
 
 impl FileExt for File {
-    fn try_clone_hotfix(&self) -> Result<File, FailureError> {
-        syscalls::fcntl_dupfd_cloxec(self.as_raw_fd())
+    fn try_clone_hotfix(&self) -> Result<File, Error> {
+        syscalls::fcntl_dupfd_cloxec(self.as_raw_fd()).context(errors::RawOsError {
+            operation: "clone fd",
+        })
     }
 
-    fn is_dangerous(&self) -> Result<bool, FailureError> {
+    fn is_dangerous(&self) -> Result<bool, Error> {
         // There isn't a marker on a filesystem level to indicate whether
         // nd_jump_link() is used internally. So, we just have to make an
         // educated guess based on which mainline filesystems expose
         // magic-links.
-
-        let stat = syscalls::fstatfs(self.as_raw_fd())?;
+        let stat = syscalls::fstatfs(self.as_raw_fd()).context(errors::RawOsError {
+            operation: "check fstype of fd",
+        })?;
         Ok(DANGEROUS_FILESYSTEMS.contains(&stat.f_type))
     }
 }

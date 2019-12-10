@@ -17,15 +17,14 @@
  */
 
 use crate::syscalls::unstable;
-use crate::user;
-use crate::{Handle, Root};
+use crate::{errors, errors::ErrorExt, user};
+use crate::{Error, Handle, Root};
 
 use core::convert::TryFrom;
-use std::io::Error as IOError;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
-use failure::{Error as FailureError, ResultExt};
+use snafu::ResultExt;
 
 lazy_static! {
     pub(crate) static ref IS_SUPPORTED: bool = {
@@ -35,10 +34,8 @@ lazy_static! {
 }
 
 /// Resolve `path` within `root` through `openat2(2)`.
-pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureError> {
-    if !*IS_SUPPORTED {
-        bail!("kernel resolution is not supported on this kernel")
-    }
+pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Error> {
+    ensure!(*IS_SUPPORTED, errors::NotSupported { feature: "openat2" });
 
     let mut how = unstable::OpenHow::new();
     how.flags = libc::O_PATH as u64;
@@ -54,27 +51,24 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
     // userspace emulation.
     let mut handle: Option<Handle> = None;
     for _ in 0..16 {
-        let file = unstable::openat2(root.as_raw_fd(), path.as_ref(), &how);
-        match file {
+        match unstable::openat2(root.as_raw_fd(), path.as_ref(), &how) {
             Ok(file) => {
-                handle =
-                    Some(Handle::try_from(file).context("convert RESOLVE_IN_ROOT fd to Handle")?);
+                handle = Some(Handle::try_from(file).wrap("convert RESOLVE_IN_ROOT fd to Handle")?);
                 break;
             }
-            Err(err) => {
-                match err
-                    .find_root_cause()
-                    .downcast_ref::<IOError>()
-                    .map(|ioerr| ioerr.raw_os_error())
-                {
-                    Some(Some(libc::EAGAIN)) => continue,
-                    _ => return Err(err).context("open sub-path")?,
+            Err(err) => match err.root_cause().raw_os_error() {
+                Some(libc::ENOSYS) => break, // shouldn't happen
+                Some(libc::EAGAIN) => continue,
+                _ => {
+                    return Err(err).context(errors::RawOsError {
+                        operation: "openat2 subpath",
+                    })?
                 }
-            }
+            },
         }
     }
 
     Ok(handle.unwrap_or(
-        user::resolve(root, path).context("fallback user-space resolution for RESOLVE_IN_ROOT")?,
+        user::resolve(root, path).wrap("fallback user-space resolution for RESOLVE_IN_ROOT")?,
     ))
 }

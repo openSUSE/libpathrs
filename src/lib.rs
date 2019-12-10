@@ -48,10 +48,10 @@
 //!
 //! ```
 //! # extern crate libc;
-//! # use std::error::Error;
+//! # use crate::Error;
 //! use std::path::Path;
 //!
-//! # fn main() -> Result<(), FailureError> {
+//! # fn main() -> Result<(), Error> {
 //! // Get a root handle for resolution.
 //! let root = Root::open("/path/to/root")?;
 //! // Resolve the path.
@@ -121,10 +121,10 @@
 
 extern crate errno;
 #[macro_use]
-extern crate failure;
-#[macro_use]
 extern crate lazy_static;
 extern crate libc;
+#[macro_use]
+extern crate snafu;
 
 mod handle;
 pub use handle::*;
@@ -132,122 +132,159 @@ pub use handle::*;
 mod root;
 pub use root::*;
 
+mod syscalls;
+pub use syscalls::Error as SyscallError;
+
 // C-friendly API.
 mod ffi;
 // Backends.
 mod kernel;
 mod user;
 // Internally used helpers.
-mod syscalls;
 mod utils;
 
-use crate::utils::RawFdExt;
+// XXX: This is a workaround until
+//      https://github.com/shepmaster/snafu/issues/188 is resolved.
+pub use errors::Error;
+mod errors {
+    use snafu::{Backtrace, ResultExt};
+    use std::error::Error as StdError;
+    use std::io::Error as IOError;
 
-use std::fmt;
-use std::io::Error as IOError;
-use std::os::unix::io::RawFd;
-use std::path::PathBuf;
+    /// The primary error type returned by libpathrs. All public interfaces of
+    /// libpathrs will return this error in `Result`s.
+    ///
+    /// # Caveats
+    /// Until [`Error::chain`] is stabilised, it will be necessary for callers
+    /// to manually implement their own version of this feature.
+    ///
+    /// [`Error::chain`]: https://doc.rust-lang.org/nightly/std/error/trait.Error.html#method.chain
+    #[derive(Snafu, Debug)]
+    #[snafu(visibility = "pub(crate)")]
+    pub enum Error {
+        /// The requested feature is not yet implemented.
+        #[snafu(display("feature '{}' not implemented", feature))]
+        NotImplemented {
+            /// Feature which is not implemented.
+            feature: &'static str,
+            backtrace: Option<Backtrace>,
+        },
 
-/// Argument types for syscalls.
-///
-/// This is primarily used to pretty-print syscall arguments.
-#[doc(hidden)]
-// No real need to expose this to users. Most people will just pretty-print the
-// errors and don't _really_ care what the syscall arguments look like.
-#[derive(Debug)]
-pub enum SyscallArg {
-    FrozenFd(RawFd, Option<PathBuf>),
-    Path(PathBuf),
-    Raw(String),
-}
+        /// The requested feature is not supported by this kernel.
+        #[snafu(display("feature '{}' not supported on this kernel", feature))]
+        NotSupported {
+            /// Feature which is not supported.
+            feature: &'static str,
+            backtrace: Option<Backtrace>,
+        },
 
-impl SyscallArg {
-    pub fn from_fd(fd: RawFd) -> Self {
-        // as_unsafe_path is safe here since it is only used for pretty-printing
-        // error messages and no real logic.
-        SyscallArg::FrozenFd(fd, fd.as_unsafe_path().ok())
-    }
-}
+        /// One of the provided arguments in invalid.
+        #[snafu(display("invalid {} argument: {}", name, description))]
+        InvalidArgument {
+            /// Name of the invalid argument.
+            name: &'static str,
+            /// Description of what makes the argument invalid.
+            description: &'static str,
+            backtrace: Option<Backtrace>,
+        },
 
-impl fmt::Display for SyscallArg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SyscallArg::FrozenFd(fd, path) => {
-                match *fd {
-                    libc::AT_FDCWD => write!(f, "[AT_FDCWD]")?,
-                    _ => write!(f, "[{}]", fd)?,
-                };
-                match path {
-                    Some(path) => write!(f, "{:?}", path),
-                    None => write!(f, "<unknown>"),
-                }
-            }
-            SyscallArg::Path(path) => write!(f, "{:?}", path),
-            SyscallArg::Raw(arg) => f.write_str(arg),
-        }
-    }
-}
+        /// libpathrs has detected some form of safety requirement violation. This
+        /// might be an attempted breakout by an attacker or even a bug internal to
+        /// libpathrs.
+        #[snafu(display("violation of safety requirement: {}", description))]
+        SafetyViolation {
+            /// Description of safety requirement which was violated.
+            description: &'static str,
+            backtrace: Option<Backtrace>,
+        },
 
-/// The underlying [`cause`] of the [`failure::Error`] type returned by
-/// libpathrs.
-///
-/// [`cause`]: https://docs.rs/failure/*/failure/struct.Error.html#method.cause
-/// [`failure::Error`]: https://docs.rs/failure/*/failure/struct.Error.html
-#[derive(Fail, Debug)]
-pub enum Error {
-    /// The requested feature is not yet implemented.
-    NotImplemented(&'static str),
-
-    /// One of the provided arguments in invalid. The returned tuple is
-    /// (argument name, description of error).
-    InvalidArgument(&'static str, &'static str),
-
-    /// Returned whenever libpathrs has detected some form of safety requirement
-    /// violation. This might be an attempted breakout by an attacker or even a
-    /// bug internal to libpathrs.
-    SafetyViolation(&'static str),
-
-    /// An operating system error during a raw-syscall execution.
-    SyscallError {
-        /// Syscall name.
-        name: &'static str,
-        /// Arguments passed to syscall.
+        /// The requested libpathrs operation directly resulted in an operating
+        /// system error. This should be contrasted with [`InternalOsError`] (which
+        /// is an error triggered internally by libpathrs while servicing the user
+        /// request).
         ///
-        /// The docs for `SyscallArg` are hidden because users really shouldn't
-        /// be touching them (they are only used to pretty-print syscall errors
-        /// and shouldn't be used for any other purpose).
-        args: Vec<SyscallArg>,
-        /// Error returned from syscall.
-        // XXX: Arguably this shouldn't be a #[fail(cause)], because then people
-        //      can't downcast to Error. I should fix this "soon".
-        #[fail(cause)]
-        cause: IOError,
-    },
-}
+        /// [`InternalOsError`]: enum.Error.html#variant.InternalOsError
+        #[snafu(display("{} failed", operation))]
+        OsError {
+            operation: &'static str,
+            source: IOError,
+            backtrace: Option<Backtrace>,
+        },
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::NotImplemented(desc) => write!(f, "not yet implemented: {}", desc)?,
-            Error::InvalidArgument(name, desc) => write!(f, "invalid {} argument: {}", name, desc)?,
-            Error::SafetyViolation(desc) => write!(f, "violation of safety requirement: {}", desc)?,
-            Error::SyscallError {
-                name,
-                args,
-                cause: _,
-            } => {
-                // Syscall name.
-                write!(f, "syscall error {}", name)?;
-                // And now the arguments.
-                if let Some((head, tail)) = args.split_first() {
-                    write!(f, "({}", head)?;
-                    for arg in tail {
-                        write!(f, ", {}", arg)?;
-                    }
-                    write!(f, ")")?;
-                }
+        /// The requested libpathrs operation directly resulted in an operating
+        /// system error. This should be contrasted with [`InternalOsError`] (which
+        /// is an error triggered internally by libpathrs while servicing the user
+        /// request).
+        ///
+        /// [`InternalOsError`]: enum.Error.html#variant.InternalOsError
+        #[snafu(display("{} failed", operation))]
+        RawOsError {
+            operation: &'static str,
+            #[snafu(backtrace)]
+            source: super::SyscallError,
+        },
+
+        /// Wrapped represents an Error which has some simple string-wrapping
+        /// information.
+        #[snafu(display("{}", context))]
+        Wrapped {
+            context: String,
+            #[snafu(backtrace)]
+            #[snafu(source(from(Error, Box::new)))]
+            source: Box<Error>,
+        },
+    }
+
+    // Private trait necessary to work around the "orphan trait" restriction.
+    pub(crate) trait ErrorExt {
+        /// Wrap a `Result<..., Error>` with an additional context string.
+        fn wrap<S: Into<String>>(self, context: S) -> Self;
+    }
+
+    impl<T> ErrorExt for Result<T, Error> {
+        fn wrap<S: Into<String>>(self, context: S) -> Self {
+            self.context(Wrapped {
+                context: context.into(),
+            })
+        }
+    }
+
+    /// A backport of the nightly-only [`Chain`]. This method
+    /// will be removed as soon as that is stabilised.
+    ///
+    /// [`Chain`]: https://doc.rust-lang.org/nightly/std/error/struct.Chain.html
+    // XXX: https://github.com/rust-lang/rust/issues/58520
+    pub(crate) struct Chain<'a> {
+        current: Option<&'a (dyn StdError + 'static)>,
+    }
+
+    impl<'a> Iterator for Chain<'a> {
+        type Item = &'a (dyn StdError + 'static);
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let current = self.current;
+            self.current = self.current.and_then(StdError::source);
+            current
+        }
+    }
+
+    impl Error {
+        /// A backport of the nightly-only [`Error::chain`]. This method
+        /// will be removed as soon as that is stabilised.
+        ///
+        /// [`Error::chain`]: https://doc.rust-lang.org/nightly/std/error/trait.Error.html#method.chain
+        // XXX: https://github.com/rust-lang/rust/issues/58520
+        pub(crate) fn iter_chain_hotfix(&self) -> Chain {
+            Chain {
+                current: Some(self),
             }
         }
-        Ok(())
+
+        /// Shorthand for `self.iter_chain_hotfix().last()`.
+        pub(crate) fn root_cause(&self) -> &(dyn StdError + 'static) {
+            self.iter_chain_hotfix()
+                .last()
+                .expect("Error::iter_chain_hotfix() should have at least one result")
+        }
     }
 }

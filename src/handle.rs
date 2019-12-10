@@ -16,13 +16,12 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::utils::RawFdExt;
+use crate::{utils::RawFdExt, Error};
 
 use core::convert::TryFrom;
 use std::fs::File;
 use std::ops::Deref;
 
-use failure::Error as FailureError;
 use libc::c_int;
 
 /// A handle to an existing inode within a [`Root`].
@@ -49,7 +48,7 @@ pub struct Handle(File);
 // TODO: Remove the need for this (it can be used to subvert libpathrs).
 #[doc(hidden)]
 impl TryFrom<File> for Handle {
-    type Error = FailureError;
+    type Error = Error;
     fn try_from(file: File) -> Result<Self, Self::Error> {
         // TODO: Check if the file is valid.
         Ok(Handle(file))
@@ -119,7 +118,7 @@ impl Handle {
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create
-    pub fn reopen(&self, flags: OpenFlags) -> Result<File, FailureError> {
+    pub fn reopen(&self, flags: OpenFlags) -> Result<File, Error> {
         self.0.reopen(flags)
     }
 

@@ -17,6 +17,8 @@
  */
 
 use crate::{
+    errors,
+    errors::ErrorExt,
     kernel, syscalls, user,
     utils::{RawFdExt, PATH_SEPARATOR},
 };
@@ -28,8 +30,8 @@ use std::ops::Deref;
 use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd};
 use std::path::{Path, PathBuf};
 
-use failure::{Error as FailureError, ResultExt};
 use libc::{c_int, dev_t};
+use snafu::{OptionExt, ResultExt};
 
 /// An inode type to be created with [`Root::create`].
 ///
@@ -136,22 +138,24 @@ impl Resolver {
 
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
-fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), FailureError> {
+fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), Error> {
     // Get the parent path.
     let parent = path.parent().unwrap_or("/".as_ref());
 
     // Now construct the trailing portion of the target.
-    let name = path
-        .file_name()
-        .ok_or(Error::InvalidArgument("path", "no trailing component"))?;
+    let name = path.file_name().context(errors::InvalidArgument {
+        name: "path",
+        description: "no trailing component",
+    })?;
 
     // It's critical we are only touching the final component in the path.
     // If there are any other path components we must bail.
-    if name.as_bytes().contains(&PATH_SEPARATOR) {
-        return Err(Error::SafetyViolation(
-            "trailing component of pathname contains '/'",
-        ))?;
-    }
+    ensure!(
+        !name.as_bytes().contains(&PATH_SEPARATOR),
+        errors::SafetyViolation {
+            description: "trailing component of split pathname contains '/'",
+        }
+    );
     Ok((parent, name.as_ref()))
 }
 
@@ -249,15 +253,24 @@ impl Root {
     //       but now we have more races to deal with. We could ask the user to
     //       provide a backup path to check against, but then why not just use
     //       that path in the first place?
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, FailureError> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let path = path.as_ref();
 
-        if path.is_relative() {
-            return Err(Error::InvalidArgument("path", "must be an absolute path"))
-                .context("open root handle")?;
-        }
+        // TODO: All of this should be relaxed. Really, we should just store the
+        //       root path as a cache and re-fetch it if it changes.
 
-        let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)?;
+        ensure!(
+            path.is_absolute(),
+            errors::InvalidArgument {
+                name: "path",
+                description: "must be an absolute path",
+            }
+        );
+
+        let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
+            .context(errors::RawOsError {
+                operation: "open root handle",
+            })?;
 
         let root = Root {
             inner: file,
@@ -265,21 +278,28 @@ impl Root {
             path: path.into(),
         };
 
-        root.check().context("double-check new root is valid")?;
+        root.check()?;
         Ok(root)
     }
 
     /// Check whether the Root is still valid.
-    pub(crate) fn check(&self) -> Result<(), FailureError> {
+    // TODO: After some discussion with
+    pub(crate) fn check(&self) -> Result<(), Error> {
         // as_unsafe_path is safe here because we are just comparing the string,
         // and it is being done as part of a larger security check.
-        if self.inner.as_unsafe_path()? == self.path {
-            Ok(())
-        } else {
-            Err(Error::SafetyViolation(
-                "root directory doesn't match original path",
-            ))?
-        }
+        let actualpath = self
+            .inner
+            .as_unsafe_path()
+            .wrap("get current path of rootfd for root check")?;
+
+        ensure!(
+            actualpath == self.path,
+            errors::SafetyViolation {
+                description: "root directory doesn't match original path",
+            }
+        );
+
+        Ok(())
     }
 
     /// Within the given [`Root`]'s tree, resolve `path` and return a
@@ -294,7 +314,11 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
-    pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, FailureError> {
+    // TODO: We need to add a way to restrict more things (such as disallowing
+    //       all symlinks or disallowing mount-point crossings). Arguably we
+    //       might even want to expose an equivalent of RESOLVE_* flags since
+    //       that would make it simpler...
+    pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.check()?;
         match self.resolver {
             Resolver::Kernel => kernel::resolve(self, path),
@@ -311,11 +335,7 @@ impl Root {
     /// inode), an error is returned.
     ///
     /// [`Root`]: struct.Root.html
-    pub fn create<P: AsRef<Path>>(
-        &self,
-        path: P,
-        inode_type: &InodeType,
-    ) -> Result<(), FailureError> {
+    pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
         self.check()?;
 
         // Use create_file if that's the inode_type. We drop the File returned
@@ -327,10 +347,11 @@ impl Root {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
-        let (parent, name) = path_split(path.as_ref()).context("split path into (parent, name)")?;
+        let (parent, name) =
+            path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
         let dirfd = self
             .resolve(parent)
-            .context("resolve parent directory for inode creation")?
+            .wrap("resolve target parent directory for inode creation")?
             .as_raw_fd();
 
         match inode_type {
@@ -347,10 +368,10 @@ impl Root {
             }
             InodeType::Hardlink(target) => {
                 let (oldparent, oldname) =
-                    path_split(target).context("split hardlink target into (parent, name)")?;
+                    path_split(target).wrap("split hardlink source path into (parent, name)")?;
                 let olddirfd = self
                     .resolve(oldparent)
-                    .context("resolve target parent for hardlink")?
+                    .wrap("resolve hardlink source parent for hardlink")?
                     .as_raw_fd();
                 syscalls::linkat(olddirfd, oldname, dirfd, name, 0)
             }
@@ -367,6 +388,9 @@ impl Root {
                 syscalls::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev)
             }
         }
+        .context(errors::RawOsError {
+            operation: "pathrs create",
+        })
     }
 
     /// Create an [`InodeType::File`] within the [`Root`]'s tree at `path` with
@@ -400,21 +424,28 @@ impl Root {
         &self,
         path: P,
         perm: &Permissions,
-    ) -> Result<Handle, FailureError> {
+    ) -> Result<Handle, Error> {
         self.check()?;
 
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
-        let (parent, name) = path_split(path.as_ref())
-            .context("split path into (parent, name) for inode creation")?;
+        let (parent, name) =
+            path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
         let dirfd = self
             .resolve(parent)
-            .context("resolve parent directory for inode creation")?
+            .wrap("resolve target parent directory for inode creation")?
             .as_raw_fd();
 
-        let file = syscalls::openat(dirfd, name, libc::O_CREAT | libc::O_EXCL, perm.mode())?;
-        Ok(Handle::try_from(file).context("convert O_CREAT fd to Handle")?)
+        // TODO: openat2(2) supports doing O_CREAT on trailing symlinks without
+        //       O_NOFOLLOW. We might want to expose that here, though because
+        //       it can't be done with the emulated backend that might be a bad
+        //       idea.
+        let file = syscalls::openat(dirfd, name, libc::O_CREAT | libc::O_EXCL, perm.mode())
+            .context(errors::RawOsError {
+                operation: "pathrs create_file",
+            })?;
+        Ok(Handle::try_from(file).wrap("convert O_CREAT fd to Handle")?)
     }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.
@@ -432,20 +463,24 @@ impl Root {
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
     /// [`Root::remove_all`]: struct.Root.html#method.remove_all
-    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), FailureError> {
+    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.check()?;
 
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
-        let (parent, name) = path_split(path.as_ref())?;
-        let dirfd = self.resolve(parent)?.as_raw_fd();
+        let (parent, name) =
+            path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        let dirfd = self
+            .resolve(parent)
+            .wrap("resolve target parent directory for inode creation")?
+            .as_raw_fd();
 
         // There is no kernel API to "just remove this inode please". You need
         // to know ahead-of-time what inode type it is. So we will try a couple
         // of times and bail if we managed to hit an inode-type race multiple
         // times.
-        let mut last_error: Option<FailureError> = None;
+        let mut last_error: Option<syscalls::Error> = None;
         for _ in 0..16 {
             // XXX: A try-block would be super useful here but that's not a
             //     thing in Rust unfortunately. So we need to manage last_error
@@ -474,7 +509,11 @@ impl Root {
         }
 
         // If we ever are here, then last_error must be Some.
-        Err(last_error.expect("unlinkat loop failed so last_error must exist"))
+        Err(last_error.expect("unlinkat loop failed so last_error must exist")).context(
+            errors::RawOsError {
+                operation: "pathrs remove",
+            },
+        )
     }
 
     /// Within the [`Root`]'s tree, perform a rename with the given `source` and
@@ -492,16 +531,32 @@ impl Root {
         source: P,
         destination: P,
         flags: RenameFlags,
-    ) -> Result<(), FailureError> {
-        let (src_parent, src_name) = path_split(source.as_ref())?;
-        let (dst_parent, dst_name) = path_split(destination.as_ref())?;
+    ) -> Result<(), Error> {
+        let (src_parent, src_name) =
+            path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
+        let (dst_parent, dst_name) =
+            path_split(destination.as_ref()).wrap("split target path into (parent, name)")?;
 
-        let src_dirfd = self.resolve(src_parent)?.as_raw_fd();
-        let dst_dirfd = self.resolve(dst_parent)?.as_raw_fd();
+        let src_dirfd = self
+            .resolve(src_parent)
+            .wrap("resolve source path for rename")?
+            .as_raw_fd();
+        let dst_dirfd = self
+            .resolve(dst_parent)
+            .wrap("resolve target path for rename")?
+            .as_raw_fd();
 
-        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0)
+        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0).context(
+            errors::RawOsError {
+                operation: "pathrs rename",
+            },
+        )
     }
 
     // TODO: mkdir_all()
+
     // TODO: remove_all()
+
+    // TODO: implement a way to duplicate (and even serialise) Roots so that you
+    //       can send them between processes (presumably with SCM_RIGHTS).
 }

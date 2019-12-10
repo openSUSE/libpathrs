@@ -36,6 +36,8 @@
 //! attempts.
 
 use crate::{
+    errors,
+    errors::ErrorExt,
     syscalls,
     utils::{FileExt, RawFdExt, PATH_SEPARATOR},
 };
@@ -48,17 +50,13 @@ use std::io::Error as IOError;
 use std::os::unix::{ffi::OsStrExt, io::AsRawFd};
 use std::path::{Component, Path, PathBuf};
 
-use failure::{Error as FailureError, ResultExt};
+use snafu::ResultExt;
 
 /// Maximum number of symlink traversals we will accept.
 const MAX_SYMLINK_TRAVERSALS: usize = 128;
 
 /// Ensure that the expected path within the root matches the current fd.
-fn check_current<P: AsRef<Path>>(
-    current: &File,
-    root: &Root,
-    expected: P,
-) -> Result<(), FailureError> {
+fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Result<(), Error> {
     // Combine the root path and our expected_path to get the full path to
     // compare current against.
     let full_path: PathBuf = root.as_ref().join(
@@ -85,15 +83,18 @@ fn check_current<P: AsRef<Path>>(
     // check to see whether the path we want is correct.
     let current_path = current
         .as_unsafe_path()
-        .context("check fd against expected path")?;
-    if current_path != full_path {
-        return Err(Error::SafetyViolation("fd doesn't match expected path"))?;
-    }
+        .wrap("check fd against expected path")?;
+    ensure!(
+        current_path == full_path,
+        errors::SafetyViolation {
+            description: "fd doesn't match expected path"
+        }
+    );
     Ok(())
 }
 
 /// Resolve `path` within `root` through user-space emulation.
-pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, FailureError> {
+pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Error> {
     let path = path.as_ref();
 
     // What is the final path we expect to get after we do the final open? This
@@ -104,9 +105,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let mut current = root
-        .try_clone_hotfix()
-        .context("dup root as starting point")?;
+    let mut current = root.try_clone_hotfix().wrap("dup root as starting point")?;
 
     // Get initial set of components from the passed path. We remove  all components
     let mut components: VecDeque<_> = path
@@ -135,11 +134,12 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
                 // are only touching the final component in the path. If there
                 // are any other path components we must bail. This shouldn't
                 // ever happen, but it's better to be safe.
-                if part.as_bytes().contains(&PATH_SEPARATOR) {
-                    return Err(Error::SafetyViolation(
-                        "component of path resolution contains '/'",
-                    ))?;
-                }
+                ensure!(
+                    !part.as_bytes().contains(&PATH_SEPARATOR),
+                    errors::SafetyViolation {
+                        description: "component of path resolution contains '/'",
+                    }
+                );
             }
             Component::ParentDir => {
                 // All of expected_path is non-symlinks, so we can treat ".."
@@ -154,8 +154,11 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
         };
 
         // Get our next element.
-        let next = syscalls::openat(current.as_raw_fd(), part, libc::O_PATH, 0)
-            .context("open next component of resolution")?;
+        let next = syscalls::openat(current.as_raw_fd(), part, libc::O_PATH, 0).context(
+            errors::RawOsError {
+                operation: "open next component of resolution",
+            },
+        )?;
 
         // Make sure that the path is what we expect. If not, there was a racing
         // rename and we should bail out here -- otherwise we might be tricked
@@ -169,12 +172,17 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
         // we have to do it every time.
         if part == Component::ParentDir {
             check_current(&next, root, &expected_path)
-                .context("check next '..' component didn't escape")?;
+                .wrap("check next '..' component didn't escape")?;
         }
 
         // Is the next dirfd a symlink or an ordinary path?
         // NOTE: File::metadata definitely does an fstat(2) here.
-        let next_type = next.metadata().context("fstat of next")?.file_type();
+        let next_type = next
+            .metadata()
+            .context(errors::OsError {
+                operation: "fstat of next component",
+            })?
+            .file_type();
 
         // If we're an ordinary dirent, we just update current and move on
         // to the next component. Nothing special here.
@@ -188,26 +196,31 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
         // much better to be safe than sorry here.
         if next
             .is_dangerous()
-            .context("check if next is on a dangerous filesystem")?
+            .wrap("check if next is on a dangerous filesystem")?
         {
-            return Err(Error::SafetyViolation(
-                "next is a symlink on a dangerous filesystem",
-            ))?;
+            return errors::SafetyViolation {
+                description: "next is a symlink on a dangerous filesystem",
+            }
+            .fail();
         }
 
         // We need a limit on the number of symlinks we traverse to avoid
         // hitting filesystem loops and DoSing.
         symlink_traversals += 1;
         if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
-            return Err(IOError::from_raw_os_error(libc::ELOOP))
-                .context("too many symlinks encountered during resolution")?;
+            return Err(IOError::from_raw_os_error(libc::ELOOP)).context(errors::OsError {
+                operation: "emulated symlink resolution",
+            })?;
         }
 
         // XXX: There is currently no way for us to use next to get the
         //      contents of the symlink. /proc/self/fd will just give us the
         //      path to the symlink. However, since readlink(2) doesn't follow
         //      symlink components we can just do it manually safely.
-        let contents = syscalls::readlinkat(current.as_raw_fd(), part)?;
+        let contents =
+            syscalls::readlinkat(current.as_raw_fd(), part).context(errors::RawOsError {
+                operation: "readlink next symlink component",
+            })?;
 
         // Add contents of the symlink to the set of components we are looping
         // over. The
@@ -225,14 +238,12 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Fa
         // current back to the root.
         expected_path.pop();
         if contents.is_absolute() {
-            current = root
-                .try_clone_hotfix()
-                .context("dup root as next current")?;
+            current = root.try_clone_hotfix().wrap("dup root as next current")?;
         }
     }
 
     // Make sure that the path is what we expect...
-    check_current(&current, root, &expected_path).context("check final handle didn't escape")?;
+    check_current(&current, root, &expected_path).wrap("check final handle didn't escape")?;
 
     // Make sure the root path is still correct.
     root.check()?;

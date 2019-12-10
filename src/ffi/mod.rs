@@ -18,7 +18,7 @@
 
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
-use libpathrs::syscalls;
+use libpathrs::{errors, syscalls};
 use libpathrs::{Error, Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root};
 
 use std::ffi::{CStr, CString, OsStr};
@@ -33,8 +33,8 @@ use std::path::Path;
 use std::{mem, ptr};
 
 use backtrace::Backtrace;
-use failure::Error as FailureError;
 use libc::{c_char, c_int, c_uint, c_void, dev_t};
+use snafu::{ErrorCompat, OptionExt, ResultExt};
 
 trait Leakable {
     /// Leak a structure such that it can be passed through C-FFI.
@@ -93,7 +93,7 @@ macro_rules! leakable {
 // trivial struct).
 pub struct CPointer<T> {
     inner: Option<T>,
-    last_error: Option<FailureError>,
+    last_error: Option<Error>,
 }
 
 leakable! {
@@ -134,10 +134,10 @@ pub type CHandle = CPointer<Handle>;
 trait ErrorWrap {
     fn wrap<F, R>(&mut self, c_err: R, func: F) -> R
     where
-        F: FnOnce() -> Result<R, FailureError>;
+        F: FnOnce() -> Result<R, Error>;
 }
 
-impl ErrorWrap for Option<FailureError> {
+impl ErrorWrap for Option<Error> {
     /// Very helpful wrapper to use in "pub extern fn" Rust FFI functions, to
     /// allow for error handling to be done in a much more Rust-like manner. The
     /// idea is that the Rust error is stored in some fixed variable (hopefully
@@ -147,23 +147,23 @@ impl ErrorWrap for Option<FailureError> {
     /// ```
     /// # use std::os::raw::c_char;
     /// # fn main() {}
-    /// use failure::Error;
-    /// use libpathrs::ffi::error;
+    /// use libpathrs::{Error, errors, ffi::error};
     ///
     /// #[no_mangle]
     /// pub extern fn func(msg: *const c_char) -> c_int {
     ///     let mut last_error: Option<Error> = None;
     ///     last_error.ffi_wrap(-1, move || {
-    ///         if msg.is_null() {
-    ///             bail!("null pointer!");
-    ///         }
+    ///         ensure!(!msg.is_null(), errors::InvalidArgument {
+    ///             name: "msg",
+    ///             description: "must not be a null pointer",
+    ///         });
     ///         Ok(42)
     ///     })
     /// }
     /// ```
     fn wrap<F, R>(&mut self, c_err: R, func: F) -> R
     where
-        F: FnOnce() -> Result<R, FailureError>,
+        F: FnOnce() -> Result<R, Error>,
     {
         // Clear the error before the operation to avoid the "errno problem".
         *self = None;
@@ -342,35 +342,36 @@ leakable! {
     impl Leakable for CError;
 }
 
-impl From<&FailureError> for CError {
+impl From<&Error> for CError {
     /// Construct a new CError struct based on the given error. The description
     /// is pretty-printed in a C-like manner (causes are appended to one another
     /// with separating colons). In addition, if the root-cause of the error is
     /// an IOError then errno is populated with that value.
-    fn from(err: &FailureError) -> Self {
-        let fail = err.as_fail();
-        let desc = err
-            .iter_causes()
-            .fold(fail.to_string(), |prev, next| format!("{}: {}", prev, next));
+    fn from(err: &Error) -> Self {
+        let desc = err.iter_chain_hotfix().fold(String::new(), |mut s, next| {
+            if s != "" {
+                s.push_str(": ");
+            }
+            s.push_str(&next.to_string());
+            s
+        });
 
         // Create a C-compatible string for CError.description.
         let desc =
             CString::new(desc).expect("CString::new(description) failed in CError generation");
 
-        let errno = match fail.find_root_cause().downcast_ref::<IOError>() {
+        let errno = match err.root_cause().downcast_ref::<IOError>() {
             Some(err) => err.raw_os_error().unwrap_or(0),
             _ => 0,
         };
 
-        // TODO: Actually have a backtrace created at error-creation time. In
-        //       order to do this nicely we will need to switch to snafu, so
-        //       this is just used as a PoC.
-        let backtrace: CBacktrace = Backtrace::new().into();
-
         CError {
             saved_errno: errno,
             description: desc.into_raw(),
-            backtrace: backtrace.leak().into(),
+            backtrace: ErrorCompat::backtrace(err)
+                .cloned()
+                .map(CBacktrace::from)
+                .map(Leakable::leak),
         }
     }
 }
@@ -440,10 +441,14 @@ pub extern "C" fn pathrs_error(
     last_error.as_ref().map(CError::from).map(Leakable::leak)
 }
 
-fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, FailureError> {
-    if path.is_null() {
-        Err(Error::InvalidArgument("path", "cannot be NULL"))?;
-    }
+fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
+    ensure!(
+        !path.is_null(),
+        errors::InvalidArgument {
+            name: "path",
+            description: "cannot be NULL",
+        }
+    );
     let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
     Ok(OsStr::from_bytes(bytes).as_ref())
 }
@@ -516,7 +521,10 @@ pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) -> 
     root.last_error.wrap(-1, move || {
         inner
             .as_mut()
-            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "root",
+                description: "invalid pathrs object",
+            })?
             .resolver = resolver.into();
         Ok(0)
     })
@@ -575,12 +583,17 @@ pub extern "C" fn pathrs_reopen(handle: &mut CHandle, flags: c_int) -> RawFd {
     handle.last_error.wrap(-1, || {
         let file = inner
             .as_ref()
-            .ok_or(Error::InvalidArgument("handle", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "handle",
+                description: "invalid pathrs object",
+            })?
             .reopen(flags)?;
         // Rust sets O_CLOEXEC by default, without an opt-out. We need to
         // disable it if we weren't asked to do O_CLOEXEC.
         if flags.0 & libc::O_CLOEXEC == 0 {
-            syscalls::fcntl_unset_cloexec(file.as_raw_fd())?;
+            syscalls::fcntl_unset_cloexec(file.as_raw_fd()).context(errors::RawOsError {
+                operation: "clear O_CLOEXEC on fd",
+            })?;
         }
         Ok(file.into_raw_fd())
     })
@@ -600,7 +613,10 @@ pub extern "C" fn pathrs_resolve(
     root.last_error.wrap(None, move || {
         inner
             .as_ref()
-            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "root",
+                description: "invalid pathrs object",
+            })?
             .resolve(parse_path(path)?)
             .map(CHandle::from)
             .map(Leakable::leak)
@@ -625,7 +641,10 @@ pub extern "C" fn pathrs_rename(
     root.last_error.wrap(-1, move || {
         inner
             .as_ref()
-            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "root",
+                description: "invalid pathrs object",
+            })?
             .rename(parse_path(src)?, parse_path(dst)?, flags)
             .and(Ok(0))
     })
@@ -651,7 +670,10 @@ pub extern "C" fn pathrs_creat(
     root.last_error.wrap(None, move || {
         inner
             .as_ref()
-            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "root",
+                description: "invalid pathrs object",
+            })?
             .create_file(parse_path(path)?, &perm)
             .map(CHandle::from)
             .map(Leakable::leak)
@@ -686,12 +708,22 @@ pub extern "C" fn pathrs_mknod(
             libc::S_IFBLK => InodeType::BlockDevice(&perms, dev),
             libc::S_IFCHR => InodeType::CharacterDevice(&perms, dev),
             libc::S_IFIFO => InodeType::Fifo(&perms),
-            libc::S_IFSOCK => Err(Error::NotImplemented("mknod(S_IFSOCK)"))?,
-            _ => Err(Error::InvalidArgument("mode", "invalid S_IFMT mask"))?,
+            libc::S_IFSOCK => errors::NotImplemented {
+                feature: "mknod(S_IFSOCK)",
+            }
+            .fail()?,
+            _ => errors::InvalidArgument {
+                name: "mode",
+                description: "invalid S_IFMT mask",
+            }
+            .fail()?,
         };
         inner
             .as_ref()
-            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "root",
+                description: "invalid pathrs object",
+            })?
             .create(path, &inode_type)
             .and(Ok(0))
     })
@@ -712,7 +744,10 @@ pub extern "C" fn pathrs_symlink(
 
         inner
             .as_ref()
-            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "root",
+                description: "invalid pathrs object",
+            })?
             .create(path, &InodeType::Symlink(target))
             .and(Ok(0))
     })
@@ -733,7 +768,10 @@ pub extern "C" fn pathrs_hardlink(
 
         inner
             .as_ref()
-            .ok_or(Error::InvalidArgument("root", "invalid pathrs object"))?
+            .context(errors::InvalidArgument {
+                name: "root",
+                description: "invalid pathrs object",
+            })?
             .create(path, &InodeType::Hardlink(target))
             .and(Ok(0))
     })

@@ -16,8 +16,7 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::utils::ToCString;
-use crate::{Error, SyscallArg};
+use crate::utils::{RawFdExt, ToCString};
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -29,8 +28,211 @@ use std::os::unix::{
 };
 use std::path::{Path, PathBuf};
 
-use failure::Error as FailureError;
 use libc::{c_int, dev_t, mode_t, stat, statfs};
+use snafu::{Backtrace, ResultExt};
+
+/// Representation of a file descriptor and its associated path at a given point
+/// in time. This is used to make pretty-printing syscall arguments much nicer.
+#[derive(Clone, Debug)]
+pub struct FrozenFd(RawFd, Option<PathBuf>);
+
+impl From<RawFd> for FrozenFd {
+    fn from(fd: RawFd) -> Self {
+        // as_unsafe_path is safe here since it is only used for pretty-printing
+        // error messages and no real logic.
+        FrozenFd(fd, fd.as_unsafe_path().ok())
+    }
+}
+
+impl fmt::Display for FrozenFd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            libc::AT_FDCWD => write!(f, "[AT_FDCWD]")?,
+            fd @ _ => write!(f, "[{}]", fd)?,
+        };
+        match &self.1 {
+            Some(path) => write!(f, "{:?}", path)?,
+            None => write!(f, "<unknown>")?,
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    #[snafu(display("fcntl({}, F_DUPFD_CLOEXEC, 0)", fd))]
+    FcntlDup {
+        fd: FrozenFd,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("fcntl({}, F_GETFD)", fd))]
+    FcntlGetFlags {
+        fd: FrozenFd,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("fcntl({}, F_SETFD, 0x{:x})", fd, flags))]
+    FcntlSetFlags {
+        fd: FrozenFd,
+        flags: i32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("openat({}, {:?}, 0x{:x}, 0o{:o})", dirfd, path, flags, mode))]
+    Openat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        flags: i32,
+        mode: u32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("openat2({}, {:?}, {}, {})", dirfd, path, how, size))]
+    Openat2 {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        how: unstable::OpenHow,
+        size: usize,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("readlinkat({}, {:?})", dirfd, path))]
+    Readlinkat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("mkdirat({}, {:?}, 0o{:o})", dirfd, path, mode))]
+    Mkdirat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        mode: u32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("mknodat({}, {:?}, 0o{:o}, {}:{})", dirfd, path, mode, major, minor))]
+    Mknodat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        mode: u32,
+        major: u32,
+        minor: u32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("unlinkat({}, {:?}, 0x{:x})", dirfd, path, flags))]
+    Unlinkat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        flags: i32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display(
+        "linkat({}, {:?}, {}, {:?}, 0x{:x})",
+        olddirfd,
+        oldpath,
+        newdirfd,
+        newpath,
+        flags
+    ))]
+    Linkat {
+        olddirfd: FrozenFd,
+        oldpath: PathBuf,
+        newdirfd: FrozenFd,
+        newpath: PathBuf,
+        flags: i32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("symlinkat({:?}, {}, {:?})", target, dirfd, path))]
+    Symlinkat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        target: PathBuf,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("renameat({}, {:?}, {}, {:?})", olddirfd, oldpath, newdirfd, newpath))]
+    Renameat {
+        olddirfd: FrozenFd,
+        oldpath: PathBuf,
+        newdirfd: FrozenFd,
+        newpath: PathBuf,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display(
+        "renameat2({}, {:?}, {}, {:?}, 0x{:x})",
+        olddirfd,
+        oldpath,
+        newdirfd,
+        newpath,
+        flags
+    ))]
+    Renameat2 {
+        olddirfd: FrozenFd,
+        oldpath: PathBuf,
+        newdirfd: FrozenFd,
+        newpath: PathBuf,
+        flags: i32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("fstatfs({})", fd))]
+    Fstatfs {
+        fd: FrozenFd,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("fstatat({}, {:?}, 0x{:x})", dirfd, path, flags))]
+    Fstatat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        flags: i32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+}
+
+impl Error {
+    pub(crate) fn root_cause(&self) -> &IOError {
+        // XXX: This should probably be a macro...
+        match self {
+            Error::FcntlDup { source, .. } => source,
+            Error::FcntlGetFlags { source, .. } => source,
+            Error::FcntlSetFlags { source, .. } => source,
+            Error::Openat { source, .. } => source,
+            Error::Openat2 { source, .. } => source,
+            Error::Readlinkat { source, .. } => source,
+            Error::Mkdirat { source, .. } => source,
+            Error::Mknodat { source, .. } => source,
+            Error::Unlinkat { source, .. } => source,
+            Error::Linkat { source, .. } => source,
+            Error::Symlinkat { source, .. } => source,
+            Error::Renameat { source, .. } => source,
+            Error::Renameat2 { source, .. } => source,
+            Error::Fstatfs { source, .. } => source,
+            Error::Fstatat { source, .. } => source,
+        }
+    }
+}
 
 // XXX: We might want to switch to nix at some point, but the interfaces
 //      provided by nix are slightly non-ergonomic. I much prefer these simpler
@@ -44,22 +246,14 @@ use libc::{c_int, dev_t, mode_t, stat, statfs};
 ///
 /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
 /// [pr62425]: https://github.com/rust-lang/rust/pull/62425
-pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, FailureError> {
-    let fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
-    let err = errno::errno();
+pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, Error> {
+    let newfd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+    let err = IOError::last_os_error();
 
-    if fd >= 0 {
-        Ok(unsafe { File::from_raw_fd(fd) })
+    if newfd >= 0 {
+        Ok(unsafe { File::from_raw_fd(newfd) })
     } else {
-        Err(Error::SyscallError {
-            name: "fcntl",
-            args: vec![
-                SyscallArg::from_fd(fd),
-                SyscallArg::Raw("F_DUPFD_CLOEXEC".into()),
-                SyscallArg::Raw("0".into()),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(FcntlDup { fd: fd });
     }
 }
 
@@ -69,16 +263,12 @@ pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, FailureError> {
 /// This is required because Rust automatically sets `O_CLOEXEC` on all new
 /// files, so we need to manually unset it when we return certain fds to the C
 /// FFI (in fairness, `O_CLOEXEC` is a good default).
-pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
+pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     let old = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if old < 0 {
-        return Err(Error::SyscallError {
-            name: "fcntl",
-            args: vec![SyscallArg::from_fd(fd), SyscallArg::Raw("F_GETFD".into())],
-            cause: err.into(),
-        })?;
+        return Err(err).context(FcntlGetFlags { fd: fd });
     }
 
     let new = old & !libc::FD_CLOEXEC;
@@ -87,20 +277,12 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), FailureError> {
     }
 
     let ret = unsafe { libc::fcntl(fd, libc::F_SETFD, new) };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
     } else {
-        Err(Error::SyscallError {
-            name: "fcntl",
-            args: vec![
-                SyscallArg::from_fd(fd),
-                SyscallArg::Raw("F_SETFD".into()),
-                SyscallArg::Raw(format!("0x{:x}", new)),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(FcntlSetFlags { fd: fd, flags: new });
     }
 }
 
@@ -113,31 +295,22 @@ pub(crate) fn openat_follow<P: AsRef<Path>>(
     path: P,
     flags: c_int,
     mode: mode_t,
-) -> Result<File, FailureError> {
+) -> Result<File, Error> {
     let path = path.as_ref();
-    let fd = unsafe {
-        libc::openat(
-            dirfd,
-            path.to_c_string().as_ptr(),
-            libc::O_CLOEXEC | libc::O_NOCTTY | flags,
-            mode,
-        )
-    };
-    let err = errno::errno();
+    let flags = libc::O_CLOEXEC | libc::O_NOCTTY | flags;
+
+    let fd = unsafe { libc::openat(dirfd, path.to_c_string().as_ptr(), flags, mode) };
+    let err = IOError::last_os_error();
 
     if fd >= 0 {
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(Error::SyscallError {
-            name: "openat",
-            args: vec![
-                SyscallArg::from_fd(dirfd),
-                SyscallArg::Path(path.into()),
-                SyscallArg::Raw(format!("0x{:x}", flags)),
-                SyscallArg::Raw(format!("0o{:o}", mode)),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Openat {
+            dirfd: dirfd,
+            path: path,
+            flags: flags,
+            mode: mode,
+        });
     }
 }
 
@@ -150,7 +323,7 @@ pub(crate) fn openat<P: AsRef<Path>>(
     path: P,
     flags: c_int,
     mode: mode_t,
-) -> Result<File, FailureError> {
+) -> Result<File, Error> {
     openat_follow(dirfd, path, libc::O_NOFOLLOW | flags, mode)
 }
 
@@ -159,7 +332,7 @@ pub(crate) fn openat<P: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `readlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
-pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBuf, FailureError> {
+pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBuf, Error> {
     let path = path.as_ref();
 
     // If the contents of the symlink are larger than this, we raise a
@@ -180,11 +353,10 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
         if maybe_truncated {
             err = IOError::from_raw_os_error(libc::ENAMETOOLONG);
         }
-        Err(Error::SyscallError {
-            name: "readlinkat",
-            args: vec![SyscallArg::from_fd(dirfd), SyscallArg::Path(path.into())],
-            cause: err,
-        })?
+        return Err(err).context(Readlinkat {
+            dirfd: dirfd,
+            path: path,
+        });
     } else {
         let content = OsStr::from_bytes(&buffer[..(len as usize)]);
         Ok(PathBuf::from(content))
@@ -195,27 +367,19 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `mkdirat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn mkdirat<P: AsRef<Path>>(
-    dirfd: RawFd,
-    path: P,
-    mode: mode_t,
-) -> Result<(), FailureError> {
+pub(crate) fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Result<(), Error> {
     let path = path.as_ref();
     let ret = unsafe { libc::mkdirat(dirfd, path.to_c_string().as_ptr(), mode) };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
     } else {
-        Err(Error::SyscallError {
-            name: "mkdirat",
-            args: vec![
-                SyscallArg::from_fd(dirfd),
-                SyscallArg::Path(path.into()),
-                SyscallArg::Raw(format!("{:o}", mode)),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Mkdirat {
+            dirfd: dirfd,
+            path: path,
+            mode: mode,
+        });
     }
 }
 
@@ -228,24 +392,21 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
     path: P,
     mode: mode_t,
     dev: dev_t,
-) -> Result<(), FailureError> {
+) -> Result<(), Error> {
     let path = path.as_ref();
     let ret = unsafe { libc::mknodat(dirfd, path.to_c_string().as_ptr(), mode, dev) };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
     } else {
-        Err(Error::SyscallError {
-            name: "mknodat",
-            args: vec![
-                SyscallArg::from_fd(dirfd),
-                SyscallArg::Path(path.into()),
-                SyscallArg::Raw(format!("0o{:o}", mode)),
-                SyscallArg::Raw(format!("0x{:x}", dev)), // TODO: Print {major, minor}.
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Mknodat {
+            dirfd: dirfd,
+            path: path,
+            mode: mode,
+            major: unsafe { libc::major(dev) },
+            minor: unsafe { libc::minor(dev) },
+        });
     }
 }
 
@@ -253,27 +414,19 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `unlinkat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn unlinkat<P: AsRef<Path>>(
-    dirfd: RawFd,
-    path: P,
-    flags: c_int,
-) -> Result<(), FailureError> {
+pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> Result<(), Error> {
     let path = path.as_ref();
     let ret = unsafe { libc::unlinkat(dirfd, path.to_c_string().as_ptr(), flags) };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
     } else {
-        Err(Error::SyscallError {
-            name: "unlinkat",
-            args: vec![
-                SyscallArg::from_fd(dirfd),
-                SyscallArg::Path(path.into()),
-                SyscallArg::Raw(format!("0x{:x}", flags)),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Unlinkat {
+            dirfd: dirfd,
+            path: path,
+            flags: flags,
+        });
     }
 }
 
@@ -287,7 +440,7 @@ pub(crate) fn linkat<P: AsRef<Path>>(
     newdirfd: RawFd,
     newpath: P,
     flags: c_int,
-) -> Result<(), FailureError> {
+) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     let ret = unsafe {
         libc::linkat(
@@ -298,22 +451,18 @@ pub(crate) fn linkat<P: AsRef<Path>>(
             flags,
         )
     };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
     } else {
-        Err(Error::SyscallError {
-            name: "linkat",
-            args: vec![
-                SyscallArg::from_fd(olddirfd),
-                SyscallArg::Path(oldpath.into()),
-                SyscallArg::from_fd(newdirfd),
-                SyscallArg::Path(newpath.into()),
-                SyscallArg::Raw(format!("0x{:x}", flags)),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Linkat {
+            olddirfd: olddirfd,
+            oldpath: oldpath,
+            newdirfd: newdirfd,
+            newpath: newpath,
+            flags: flags,
+        });
     }
 }
 
@@ -322,11 +471,7 @@ pub(crate) fn linkat<P: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `symlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
-pub(crate) fn symlinkat<P: AsRef<Path>>(
-    target: P,
-    dirfd: RawFd,
-    path: P,
-) -> Result<(), FailureError> {
+pub(crate) fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Result<(), Error> {
     let (target, path) = (target.as_ref(), path.as_ref());
     let ret = unsafe {
         libc::symlinkat(
@@ -335,20 +480,16 @@ pub(crate) fn symlinkat<P: AsRef<Path>>(
             path.to_c_string().as_ptr(),
         )
     };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
     } else {
-        Err(Error::SyscallError {
-            name: "symlinkat",
-            args: vec![
-                SyscallArg::Path(target.into()),
-                SyscallArg::from_fd(dirfd),
-                SyscallArg::Path(path.into()),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Symlinkat {
+            dirfd: dirfd,
+            path: path,
+            target: target,
+        });
     }
 }
 
@@ -361,7 +502,7 @@ pub(crate) fn renameat<P: AsRef<Path>>(
     oldpath: P,
     newdirfd: RawFd,
     newpath: P,
-) -> Result<(), FailureError> {
+) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     let ret = unsafe {
         libc::renameat(
@@ -371,21 +512,17 @@ pub(crate) fn renameat<P: AsRef<Path>>(
             newpath.to_c_string().as_ptr(),
         )
     };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
     } else {
-        Err(Error::SyscallError {
-            name: "renameat",
-            args: vec![
-                SyscallArg::from_fd(olddirfd),
-                SyscallArg::Path(oldpath.into()),
-                SyscallArg::from_fd(newdirfd),
-                SyscallArg::Path(newpath.into()),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Renameat {
+            olddirfd: olddirfd,
+            oldpath: oldpath,
+            newdirfd: newdirfd,
+            newpath: newpath,
+        });
     }
 }
 
@@ -414,7 +551,7 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
     newdirfd: RawFd,
     newpath: P,
     flags: i32,
-) -> Result<(), FailureError> {
+) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     let ret = unsafe {
         // (g)libc doesn't have a renameat2 wrapper in older versions.
@@ -427,7 +564,7 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
             flags,
         )
     };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(())
@@ -436,37 +573,29 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
             // Fall back to renameat(2) if possible.
             return renameat(olddirfd, oldpath, newdirfd, newpath);
         }
-        Err(Error::SyscallError {
-            name: "renameat2",
-            args: vec![
-                SyscallArg::from_fd(olddirfd),
-                SyscallArg::Path(oldpath.into()),
-                SyscallArg::from_fd(newdirfd),
-                SyscallArg::Path(newpath.into()),
-                SyscallArg::Raw(format!("0x{:x}", flags)),
-            ],
-            cause: err.into(),
-        })?
+        return Err(err).context(Renameat2 {
+            olddirfd: olddirfd,
+            oldpath: oldpath,
+            newdirfd: newdirfd,
+            newpath: newpath,
+            flags: flags,
+        });
     }
 }
 
 /// Wrapper for `fstatfs(2)`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatfs(2)`.
-pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, FailureError> {
+pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
     // repr(C) struct without internal references is definitely valid.
     let mut buf: statfs = unsafe { std::mem::zeroed() };
     let ret = unsafe { libc::fstatfs(fd, &mut buf as *mut statfs) };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(buf)
     } else {
-        Err(Error::SyscallError {
-            name: "fstatfs",
-            args: vec![SyscallArg::from_fd(fd)],
-            cause: err.into(),
-        })?
+        return Err(err).context(Fstatfs { fd: fd });
     }
 }
 
@@ -474,28 +603,30 @@ pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, FailureError> {
 /// AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatat(2)`.
-pub(crate) fn fstatat<P: AsRef<Path>>(fd: RawFd, path: P) -> Result<stat, FailureError> {
+pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Error> {
     // repr(C) struct without internal references is definitely valid.
     let mut buf: stat = unsafe { std::mem::zeroed() };
     let path = path.as_ref();
+    let flags = libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH;
+
     let ret = unsafe {
         libc::fstatat(
-            fd,
+            dirfd,
             path.to_c_string().as_ptr(),
             &mut buf as *mut stat,
-            libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH,
+            flags,
         )
     };
-    let err = errno::errno();
+    let err = IOError::last_os_error();
 
     if ret >= 0 {
         Ok(buf)
     } else {
-        Err(Error::SyscallError {
-            name: "fstatat",
-            args: vec![SyscallArg::from_fd(fd), SyscallArg::Path(path.into())],
-            cause: err.into(),
-        })?
+        return Err(err).context(Fstatat {
+            dirfd: dirfd,
+            path: path,
+            flags: flags,
+        });
     }
 }
 
@@ -508,7 +639,7 @@ pub(crate) mod unstable {
     /// Arguments for how `openat2` should open the target path.
     #[repr(C)]
     #[repr(align(8))]
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct OpenHow {
         /// O_* flags (`-EINVAL` on unknown or incompatible flags).
         pub flags: u64,
@@ -569,11 +700,7 @@ pub(crate) mod unstable {
     #[allow(non_upper_case_globals)]
     const SYS_openat2: i64 = 437;
 
-    pub fn openat2<P: AsRef<Path>>(
-        dirfd: RawFd,
-        path: P,
-        how: &OpenHow,
-    ) -> Result<File, FailureError> {
+    pub fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<File, Error> {
         let path = path.as_ref();
 
         // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
@@ -590,24 +717,19 @@ pub(crate) mod unstable {
                 OPEN_HOW_SIZE,
             )
         } as RawFd;
-        let err = errno::errno();
+        let err = IOError::last_os_error();
+
         if fd >= 0 {
             Ok(unsafe { File::from_raw_fd(fd) })
-        } else if err.0 == libc::EXDEV {
-            Err(Error::SafetyViolation(
-                "openat2 detected a potential attack",
-            ))?
         } else {
-            Err(Error::SyscallError {
-                name: "openat2",
-                args: vec![
-                    SyscallArg::from_fd(dirfd),
-                    SyscallArg::Path(path.into()),
-                    SyscallArg::Raw(how.to_string()),
-                    SyscallArg::Raw(OPEN_HOW_SIZE.to_string()),
-                ],
-                cause: err.into(),
-            })?
+            // TODO: Wrap libc::EXDEV.
+            //       --> err.raw_os_error() != Some(libc::EXDEV),
+            return Err(err).context(Openat2 {
+                dirfd: dirfd,
+                path: path,
+                how: how,
+                size: OPEN_HOW_SIZE,
+            });
         }
     }
 }
