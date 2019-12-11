@@ -16,6 +16,7 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::error::Backtrace;
 use crate::utils::{RawFdExt, ToCString};
 
 use std::ffi::OsStr;
@@ -29,12 +30,19 @@ use std::os::unix::{
 use std::path::{Path, PathBuf};
 
 use libc::{c_int, dev_t, mode_t, stat, statfs};
-use snafu::{Backtrace, ResultExt};
+use snafu::ResultExt;
 
 /// Representation of a file descriptor and its associated path at a given point
-/// in time. This is used to make pretty-printing syscall arguments much nicer.
+/// in time.
+///
+/// This is primarily used to make pretty-printing syscall arguments much nicer,
+/// and users really shouldn't be interacting with this directly.
+///
+/// # Caveats
+/// Note that the file descriptor value is very unlikely to reference a live
+/// file descriptor. Its value is only used for informational purposes.
 #[derive(Clone, Debug)]
-pub struct FrozenFd(RawFd, Option<PathBuf>);
+pub struct FrozenFd(c_int, Option<PathBuf>);
 
 impl From<RawFd> for FrozenFd {
     fn from(fd: RawFd) -> Self {
@@ -72,14 +80,14 @@ pub enum Error {
     FcntlDup {
         fd: FrozenFd,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("fcntl({}, F_GETFD)", fd))]
     FcntlGetFlags {
         fd: FrozenFd,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("fcntl({}, F_SETFD, 0x{:x})", fd, flags))]
@@ -87,7 +95,7 @@ pub enum Error {
         fd: FrozenFd,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("openat({}, {:?}, 0x{:x}, 0o{:o})", dirfd, path, flags, mode))]
@@ -97,7 +105,7 @@ pub enum Error {
         flags: i32,
         mode: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("openat2({}, {:?}, {}, {})", dirfd, path, how, size))]
@@ -107,7 +115,7 @@ pub enum Error {
         how: unstable::OpenHow,
         size: usize,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("readlinkat({}, {:?})", dirfd, path))]
@@ -115,7 +123,7 @@ pub enum Error {
         dirfd: FrozenFd,
         path: PathBuf,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("mkdirat({}, {:?}, 0o{:o})", dirfd, path, mode))]
@@ -124,7 +132,7 @@ pub enum Error {
         path: PathBuf,
         mode: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("mknodat({}, {:?}, 0o{:o}, {}:{})", dirfd, path, mode, major, minor))]
@@ -135,7 +143,7 @@ pub enum Error {
         major: u32,
         minor: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("unlinkat({}, {:?}, 0x{:x})", dirfd, path, flags))]
@@ -144,7 +152,7 @@ pub enum Error {
         path: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display(
@@ -162,7 +170,7 @@ pub enum Error {
         newpath: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("symlinkat({:?}, {}, {:?})", target, dirfd, path))]
@@ -171,7 +179,7 @@ pub enum Error {
         path: PathBuf,
         target: PathBuf,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("renameat({}, {:?}, {}, {:?})", olddirfd, oldpath, newdirfd, newpath))]
@@ -181,7 +189,7 @@ pub enum Error {
         newdirfd: FrozenFd,
         newpath: PathBuf,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display(
@@ -199,14 +207,14 @@ pub enum Error {
         newpath: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("fstatfs({})", fd))]
     Fstatfs {
         fd: FrozenFd,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("fstatat({}, {:?}, 0x{:x})", dirfd, path, flags))]
@@ -215,7 +223,7 @@ pub enum Error {
         path: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 }
 

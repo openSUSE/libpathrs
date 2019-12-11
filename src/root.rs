@@ -16,13 +16,13 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::Handle;
 use crate::{
-    errors,
-    errors::ErrorExt,
+    error,
+    error::{Error, ErrorExt},
     kernel, syscalls, user,
     utils::{RawFdExt, PATH_SEPARATOR},
 };
-use crate::{Error, Handle};
 
 use std::fs::{File, Permissions};
 use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd};
@@ -141,7 +141,7 @@ fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), Error> {
     let parent = path.parent().unwrap_or("/".as_ref());
 
     // Now construct the trailing portion of the target.
-    let name = path.file_name().context(errors::InvalidArgument {
+    let name = path.file_name().context(error::InvalidArgument {
         name: "path",
         description: "no trailing component",
     })?;
@@ -150,7 +150,7 @@ fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), Error> {
     // If there are any other path components we must bail.
     ensure!(
         !name.as_bytes().contains(&PATH_SEPARATOR),
-        errors::SafetyViolation {
+        error::SafetyViolation {
             description: "trailing component of split pathname contains '/'",
         }
     );
@@ -240,14 +240,14 @@ impl Root {
 
         ensure!(
             path.is_absolute(),
-            errors::InvalidArgument {
+            error::InvalidArgument {
                 name: "path",
                 description: "must be an absolute path",
             }
         );
 
         let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
-            .context(errors::RawOsError {
+            .context(error::RawOsError {
                 operation: "open root handle",
             })?;
 
@@ -273,7 +273,7 @@ impl Root {
 
         ensure!(
             actualpath == self.path,
-            errors::SafetyViolation {
+            error::SafetyViolation {
                 description: "root directory doesn't match original path",
             }
         );
@@ -369,7 +369,7 @@ impl Root {
                 syscalls::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev)
             }
         }
-        .context(errors::RawOsError {
+        .context(error::RawOsError {
             operation: "pathrs create",
         })
     }
@@ -424,7 +424,7 @@ impl Root {
         //       it can't be done with the emulated backend that might be a bad
         //       idea.
         let file = syscalls::openat(dirfd, name, libc::O_CREAT | libc::O_EXCL, perm.mode())
-            .context(errors::RawOsError {
+            .context(error::RawOsError {
                 operation: "pathrs create_file",
             })?;
         Ok(Handle::new(file).wrap("convert O_CREAT fd to Handle")?)
@@ -493,7 +493,7 @@ impl Root {
 
         // If we ever are here, then last_error must be Some.
         Err(last_error.expect("unlinkat loop failed so last_error must exist")).context(
-            errors::RawOsError {
+            error::RawOsError {
                 operation: "pathrs remove",
             },
         )
@@ -532,7 +532,7 @@ impl Root {
             .as_raw_fd();
 
         syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0).context(
-            errors::RawOsError {
+            error::RawOsError {
                 operation: "pathrs rename",
             },
         )

@@ -18,8 +18,8 @@
 
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
-use libpathrs::{errors, syscalls};
-use libpathrs::{Error, Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root};
+use libpathrs::{error, syscalls};
+use libpathrs::{error::Error, Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root};
 
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::Permissions;
@@ -147,13 +147,13 @@ impl ErrorWrap for Option<Error> {
     /// ```
     /// # use std::os::raw::c_char;
     /// # fn main() {}
-    /// use libpathrs::{Error, errors, ffi::error};
+    /// use libpathrs::{Error, error, ffi::error};
     ///
     /// #[no_mangle]
     /// pub extern fn func(msg: *const c_char) -> c_int {
     ///     let mut last_error: Option<Error> = None;
     ///     last_error.ffi_wrap(-1, move || {
-    ///         ensure!(!msg.is_null(), errors::InvalidArgument {
+    ///         ensure!(!msg.is_null(), error::InvalidArgument {
     ///             name: "msg",
     ///             description: "must not be a null pointer",
     ///         });
@@ -444,7 +444,7 @@ pub extern "C" fn pathrs_error(
 fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     ensure!(
         !path.is_null(),
-        errors::InvalidArgument {
+        error::InvalidArgument {
             name: "path",
             description: "cannot be NULL",
         }
@@ -521,7 +521,7 @@ pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) -> 
     root.last_error.wrap(-1, move || {
         inner
             .as_mut()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "root",
                 description: "invalid pathrs object",
             })?
@@ -583,7 +583,7 @@ pub extern "C" fn pathrs_reopen(handle: &mut CHandle, flags: c_int) -> RawFd {
     handle.last_error.wrap(-1, || {
         let file = inner
             .as_ref()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "handle",
                 description: "invalid pathrs object",
             })?
@@ -591,7 +591,7 @@ pub extern "C" fn pathrs_reopen(handle: &mut CHandle, flags: c_int) -> RawFd {
         // Rust sets O_CLOEXEC by default, without an opt-out. We need to
         // disable it if we weren't asked to do O_CLOEXEC.
         if flags.0 & libc::O_CLOEXEC == 0 {
-            syscalls::fcntl_unset_cloexec(file.as_raw_fd()).context(errors::RawOsError {
+            syscalls::fcntl_unset_cloexec(file.as_raw_fd()).context(error::RawOsError {
                 operation: "clear O_CLOEXEC on fd",
             })?;
         }
@@ -613,7 +613,7 @@ pub extern "C" fn pathrs_resolve(
     root.last_error.wrap(None, move || {
         inner
             .as_ref()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "root",
                 description: "invalid pathrs object",
             })?
@@ -641,7 +641,7 @@ pub extern "C" fn pathrs_rename(
     root.last_error.wrap(-1, move || {
         inner
             .as_ref()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "root",
                 description: "invalid pathrs object",
             })?
@@ -670,7 +670,7 @@ pub extern "C" fn pathrs_creat(
     root.last_error.wrap(None, move || {
         inner
             .as_ref()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "root",
                 description: "invalid pathrs object",
             })?
@@ -708,11 +708,11 @@ pub extern "C" fn pathrs_mknod(
             libc::S_IFBLK => InodeType::BlockDevice(&perms, dev),
             libc::S_IFCHR => InodeType::CharacterDevice(&perms, dev),
             libc::S_IFIFO => InodeType::Fifo(&perms),
-            libc::S_IFSOCK => errors::NotImplemented {
+            libc::S_IFSOCK => error::NotImplemented {
                 feature: "mknod(S_IFSOCK)",
             }
             .fail()?,
-            _ => errors::InvalidArgument {
+            _ => error::InvalidArgument {
                 name: "mode",
                 description: "invalid S_IFMT mask",
             }
@@ -720,7 +720,7 @@ pub extern "C" fn pathrs_mknod(
         };
         inner
             .as_ref()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "root",
                 description: "invalid pathrs object",
             })?
@@ -744,7 +744,7 @@ pub extern "C" fn pathrs_symlink(
 
         inner
             .as_ref()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "root",
                 description: "invalid pathrs object",
             })?
@@ -768,7 +768,7 @@ pub extern "C" fn pathrs_hardlink(
 
         inner
             .as_ref()
-            .context(errors::InvalidArgument {
+            .context(error::InvalidArgument {
                 name: "root",
                 description: "invalid pathrs object",
             })?

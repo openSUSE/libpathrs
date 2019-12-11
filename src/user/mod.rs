@@ -36,12 +36,12 @@
 //! attempts.
 
 use crate::{
-    errors,
-    errors::ErrorExt,
+    error,
+    error::{Error, ErrorExt},
     syscalls,
     utils::{FileExt, RawFdExt, PATH_SEPARATOR},
 };
-use crate::{Error, Handle, Root};
+use crate::{Handle, Root};
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -85,7 +85,7 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Re
         .wrap("check fd against expected path")?;
     ensure!(
         current_path == full_path,
-        errors::SafetyViolation {
+        error::SafetyViolation {
             description: "fd doesn't match expected path"
         }
     );
@@ -138,7 +138,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
                 // ever happen, but it's better to be safe.
                 ensure!(
                     !part.as_bytes().contains(&PATH_SEPARATOR),
-                    errors::SafetyViolation {
+                    error::SafetyViolation {
                         description: "component of path resolution contains '/'",
                     }
                 );
@@ -157,14 +157,14 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
 
         // Get our next element.
         let next = syscalls::openat(current.as_raw_fd(), part, libc::O_PATH, 0).context(
-            errors::RawOsError {
+            error::RawOsError {
                 operation: "open next component of resolution",
             },
         )?;
 
         // Make sure that the path is what we expect. If not, there was a racing
         // rename and we should bail out here -- otherwise we might be tricked
-        // into revealing information outside the rootfs through errors or
+        // into revealing information outside the rootfs through error or
         // timing-related attacks.
         //
         // The safety argument for only needing to check ".." is identical to
@@ -181,7 +181,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
         // NOTE: File::metadata definitely does an fstat(2) here.
         let next_type = next
             .metadata()
-            .context(errors::OsError {
+            .context(error::OsError {
                 operation: "fstat of next component",
             })?
             .file_type();
@@ -200,7 +200,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
             .is_dangerous()
             .wrap("check if next is on a dangerous filesystem")?
         {
-            return errors::SafetyViolation {
+            return error::SafetyViolation {
                 description: "next is a symlink on a dangerous filesystem",
             }
             .fail();
@@ -210,7 +210,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
         // hitting filesystem loops and DoSing.
         symlink_traversals += 1;
         if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
-            return Err(IOError::from_raw_os_error(libc::ELOOP)).context(errors::OsError {
+            return Err(IOError::from_raw_os_error(libc::ELOOP)).context(error::OsError {
                 operation: "emulated symlink resolution",
             })?;
         }
@@ -220,7 +220,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
         //      path to the symlink. However, since readlink(2) doesn't follow
         //      symlink components we can just do it manually safely.
         let contents =
-            syscalls::readlinkat(current.as_raw_fd(), part).context(errors::RawOsError {
+            syscalls::readlinkat(current.as_raw_fd(), part).context(error::RawOsError {
                 operation: "readlink next symlink component",
             })?;
 

@@ -17,8 +17,12 @@
  */
 
 use crate::syscalls::unstable;
-use crate::{errors, errors::ErrorExt, user};
-use crate::{Error, Handle, Root};
+use crate::{
+    error,
+    error::{Error, ErrorExt},
+    user,
+};
+use crate::{Handle, Root};
 
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
@@ -34,7 +38,7 @@ lazy_static! {
 
 /// Resolve `path` within `root` through `openat2(2)`.
 pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Error> {
-    ensure!(*IS_SUPPORTED, errors::NotSupported { feature: "openat2" });
+    ensure!(*IS_SUPPORTED, error::NotSupported { feature: "openat2" });
 
     let mut how = unstable::OpenHow::new();
     how.flags = libc::O_PATH as u64;
@@ -61,7 +65,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
                 // TODO: Add wrapper for known-bad openat2 return codes.
                 //Some(libc::EXDEV) | Some(libc::ELOOP) => { ... }
                 _ => {
-                    return Err(err).context(errors::RawOsError {
+                    return Err(err).context(error::RawOsError {
                         operation: "openat2 subpath",
                     })?
                 }
