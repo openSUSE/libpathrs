@@ -22,10 +22,6 @@ import cffi
 
 __all__ = ["Root", "Handle", "Error"]
 
-# Resolvers supported by pathrs -- can be configured with PATHRS_RESOLVER.
-KERNEL_RESOLVER = "kernel"
-EMULATED_RESOLVER = "emulated"
-
 def cstr(pystr):
 	return ffi.new("char[]", pystr.encode("utf8"))
 
@@ -222,16 +218,10 @@ class Root(object):
 		if err:
 			raise err
 
-		# Check the environment for any default resolver override.
-		if resolver is None:
-			resolver = os.environ.get("PATHRS_RESOLVER")
 		# Switch resolvers if requested.
-		if resolver is not None:
+		if DEFAULT_RESOLVER is not None:
 			new_config = ffi.new("pathrs_config_root_t *")
-			new_config.resolver = {
-				KERNEL_RESOLVER: libpathrs_so.PATHRS_KERNEL_RESOLVER,
-				EMULATED_RESOLVER: libpathrs_so.PATHRS_EMULATED_RESOLVER,
-			}[resolver]
+			new_config.resolver = DEFAULT_RESOLVER
 
 			ret = libpathrs_so.pathrs_configure(objtype(self), self.inner, ffi.NULL, new_config)
 			if ret != ffi.NULL:
@@ -293,18 +283,35 @@ def __do_load():
 	global ffi, libpathrs_so
 	ffi = cffi.FFI()
 
-	# TODO: All of this searching code should really be disabled for
-	#       "production" users because a privileged binary executed in an
-	#       unsafe working directory could be easily tricked into loading (and
-	#       thus running) arbitrary code.
+	# Used to indicate that this binding should try to load from "unsafe"
+	# locations (such as paths relative to the working directory). Users should
+	# not enable this -- it's only used for libpathrs internal testing.
+	INSECURE_FFI = "__PATHRS_INSECURE_FFI" in os.environ
 
-	# Figure out where the libpathrs source dir is.
-	ROOT_DIR = os.path.dirname(sys.path[0]) or ".."
+	ROOT_DIR = None
+	if INSECURE_FFI:
+		# Figure out where the libpathrs source dir is.
+		candidate = os.path.dirname(sys.path[0] or os.getcwd())
+		while candidate != "/":
+			try:
+				# Look for a Cargo.toml which says it's pathrs.
+				candidate_toml = os.path.join(candidate, "Cargo.toml")
+				with open(candidate_toml, "r") as f:
+					content = f.read()
+				if re.findall(r'^name = "pathrs"$', content, re.MULTILINE):
+					ROOT_DIR = candidate
+					break
+			except:
+				pass
+
+			candidate = os.path.dirname(candidate)
 
 	# Figure out the header path.
 	include_path = "/usr/include/pathrs.h"
 	if not os.path.exists(include_path):
-		include_path = os.path.join(ROOT_DIR, "include/pathrs.h")
+		if INSECURE_FFI and ROOT_DIR:
+			# Okay, let's try falling back to the source header.
+			include_path = os.path.join(ROOT_DIR, "include/pathrs.h")
 	if not os.path.exists(include_path):
 		raise Error("Cannot find 'libpathrs' header.")
 
@@ -318,18 +325,28 @@ def __do_load():
 		# First, try system search paths.
 		libpathrs_so = ffi.dlopen("pathrs")
 	except OSError:
-		# Okay, let's try falling back to source.
-		paths = []
-		for mode in ["debug", "release"]:
-			so_path = os.path.join(ROOT_DIR, "target/%s/libpathrs.so" % (mode,))
-			if os.path.exists(so_path):
-				paths.append(so_path)
+		if INSECURE_FFI and ROOT_DIR:
+			# Okay, let's try falling back to source tree's binaries.
+			paths = []
+			for mode in ["debug", "release"]:
+				so_path = os.path.join(ROOT_DIR, "target/%s/libpathrs.so" % (mode,))
+				if os.path.exists(so_path):
+					paths.append(so_path)
 		if not paths:
 			raise Error("Cannot find 'libpathrs' library.")
 
 		# Use the last-modified library, since that's presumably what we want.
 		paths = sorted(paths, key=lambda path: -os.path.getmtime(path))
 		libpathrs_so = ffi.dlopen(paths[0])
+
+	# Resolvers supported by pathrs -- can be configured with PATHRS_RESOLVER.
+	# TODO: This is less than ideal, and should be exposed through the Root
+	#       object instead of being done magically.
+	global DEFAULT_RESOLVER
+	DEFAULT_RESOLVER = {
+		"kernel": libpathrs_so.PATHRS_KERNEL_RESOLVER,
+		"emulated": libpathrs_so.PATHRS_EMULATED_RESOLVER,
+	}.get(os.environ.get("PATHRS_RESOLVER"))
 
 # Initialise our libpathrs handles.
 __do_load()
