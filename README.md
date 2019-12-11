@@ -8,14 +8,16 @@ resolution within a potentially-untrusted directory safe on GNU/Linux. There
 are countless examples of security vulnerabilities caused by bad handling of
 paths (symlinks make the issue significantly worse).
 
-I have been working on [kernel patches to make this trivial to do safely][lwn],
-but in order to safely use the new kernel API you need to restructure how you
-handle paths quite significantly. Since a restructure is necessary anyway,
-having a new library is not too much of a downside. In addition, this gives us
-the ability to implement the core safety features through userspace emulation
-on older kernels.
+I have been working on [kernel patches to make this trivial to do
+safely][lwn-atflags] (which morphed into [a new syscall][lwn-openat2]), but in
+order to safely use the new kernel API you need to restructure how you handle
+paths quite significantly. Since a restructure is necessary anyway, having a
+new library is not too much of a downside. In addition, this gives us the
+ability to implement the core safety features through userspace emulation on
+older kernels.
 
-[lwn]: https://lwn.net/Articles/767547/
+[lwn-atflags]: https://lwn.net/Articles/767547/
+[lwn-openat2]: https://lwn.net/Articles/796868/
 
 ### Example ###
 
@@ -73,8 +75,6 @@ that have yet to be implemented and are considered important before it can be
 released to the public (items will be removed from the list as they are
 implemented).
 
-* Switch wholesale to [`snafu`][snafu] (which is apparently what you're
-  supposed to use these days as an error-wrapping library).
 * Helper functions to make commonly-used functions easier to implement:
   - `Root::remove_all` (similar to `rm -rf` or Go's `os.RemoveAll`).
   - `Root::mkdir_all` (similar `mkdir -p` or Go's `os.MkdirAll`).
