@@ -32,7 +32,7 @@ edition = "2018"
 maintenance = { status = "experimental" }
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["rlib", "cdylib"]
 
 [profile.release]
 # Enable link-time optimisations.
