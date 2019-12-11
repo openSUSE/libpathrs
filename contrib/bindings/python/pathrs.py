@@ -131,7 +131,12 @@ class Backtrace(list):
 
 
 def error(obj):
-	err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
+	try:
+		err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
+	except Error:
+		# Most likely, obj is a raw pathrs_error_t.
+		# TODO: Should probably do an isinstance() check here...
+		err = obj
 	if err == ffi.NULL:
 		return None
 
@@ -183,12 +188,14 @@ class Root(object):
 			resolver = os.environ.get("PATHRS_RESOLVER")
 		# Switch resolvers if requested.
 		if resolver is not None:
-			resolver = {
+			new_config = ffi.new("pathrs_config_root_t *")
+			new_config.resolver = {
 				KERNEL_RESOLVER: libpathrs_so.PATHRS_KERNEL_RESOLVER,
 				EMULATED_RESOLVER: libpathrs_so.PATHRS_EMULATED_RESOLVER,
 			}[resolver]
-			ret = libpathrs_so.pathrs_set_resolver(self.inner, resolver)
-			if ret < 0:
+
+			ret = libpathrs_so.pathrs_configure(objtype(self), self.inner, ffi.NULL, new_config)
+			if ret != ffi.NULL:
 				raise error(self)
 
 	def __del__(self):

@@ -425,7 +425,7 @@ pub extern "C" fn pathrs_error(
         return None;
     }
 
-    // Both of these casts and dereferences are safe because the C caller has
+    // All of these casts and dereferences are safe because the C caller has
     // assured us that the type passed is correct.
     let last_error = match ptr_type {
         CPointerType::PATHRS_NONE => return None,
@@ -458,7 +458,7 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
 /// Open a root handle.
 ///
 /// The default resolver is automatically chosen based on the running kernel.
-/// You can switch the resolver used with pathrs_set_resolver() -- though this
+/// You can switch the resolver used with pathrs_configure() -- though this
 /// is not strictly recommended unless you have a good reason to do it.
 ///
 /// The provided path must be an existing directory. If using the emulated
@@ -494,44 +494,6 @@ pub extern "C" fn pathrs_open(path: *const c_char) -> &'static mut CRoot {
     .leak()
 }
 
-/// The backend used for path resolution within a pathrs_root_t to get a
-/// pathrs_handle_t.
-#[repr(C)]
-#[allow(non_camel_case_types, dead_code)]
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum CResolver {
-    /// Use the native openat2(2) backend (requires kernel support).
-    PATHRS_KERNEL_RESOLVER = 0xF000,
-    /// Use the userspace "emulated" backend.
-    PATHRS_EMULATED_RESOLVER = 0xF001,
-}
-
-impl Into<Resolver> for CResolver {
-    fn into(self) -> Resolver {
-        match self {
-            CResolver::PATHRS_KERNEL_RESOLVER => Resolver::Kernel,
-            CResolver::PATHRS_EMULATED_RESOLVER => Resolver::Emulated,
-        }
-    }
-}
-
-/// Switch the resolver for a pathrs_root_t handle.
-#[no_mangle]
-pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) -> c_int {
-    let inner = &mut root.inner;
-
-    root.last_error.wrap(-1, move || {
-        inner
-            .as_mut()
-            .context(error::InvalidArgument {
-                name: "root",
-                description: "invalid pathrs object",
-            })?
-            .resolver = resolver.into();
-        Ok(0)
-    })
-}
-
 /// Represents an FFI-safe configuration structure which supports setting and getting.
 trait CConfig {
     /// Verify that the pointer type and pointer are valid for this type of
@@ -547,8 +509,99 @@ trait CConfig {
     fn apply(&self, ptr: *mut c_void) -> Result<(), Error>;
 }
 
+/// The backend used for path resolution within a `pathrs_root_t` to get a
+/// `pathrs_handle_t`. Can be used with `pathrs_configure()` to change the
+/// resolver for a `pathrs_root_t`.
+#[repr(C)]
+#[allow(non_camel_case_types, dead_code)]
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum CResolver {
+    /// Use the native openat2(2) backend (requires kernel support).
+    PATHRS_KERNEL_RESOLVER = 0xF000,
+    /// Use the userspace "emulated" backend.
+    PATHRS_EMULATED_RESOLVER = 0xF001,
+}
+
+impl From<Resolver> for CResolver {
+    fn from(other: Resolver) -> Self {
+        match other {
+            Resolver::Kernel => CResolver::PATHRS_KERNEL_RESOLVER,
+            Resolver::Emulated => CResolver::PATHRS_EMULATED_RESOLVER,
+        }
+    }
+}
+
+impl Into<Resolver> for CResolver {
+    fn into(self) -> Resolver {
+        match self {
+            CResolver::PATHRS_KERNEL_RESOLVER => Resolver::Kernel,
+            CResolver::PATHRS_EMULATED_RESOLVER => Resolver::Emulated,
+        }
+    }
+}
+
+/// Configuration for a specific `pathrs_root_t`, for use with
+///    `pathrs_configure(PATHRS_ROOT, <root>)`
+#[repr(C)]
+pub struct CRootConfig {
+    /// Resolver used for all resolution under this `pathrs_root_t`.
+    pub resolver: CResolver,
+}
+
+impl CConfig for CRootConfig {
+    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<(), Error> {
+        // Guaranteed by pathrs_configure.
+        assert!(ptr_type == CPointerType::PATHRS_ROOT);
+        ensure!(
+            !ptr.is_null(),
+            error::InvalidArgument {
+                name: "ptr",
+                description: "ptr must be non-NULL",
+            }
+        );
+
+        // This cast and dereference is safe because the C caller has assured us
+        // that the type passed is correct.
+        let root = unsafe { &mut *(ptr as *mut CRoot) };
+        // Check that it's a valid object.
+        ensure!(
+            root.inner.is_some(),
+            error::InvalidArgument {
+                name: "ptr",
+                description: "invalid pathrs object",
+            }
+        );
+
+        Ok(())
+    }
+
+    fn fetch(&mut self, ptr: *const c_void) -> Result<(), Error> {
+        // This cast and dereference is safe because the C caller has assured us
+        // that the type passed is correct.
+        let root = unsafe { &*(ptr as *const CRoot) }
+            .inner
+            .as_ref()
+            .expect("object must be valid");
+
+        self.resolver = root.resolver.into();
+        Ok(())
+    }
+
+    fn apply(&self, ptr: *mut c_void) -> Result<(), Error> {
+        // This cast and dereference is safe because the C caller has assured us
+        // that the type passed is correct.
+        let root = unsafe { &mut *(ptr as *mut CRoot) }
+            .inner
+            .as_mut()
+            .expect("object must be valid");
+
+        root.resolver = self.resolver.into();
+        Ok(())
+    }
+}
+
 /// Global configuration for pathrs, for use with
-///    `pathrs_configure(PATHRS_NONE, NULL)`;
+///    `pathrs_configure(PATHRS_NONE, NULL)`
 #[repr(C)]
 pub struct CGlobalConfig {
     /// Sets whether backtraces will be generated for errors. This is a global
@@ -595,6 +648,7 @@ impl CConfig for CGlobalConfig {
 /// Only certain objects can be configured with pathrs_configure():
 ///
 ///   * PATHRS_NONE (@ptr == NULL), with pathrs_config_global_t.
+///   * PATHRS_ROOT, with pathrs_config_root_t.
 ///
 /// For all other types, a pathrs_error_t will be returned (and as usual, it is
 /// up to the caller to pathrs_free it).
@@ -612,6 +666,7 @@ pub extern "C" fn pathrs_configure(
         // First, check that ptr is valid and ptr_type can be configured.
         match ptr_type {
             CPointerType::PATHRS_NONE => CGlobalConfig::verify(ptr_type, ptr),
+            CPointerType::PATHRS_ROOT => CRootConfig::verify(ptr_type, ptr),
             _ => error::InvalidArgument {
                 name: "ptr_type",
                 description: "type cannot be configured",
@@ -621,9 +676,14 @@ pub extern "C" fn pathrs_configure(
 
         // First, get the original configuration (if requested).
         if !old_ptr.is_null() {
+            // All of these casts and dereferences are safe because the C caller
+            // has assured us that the type passed is correct.
             match ptr_type {
                 CPointerType::PATHRS_NONE => {
                     unsafe { &mut *(old_ptr as *mut CGlobalConfig) }.fetch(ptr)
+                }
+                CPointerType::PATHRS_ROOT => {
+                    unsafe { &mut *(old_ptr as *mut CRootConfig) }.fetch(ptr)
                 }
                 _ => unreachable!(), // already handled above
             }?;
@@ -631,9 +691,14 @@ pub extern "C" fn pathrs_configure(
 
         // Finally, set the new configuration (if requested).
         if !new_ptr.is_null() {
+            // All of these casts and dereferences are safe because the C caller
+            // has assured us that the type passed is correct.
             match ptr_type {
                 CPointerType::PATHRS_NONE => {
                     unsafe { &*(new_ptr as *const CGlobalConfig) }.apply(ptr)
+                }
+                CPointerType::PATHRS_ROOT => {
+                    unsafe { &*(new_ptr as *const CRootConfig) }.apply(ptr)
                 }
                 _ => unreachable!(), // already handled above
             }?;
@@ -671,7 +736,7 @@ pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
         return;
     }
 
-    // Both of these casts and dereferences are safe because the C caller has
+    // All of these casts and dereferences are safe because the C caller has
     // assured us that the type passed is correct.
     match ptr_type {
         CPointerType::PATHRS_NONE => (),

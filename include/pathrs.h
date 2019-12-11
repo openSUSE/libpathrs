@@ -56,8 +56,9 @@ typedef enum {
 } pathrs_type_t;
 
 /**
- * The backend used for path resolution within a pathrs_root_t to get a
- * pathrs_handle_t.
+ * The backend used for path resolution within a `pathrs_root_t` to get a
+ * `pathrs_handle_t`. Can be used with `pathrs_configure()` to change the
+ * resolver for a `pathrs_root_t`.
  */
 typedef enum {
     /**
@@ -184,7 +185,7 @@ typedef __pathrs_root_t pathrs_root_t;
 
 /**
  * Global configuration for pathrs, for use with
- *    `pathrs_configure(PATHRS_NONE, NULL)`;
+ *    `pathrs_configure(PATHRS_NONE, NULL)`
  */
 typedef struct {
     /**
@@ -194,6 +195,17 @@ typedef struct {
      */
     bool error_backtraces;
 } pathrs_config_global_t;
+
+/**
+ * Configuration for a specific `pathrs_root_t`, for use with
+ *    `pathrs_configure(PATHRS_ROOT, <root>)`
+ */
+typedef struct {
+    /**
+     * Resolver used for all resolution under this `pathrs_root_t`.
+     */
+    pathrs_resolver_t resolver;
+} pathrs_config_root_t;
 
 /**
  * Configure pathrs and its objects and fetch the current configuration.
@@ -209,6 +221,7 @@ typedef struct {
  * Only certain objects can be configured with pathrs_configure():
  *
  *   * PATHRS_NONE (@ptr == NULL), with pathrs_config_global_t.
+ *   * PATHRS_ROOT, with pathrs_config_root_t.
  *
  * For all other types, a pathrs_error_t will be returned (and as usual, it is
  * up to the caller to pathrs_free it).
@@ -259,7 +272,7 @@ int pathrs_mknod(pathrs_root_t *root,
  * Open a root handle.
  *
  * The default resolver is automatically chosen based on the running kernel.
- * You can switch the resolver used with pathrs_set_resolver() -- though this
+ * You can switch the resolver used with pathrs_configure() -- though this
  * is not strictly recommended unless you have a good reason to do it.
  *
  * The provided path must be an existing directory. If using the emulated
@@ -314,11 +327,6 @@ int pathrs_reopen(pathrs_handle_t *handle, int flags);
  * already exist*, otherwise an error will occur.
  */
 pathrs_handle_t *pathrs_resolve(pathrs_root_t *root, const char *path);
-
-/**
- * Switch the resolver for a pathrs_root_t handle.
- */
-int pathrs_set_resolver(pathrs_root_t *root, pathrs_resolver_t resolver);
 
 int pathrs_symlink(pathrs_root_t *root, const char *path, const char *target);
 

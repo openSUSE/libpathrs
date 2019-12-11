@@ -73,6 +73,7 @@ exclude = [
 # passed as void *), so we need to force cbindgen to include them.
 include = [
 	"CGlobalConfig",
+	"CRootConfig",
 ]
 
 # Clean up the naming of structs.
@@ -85,6 +86,7 @@ include = [
 
 # C*Conifg
 "CGlobalConfig" = "pathrs_config_global_t"
+"CRootConfig" = "pathrs_config_root_t"
 
 # CPointer<Root>
 "CRoot" = "pathrs_root_t"
