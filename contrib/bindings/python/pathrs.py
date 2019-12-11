@@ -157,12 +157,51 @@ class Handle(object):
 	def __del__(self):
 		libpathrs_so.pathrs_free(objtype(self), self.inner)
 
-	def reopen(self, flags):
+	# XXX: This is _super_ ugly but so is the one in CPython.
+	@staticmethod
+	def _convert_mode(mode):
+		mode = set(mode)
+		flags = os.O_CLOEXEC
+
+		# We don't support O_CREAT or O_EXCL with libpathrs -- use creat().
+		if "x" in mode:
+			raise ValueError("pathrs doesn't support mode='x', use creat()")
+		# Basic sanity-check to make sure we don't accept garbage modes.
+		if len(mode & {"r", "w", "a"}) > 1:
+			raise ValueError("must have exactly one of read/write/append mode")
+
+		read = False
+		write = False
+
+		if "+" in mode:
+			read = True
+			write = True
+		if "r" in mode:
+			read = True
+		if "w" in mode:
+			write = True
+			flags |= os.O_TRUNC
+		if "a" in mode:
+			write = True
+			flags |= os.O_APPEND
+
+		if read and write:
+			flags |= os.O_RDWR
+		elif write:
+			flags |= os.O_WRONLY
+		else:
+			flags |= os.O_RDONLY
+
+		# We don't care about "b" or "t" since that's just a Python thing.
+		return flags
+
+	def reopen(self, mode="r", extra_flags=0):
+		flags = self._convert_mode(mode) | extra_flags
 		fd = libpathrs_so.pathrs_reopen(self.inner, flags)
 		if fd < 0:
 			raise error(self)
 		try:
-			return os.fdopen(fd)
+			return os.fdopen(fd, mode)
 		except Exception as e:
 			os.close(fd)
 			raise
