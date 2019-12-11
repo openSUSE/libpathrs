@@ -210,6 +210,9 @@ pub struct Root {
     // TODO: Root.path handling really needs to be relaxed. Really, we should
     //       just store the root path as a cache and re-fetch it if it changes.
     pub(crate) path: PathBuf,
+    // TODO: In theory we should have more options for the resolver so that we
+    //       can further restrict it (such as disabling symlinks or mount-point
+    //       crossings).
     pub resolver: Resolver,
 }
 

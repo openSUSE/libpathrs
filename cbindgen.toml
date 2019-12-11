@@ -69,6 +69,12 @@ exclude = [
 	"UPGRADE_NOREAD",
 ]
 
+# These types have no obvious usage within the FFI wrappers (they are always
+# passed as void *), so we need to force cbindgen to include them.
+include = [
+	"CGlobalConfig",
+]
+
 # Clean up the naming of structs.
 [export.rename]
 "CResolver" = "pathrs_resolver_t"
@@ -76,6 +82,9 @@ exclude = [
 
 # libc
 "RawFd" = "int"
+
+# C*Conifg
+"CGlobalConfig" = "pathrs_config_global_t"
 
 # CPointer<Root>
 "CRoot" = "pathrs_root_t"

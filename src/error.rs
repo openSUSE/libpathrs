@@ -52,10 +52,10 @@ pub struct Backtrace(pub Option<backtrace::Backtrace>);
 /// Controls whether backtraces will be generated during error handling within
 /// libpathrs.
 ///
-/// By default, backtraces are **disabled**.
+/// By default, backtraces are disabled for release builds and enabled otherwise.
 // TODO: This should probably be a getter+setter setup but I couldn't figure out
 //       nice names for the getter and setter.
-pub static BACKTRACES_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static BACKTRACES_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 
 impl GenerateBacktrace for Backtrace {
     fn generate() -> Self {
@@ -89,7 +89,7 @@ pub enum Error {
     #[snafu(display("feature '{}' not implemented", feature))]
     NotImplemented {
         /// Feature which is not implemented.
-        feature: &'static str,
+        feature: String,
         /// Backtrace captured at time of error.
         backtrace: Backtrace,
     },
@@ -98,7 +98,7 @@ pub enum Error {
     #[snafu(display("feature '{}' not supported on this kernel", feature))]
     NotSupported {
         /// Feature which is not supported.
-        feature: &'static str,
+        feature: String,
         /// Backtrace captured at time of error.
         backtrace: Backtrace,
     },
@@ -107,9 +107,9 @@ pub enum Error {
     #[snafu(display("invalid {} argument: {}", name, description))]
     InvalidArgument {
         /// Name of the invalid argument.
-        name: &'static str,
+        name: String,
         /// Description of what makes the argument invalid.
-        description: &'static str,
+        description: String,
         /// Backtrace captured at time of error.
         backtrace: Backtrace,
     },
@@ -120,7 +120,7 @@ pub enum Error {
     #[snafu(display("violation of safety requirement: {}", description))]
     SafetyViolation {
         /// Description of safety requirement which was violated.
-        description: &'static str,
+        description: String,
         /// Backtrace captured at time of error.
         backtrace: Backtrace,
     },
@@ -135,7 +135,7 @@ pub enum Error {
     #[snafu(display("{} failed", operation))]
     OsError {
         /// Operation which was being attempted.
-        operation: &'static str,
+        operation: String,
         /// Underlying error.
         source: IOError,
         /// Backtrace captured at time of error.
@@ -158,7 +158,7 @@ pub enum Error {
     #[snafu(display("{} failed", operation))]
     RawOsError {
         /// Operation which was being attempted.
-        operation: &'static str,
+        operation: String,
         /// Underlying syscall wrapper error.
         #[snafu(backtrace)]
         source: SyscallError,

@@ -38,6 +38,10 @@
  */
 typedef enum {
     /**
+     * NULL.
+     */
+    PATHRS_NONE = 57343,
+    /**
      * `pathrs_error_t`
      */
     PATHRS_ERROR = 57344,
@@ -77,31 +81,6 @@ typedef struct __pathrs_handle_t __pathrs_handle_t;
  * it an implementation detail and don't make use of it.
  */
 typedef struct __pathrs_root_t __pathrs_root_t;
-
-/**
- * A handle to a path within a given Root. This handle references an
- * already-resolved path which can be used for only one purpose -- to "re-open"
- * the handle and get an actual fs::File which can be used for ordinary
- * operations.
- *
- * It is critical for the safety of users of this library that *at no point* do
- * you use interfaces like libc::openat directly on file descriptors you get
- * from using this library (or extract the RawFd from a fs::File). You must
- * always use operations through a Root.
- */
-typedef __pathrs_handle_t pathrs_handle_t;
-
-/**
- * A handle to the root of a directory tree to resolve within. The only purpose
- * of this "root handle" is to get Handles to inodes within the directory tree.
- *
- * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
- * inside a possibly-attacker-controlled directory tree. While we do have
- * protections that should defend against it (for both drivers), it's far more
- * dangerous than just opening a directory tree which is not inside a
- * potentially-untrusted directory.
- */
-typedef __pathrs_root_t pathrs_root_t;
 
 /**
  * Represents a single entry in a Rust backtrace in C. This structure is
@@ -177,6 +156,67 @@ typedef struct {
      */
     pathrs_backtrace_t *backtrace;
 } pathrs_error_t;
+
+/**
+ * A handle to a path within a given Root. This handle references an
+ * already-resolved path which can be used for only one purpose -- to "re-open"
+ * the handle and get an actual fs::File which can be used for ordinary
+ * operations.
+ *
+ * It is critical for the safety of users of this library that *at no point* do
+ * you use interfaces like libc::openat directly on file descriptors you get
+ * from using this library (or extract the RawFd from a fs::File). You must
+ * always use operations through a Root.
+ */
+typedef __pathrs_handle_t pathrs_handle_t;
+
+/**
+ * A handle to the root of a directory tree to resolve within. The only purpose
+ * of this "root handle" is to get Handles to inodes within the directory tree.
+ *
+ * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
+ * inside a possibly-attacker-controlled directory tree. While we do have
+ * protections that should defend against it (for both drivers), it's far more
+ * dangerous than just opening a directory tree which is not inside a
+ * potentially-untrusted directory.
+ */
+typedef __pathrs_root_t pathrs_root_t;
+
+/**
+ * Global configuration for pathrs, for use with
+ *    `pathrs_configure(PATHRS_NONE, NULL)`;
+ */
+typedef struct {
+    /**
+     * Sets whether backtraces will be generated for errors. This is a global
+     * setting, and defaults to **disabled** for release builds of libpathrs
+     * (but is **enabled** for debug builds).
+     */
+    bool error_backtraces;
+} pathrs_config_global_t;
+
+/**
+ * Configure pathrs and its objects and fetch the current configuration.
+ *
+ * Given a (ptr_type, ptr) combination the provided @new_ptr configuration will
+ * be applied, while the previous configuration will be stored in @old_ptr.
+ *
+ * If @new_ptr is NULL the active configuration will be unchanged (but @old_ptr
+ * will be filled with the active configuration). Similarly, if @old_ptr is
+ * NULL the active configuration will be changed but the old configuration will
+ * not be stored anywhere. If both are NULL, the operation is a no-op.
+ *
+ * Only certain objects can be configured with pathrs_configure():
+ *
+ *   * PATHRS_NONE (@ptr == NULL), with pathrs_config_global_t.
+ *
+ * For all other types, a pathrs_error_t will be returned (and as usual, it is
+ * up to the caller to pathrs_free it).
+ */
+pathrs_error_t *pathrs_configure(pathrs_type_t ptr_type,
+                                 void *ptr,
+                                 void *old_ptr,
+                                 const void *new_ptr);
 
 pathrs_handle_t *pathrs_creat(pathrs_root_t *root,
                               const char *path,

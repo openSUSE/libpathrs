@@ -30,6 +30,7 @@ use std::os::unix::{
     io::{AsRawFd, IntoRawFd, RawFd},
 };
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::{mem, ptr};
 
 use backtrace::Backtrace;
@@ -152,7 +153,7 @@ impl ErrorWrap for Option<Error> {
     /// #[no_mangle]
     /// pub extern fn func(msg: *const c_char) -> c_int {
     ///     let mut last_error: Option<Error> = None;
-    ///     last_error.ffi_wrap(-1, move || {
+    ///     last_error.wrap(-1, move || {
     ///         ensure!(!msg.is_null(), error::InvalidArgument {
     ///             name: "msg",
     ///             description: "must not be a null pointer",
@@ -427,6 +428,7 @@ pub extern "C" fn pathrs_error(
     // Both of these casts and dereferences are safe because the C caller has
     // assured us that the type passed is correct.
     let last_error = match ptr_type {
+        CPointerType::PATHRS_NONE => return None,
         CPointerType::PATHRS_ERROR => return None,
         CPointerType::PATHRS_ROOT => {
             let root = unsafe { &mut *(ptr as *mut CRoot) };
@@ -530,12 +532,127 @@ pub extern "C" fn pathrs_set_resolver(root: &mut CRoot, resolver: CResolver) -> 
     })
 }
 
+/// Represents an FFI-safe configuration structure which supports setting and getting.
+trait CConfig {
+    /// Verify that the pointer type and pointer are valid for this type of
+    /// `CConfig`. This is mostly a sanity-check (`pathrs_configure()` knows the
+    /// mapping between `CPointerType` and Rust type).
+    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<(), Error>;
+
+    /// Fetch the configuration from the ptr object, and store it in this config
+    /// object.
+    fn fetch(&mut self, ptr: *const c_void) -> Result<(), Error>;
+
+    /// Apply a configuration to the given ptr object.
+    fn apply(&self, ptr: *mut c_void) -> Result<(), Error>;
+}
+
+/// Global configuration for pathrs, for use with
+///    `pathrs_configure(PATHRS_NONE, NULL)`;
+#[repr(C)]
+pub struct CGlobalConfig {
+    /// Sets whether backtraces will be generated for errors. This is a global
+    /// setting, and defaults to **disabled** for release builds of libpathrs
+    /// (but is **enabled** for debug builds).
+    pub error_backtraces: bool,
+}
+
+impl CConfig for CGlobalConfig {
+    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<(), Error> {
+        // Guaranteed by pathrs_configure.
+        assert!(ptr_type == CPointerType::PATHRS_NONE);
+        ensure!(
+            ptr.is_null(),
+            error::InvalidArgument {
+                name: "ptr",
+                description: "ptr must be NULL with PATHRS_NONE",
+            }
+        );
+        Ok(())
+    }
+
+    fn fetch(&mut self, _ptr: *const c_void) -> Result<(), Error> {
+        self.error_backtraces = error::BACKTRACES_ENABLED.load(Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn apply(&self, _ptr: *mut c_void) -> Result<(), Error> {
+        error::BACKTRACES_ENABLED.store(self.error_backtraces, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// Configure pathrs and its objects and fetch the current configuration.
+///
+/// Given a (ptr_type, ptr) combination the provided @new_ptr configuration will
+/// be applied, while the previous configuration will be stored in @old_ptr.
+///
+/// If @new_ptr is NULL the active configuration will be unchanged (but @old_ptr
+/// will be filled with the active configuration). Similarly, if @old_ptr is
+/// NULL the active configuration will be changed but the old configuration will
+/// not be stored anywhere. If both are NULL, the operation is a no-op.
+///
+/// Only certain objects can be configured with pathrs_configure():
+///
+///   * PATHRS_NONE (@ptr == NULL), with pathrs_config_global_t.
+///
+/// For all other types, a pathrs_error_t will be returned (and as usual, it is
+/// up to the caller to pathrs_free it).
+#[no_mangle]
+pub extern "C" fn pathrs_configure(
+    ptr_type: CPointerType,
+    ptr: *mut c_void,
+    old_ptr: *mut c_void,
+    new_ptr: *const c_void,
+) -> Option<&'static mut CError> {
+    // XXX: All of this could probably be made quite a bit neater with a macro.
+
+    let mut error: Option<Error> = None;
+    error.wrap((), move || {
+        // First, check that ptr is valid and ptr_type can be configured.
+        match ptr_type {
+            CPointerType::PATHRS_NONE => CGlobalConfig::verify(ptr_type, ptr),
+            _ => error::InvalidArgument {
+                name: "ptr_type",
+                description: "type cannot be configured",
+            }
+            .fail(),
+        }?;
+
+        // First, get the original configuration (if requested).
+        if !old_ptr.is_null() {
+            match ptr_type {
+                CPointerType::PATHRS_NONE => {
+                    unsafe { &mut *(old_ptr as *mut CGlobalConfig) }.fetch(ptr)
+                }
+                _ => unreachable!(), // already handled above
+            }?;
+        }
+
+        // Finally, set the new configuration (if requested).
+        if !new_ptr.is_null() {
+            match ptr_type {
+                CPointerType::PATHRS_NONE => {
+                    unsafe { &*(new_ptr as *const CGlobalConfig) }.apply(ptr)
+                }
+                _ => unreachable!(), // already handled above
+            }?;
+        }
+
+        Ok(())
+    });
+
+    error.as_ref().map(CError::from).map(Leakable::leak)
+}
+
 /// The type of object being passed to "object agnostic" libpathrs functions.
 // The values of the enum are baked into the API, you can only append to it.
 #[repr(C)]
 #[allow(non_camel_case_types, dead_code)]
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CPointerType {
+    /// NULL.
+    PATHRS_NONE = 0xDFFF,
     /// `pathrs_error_t`
     PATHRS_ERROR = 0xE000,
     /// `pathrs_root_t`
@@ -557,6 +674,7 @@ pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
     // Both of these casts and dereferences are safe because the C caller has
     // assured us that the type passed is correct.
     match ptr_type {
+        CPointerType::PATHRS_NONE => (),
         CPointerType::PATHRS_ERROR => unsafe { &mut *(ptr as *mut CError) }.free(),
         CPointerType::PATHRS_ROOT => unsafe { &mut *(ptr as *mut CRoot) }.free(),
         CPointerType::PATHRS_HANDLE => unsafe { &mut *(ptr as *mut CHandle) }.free(),
