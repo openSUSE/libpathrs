@@ -34,6 +34,13 @@ header = """
  * You should have received a copy of the GNU Lesser General Public License along
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+
+/*
+ * Markers required for Python bindings due to a cffi limitation:
+ *  <https://bitbucket.org/cffi/cffi/issues/131>
+ */
+// packed-struct=pathrs_config_global_t
+// packed-struct=pathrs_config_root_t
 """
 
 include_guard = "LIBPATHRS_H"
@@ -44,6 +51,21 @@ autogen_warning = """
  *          Instead, re-generate it with:
  *            % cbindgen -c cbindgen.toml -o include/pathrs.h
  */
+"""
+
+# Part of workaround for https://github.com/eqrion/cbindgen/issues/430.
+trailer = """
+#ifndef LIBPATHRS_H___CBINDGEN_430_WORKAROUND
+#define LIBPATHRS_H___CBINDGEN_430_WORKAROUND
+/* Part of workaround for https://github.com/eqrion/cbindgen/issues/430. */
+struct pathrs_config_global_t {
+    bool error_backtraces;
+} __attribute__((packed));
+
+struct pathrs_config_root_t {
+    pathrs_resolver_t resolver;
+} __attribute__((packed));
+#endif /* LIBPATHRS_H___CBINDGEN_430_WORKAROUND */
 """
 
 # Needed for dev_t.
@@ -74,6 +96,8 @@ exclude = [
 include = [
 	"CGlobalConfig",
 	"CRootConfig",
+	# Part of workaround for https://github.com/eqrion/cbindgen/issues/430.
+	"CResolver",
 ]
 
 # Clean up the naming of structs.

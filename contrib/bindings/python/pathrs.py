@@ -223,9 +223,9 @@ class Root(object):
 			new_config = ffi.new("pathrs_config_root_t *")
 			new_config.resolver = DEFAULT_RESOLVER
 
-			ret = libpathrs_so.pathrs_configure(objtype(self), self.inner, ffi.NULL, new_config)
-			if ret != ffi.NULL:
-				raise error(self)
+			err = libpathrs_so.pathrs_configure(objtype(self), self.inner, ffi.NULL, new_config, ffi.sizeof(new_config))
+			if err:
+				raise error(err)
 
 	def __del__(self):
 		if self.inner is not None:
@@ -316,10 +316,52 @@ def __do_load():
 		raise Error("Cannot find 'libpathrs' header.")
 
 	with open(include_path) as f:
-		# Strip out #-lines.
-		hdr = re.sub(r"^#.*", "", f.read(), flags=re.MULTILINE)
-		ffi.cdef("typedef uint32_t dev_t;")
-		ffi.cdef(hdr)
+		hdr = f.read()
+
+	# Get the set of structs which have __attribute__((packed)) so we can
+	# declare they're packed in cffi terms. For more details, see
+	# <https://bitbucket.org/cffi/cffi/issues/131>.
+	# NOTE: Rather than parsing C using regex (very bad idea), the pathrs
+	#       header is guaranteed to include helper comments.
+	packed_structs = re.findall(r"^//\s*packed-struct=(\w+)", hdr, flags=re.MULTILINE)
+
+	# Strip out #-lines.
+	hdr = re.sub(r"^#.*", "", hdr, flags=re.MULTILINE)
+	# Strip out __attribute__((packed)).
+	hdr = re.sub(r"__attribute__\s*\(\(packed\)\)", "", hdr, flags=re.MULTILINE)
+
+	# Ideally we'd use ffi.pack_structure() but that doesn't exist, so we need
+	# to do this in a slightly more janky way. Because the header is generated
+	# by cbindgen and is based on Rust types (which doesn't have a concept of
+	# nested or anonymous types), we know that there won't be any nested
+	# brackets in struct definitions. So in theory, regex should be fine here
+	# -- not to mention that the headers are written by the same person who
+	# wrote this. :P
+	packed_hdr = ""
+	for struct in packed_structs:
+		patterns = [
+			# struct definition
+			re.compile("^\s*struct\s+%s[\s\n]*{[^}]*}\s*;?" % (struct,), flags=re.MULTILINE),
+			# typedef
+			# TODO: This will absolutely break after we fix the cbindgen
+			#       limitations (this won't handle "typedef struct { ... } foo"
+			#       even remotely correctly).
+			re.compile("^\s*typedef\s+[^;{]*%s[^;{]*;" % (struct,), flags=re.MULTILINE),
+		]
+
+		for pattern in patterns:
+			# Add the matched pattern to the packed header.
+			try:
+				packed_hdr += re.search(pattern, hdr).group() + "\n"
+			except:
+				raise RuntimeError("pathrs.h invalid -- packed-struct=%s listed but struct not defined" % (struct,))
+
+			# And drop it from the original header.
+			hdr = re.sub(pattern, "", hdr)
+
+	ffi.cdef("typedef uint32_t dev_t;")
+	ffi.cdef(hdr)
+	ffi.cdef(packed_hdr, packed=True)
 
 	try:
 		# First, try system search paths.
