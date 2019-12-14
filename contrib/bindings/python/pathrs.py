@@ -339,25 +339,17 @@ def __do_load():
 	# wrote this. :P
 	packed_hdr = ""
 	for struct in packed_structs:
-		patterns = [
-			# struct definition
-			re.compile("^\s*struct\s+%s[\s\n]*{[^}]*}\s*;?" % (struct,), flags=re.MULTILINE),
-			# typedef
-			# TODO: This will absolutely break after we fix the cbindgen
-			#       limitations (this won't handle "typedef struct { ... } foo"
-			#       even remotely correctly).
-			re.compile("^\s*typedef\s+[^;{]*%s[^;{]*;" % (struct,), flags=re.MULTILINE),
-		]
+		# struct definition
+		pattern = re.compile("^typedef\s*struct[^{;]+{[^}]*}\s*%s\s*;?" % (struct,), flags=re.MULTILINE)
 
-		for pattern in patterns:
-			# Add the matched pattern to the packed header.
-			try:
-				packed_hdr += re.search(pattern, hdr).group() + "\n"
-			except:
-				raise RuntimeError("pathrs.h invalid -- packed-struct=%s listed but struct not defined" % (struct,))
+		# Add the matched pattern to the packed header.
+		try:
+			packed_hdr += re.search(pattern, hdr).group() + "\n"
+		except:
+			raise RuntimeError("pathrs.h invalid -- packed-struct=%s listed but struct not defined" % (struct,))
 
-			# And drop it from the original header.
-			hdr = re.sub(pattern, "", hdr)
+		# And drop it from the original header.
+		hdr = re.sub(pattern, "", hdr)
 
 	ffi.cdef("typedef uint32_t dev_t;")
 	ffi.cdef(hdr)

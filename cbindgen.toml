@@ -53,21 +53,6 @@ autogen_warning = """
  */
 """
 
-# Part of workaround for https://github.com/eqrion/cbindgen/issues/430.
-trailer = """
-#ifndef LIBPATHRS_H___CBINDGEN_430_WORKAROUND
-#define LIBPATHRS_H___CBINDGEN_430_WORKAROUND
-/* Part of workaround for https://github.com/eqrion/cbindgen/issues/430. */
-struct pathrs_config_global_t {
-    bool error_backtraces;
-} __attribute__((packed));
-
-struct pathrs_config_root_t {
-    pathrs_resolver_t resolver;
-} __attribute__((packed));
-#endif /* LIBPATHRS_H___CBINDGEN_430_WORKAROUND */
-"""
-
 # Needed for dev_t.
 sys_includes = ["sys/types.h"]
 
@@ -75,6 +60,9 @@ sys_includes = ["sys/types.h"]
 line_length = 80
 tab_width = 4
 style = "type"
+
+[layout]
+packed = "__attribute__((packed))"
 
 [export]
 exclude = [
@@ -96,8 +84,6 @@ exclude = [
 include = [
 	"CGlobalConfig",
 	"CRootConfig",
-	# Part of workaround for https://github.com/eqrion/cbindgen/issues/430.
-	"CResolver",
 ]
 
 # Clean up the naming of structs.

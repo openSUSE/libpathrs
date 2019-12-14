@@ -44,7 +44,7 @@
  * The type of object being passed to "object agnostic" libpathrs functions.
  */
 typedef enum {
-    __INVALID = 0,
+    __PATHRS_INVALID_TYPE = 0,
     /**
      * NULL.
      */
@@ -69,7 +69,7 @@ typedef enum {
  * resolver for a `pathrs_root_t`.
  */
 typedef enum {
-    __INVALID = 0,
+    __PATHRS_INVALID_RESOLVER = 0,
     /**
      * Use the native openat2(2) backend (requires kernel support).
      */
@@ -79,12 +79,6 @@ typedef enum {
      */
     PATHRS_EMULATED_RESOLVER = 61441,
 } pathrs_resolver_t;
-
-/**
- * Global configuration for pathrs, for use with
- *    `pathrs_configure(PATHRS_NONE, NULL)`
- */
-typedef struct pathrs_config_global_t pathrs_config_global_t;
 
 /**
  * This is only exported to work around a Rust compiler restriction. Consider
@@ -97,12 +91,6 @@ typedef struct __pathrs_handle_t __pathrs_handle_t;
  * it an implementation detail and don't make use of it.
  */
 typedef struct __pathrs_root_t __pathrs_root_t;
-
-/**
- * Configuration for a specific `pathrs_root_t`, for use with
- *    `pathrs_configure(PATHRS_ROOT, <root>)`
- */
-typedef struct pathrs_config_root_t pathrs_config_root_t;
 
 /**
  * Represents a single entry in a Rust backtrace in C. This structure is
@@ -203,6 +191,30 @@ typedef __pathrs_handle_t pathrs_handle_t;
  * potentially-untrusted directory.
  */
 typedef __pathrs_root_t pathrs_root_t;
+
+/**
+ * Global configuration for pathrs, for use with
+ *    `pathrs_configure(PATHRS_NONE, NULL)`
+ */
+typedef struct __attribute__((packed)) {
+    /**
+     * Sets whether backtraces will be generated for errors. This is a global
+     * setting, and defaults to **disabled** for release builds of libpathrs
+     * (but is **enabled** for debug builds).
+     */
+    bool error_backtraces;
+} pathrs_config_global_t;
+
+/**
+ * Configuration for a specific `pathrs_root_t`, for use with
+ *    `pathrs_configure(PATHRS_ROOT, <root>)`
+ */
+typedef struct __attribute__((packed)) {
+    /**
+     * Resolver used for all resolution under this `pathrs_root_t`.
+     */
+    pathrs_resolver_t resolver;
+} pathrs_config_root_t;
 
 /**
  * Configure pathrs and its objects and fetch the current configuration.
@@ -333,16 +345,3 @@ pathrs_handle_t *pathrs_resolve(pathrs_root_t *root, const char *path);
 int pathrs_symlink(pathrs_root_t *root, const char *path, const char *target);
 
 #endif /* LIBPATHRS_H */
-
-#ifndef LIBPATHRS_H___CBINDGEN_430_WORKAROUND
-#define LIBPATHRS_H___CBINDGEN_430_WORKAROUND
-/* Part of workaround for https://github.com/eqrion/cbindgen/issues/430. */
-struct pathrs_config_global_t {
-    bool error_backtraces;
-} __attribute__((packed));
-
-struct pathrs_config_root_t {
-    pathrs_resolver_t resolver;
-} __attribute__((packed));
-#endif /* LIBPATHRS_H___CBINDGEN_430_WORKAROUND */
-

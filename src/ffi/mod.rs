@@ -522,7 +522,7 @@ trait CConfig {
 #[allow(non_camel_case_types, dead_code)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CResolver {
-    __INVALID = 0,
+    __PATHRS_INVALID_RESOLVER = 0,
     /// Use the native openat2(2) backend (requires kernel support).
     PATHRS_KERNEL_RESOLVER = 0xF000,
     /// Use the userspace "emulated" backend.
@@ -829,7 +829,7 @@ pub extern "C" fn pathrs_configure(
 #[allow(non_camel_case_types, dead_code)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CPointerType {
-    __INVALID = 0,
+    __PATHRS_INVALID_TYPE = 0,
     /// NULL.
     PATHRS_NONE = 0xDFFF,
     /// `pathrs_error_t`
