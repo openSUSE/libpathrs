@@ -18,9 +18,8 @@
 
 use crate::syscalls::unstable;
 use crate::{
-    error,
-    error::{Error, ErrorExt},
-    user,
+    error::{self, Error, ErrorExt},
+    resolvers,
 };
 use crate::{Handle, Root};
 
@@ -74,6 +73,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     }
 
     Ok(handle.unwrap_or(
-        user::resolve(root, path).wrap("fallback user-space resolution for RESOLVE_IN_ROOT")?,
+        resolvers::user::resolve(root, path)
+            .wrap("fallback user-space resolution for RESOLVE_IN_ROOT")?,
     ))
 }

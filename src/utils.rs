@@ -16,7 +16,10 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error, error::Error, syscalls, OpenFlags};
+use crate::{
+    error::{self, Error},
+    syscalls, OpenFlags,
+};
 
 use std::ffi::{CString, OsStr};
 use std::fs::File;

@@ -118,19 +118,23 @@ extern crate libc;
 #[macro_use]
 extern crate snafu;
 
+// `Handle` implementation.
 mod handle;
 pub use handle::*;
 
+// `Root` implementation.
 mod root;
 pub use root::*;
 
+/// Errors returned by libpathrs.
 pub mod error;
 
-// C-friendly API.
-mod ffi;
-// Backends.
-mod kernel;
-mod user;
+// Backend resolver implementations.
+mod resolvers;
+
+// C API.
+mod capi;
+
 // Internally used helpers.
 mod syscalls;
 mod utils;

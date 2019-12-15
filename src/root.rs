@@ -18,9 +18,8 @@
 
 use crate::Handle;
 use crate::{
-    error,
-    error::{Error, ErrorExt},
-    kernel, syscalls, user,
+    error::{self, Error, ErrorExt},
+    resolvers, syscalls,
     utils::{RawFdExt, PATH_SEPARATOR},
 };
 
@@ -112,7 +111,7 @@ pub enum Resolver {
 }
 
 lazy_static! {
-    static ref DEFAULT_RESOLVER: Resolver = match *kernel::IS_SUPPORTED {
+    static ref DEFAULT_RESOLVER: Resolver = match *resolvers::kernel::IS_SUPPORTED {
         true => Resolver::Kernel,
         false => Resolver::Emulated,
     };
@@ -128,7 +127,7 @@ impl Resolver {
     /// Is this resolver supported by the current platform?
     pub fn supported(&self) -> bool {
         match self {
-            Resolver::Kernel => *kernel::IS_SUPPORTED,
+            Resolver::Kernel => *resolvers::kernel::IS_SUPPORTED,
             Resolver::Emulated => true,
         }
     }
@@ -303,8 +302,8 @@ impl Root {
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.check()?;
         match self.resolver {
-            Resolver::Kernel => kernel::resolve(self, path),
-            Resolver::Emulated => user::resolve(self, path),
+            Resolver::Kernel => resolvers::kernel::resolve(self, path),
+            Resolver::Emulated => resolvers::user::resolve(self, path),
         }
     }
 

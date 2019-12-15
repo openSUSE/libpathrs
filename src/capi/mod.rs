@@ -18,10 +18,9 @@
 
 // Import ourselves to make this an example of using libpathrs.
 use crate as libpathrs;
-use libpathrs::{error, syscalls};
 use libpathrs::{
-    error::{Error, ErrorExt},
-    Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root,
+    error::{self, Error, ErrorExt},
+    syscalls, Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root,
 };
 
 use std::ffi::{CStr, CString, OsStr};

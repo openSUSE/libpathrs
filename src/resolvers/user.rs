@@ -36,8 +36,7 @@
 //! attempts.
 
 use crate::{
-    error,
-    error::{Error, ErrorExt},
+    error::{self, Error, ErrorExt},
     syscalls,
     utils::{FileExt, RawFdExt, PATH_SEPARATOR},
 };
