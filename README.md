@@ -36,29 +36,23 @@ int get_my_fd(void)
 	pathrs_error_t *error = NULL;
 
 	root = pathrs_open("/path/to/root");
-	if (!root)
-		abort(); /* will never happen */
 	error = pathrs_error(PATHRS_ROOT, root);
 	if (error)
 		goto err;
 
 	handle = pathrs_resolve(root, "/etc/passwd");
-	if (!handle) {
-		error = pathrs_error(PATHRS_ROOT, root);
+	error = pathrs_error(PATHRS_ROOT, root);
+	if (error) /* or (!handle) */
 		goto err;
-	}
 
 	fd = pathrs_reopen(handle, O_RDONLY);
-	if (fd < 0) {
-		error = pathrs_error(PATHRS_HANDLE, handle);
+	error = pathrs_error(PATHRS_HANDLE, handle);
+	if (error) /* or (fd < 0) */
 		goto err;
-	}
-
-	goto out;
 
 err:
-	fprintf(stderr, "Uh-oh: %s (errno=%d)\n", error->description, error->saved_errno);
-	/* Optionally, print out the backtrace... */
+	if (error)
+		fprintf(stderr, "Uh-oh: %s (errno=%d)\n", error->description, error->saved_errno);
 
 out:
 	pathrs_free(PATHRS_ROOT, root);

@@ -64,34 +64,29 @@ void print_error(pathrs_error_t *error)
 int open_in_root(const char *root_path, const char *unsafe_path)
 {
 	int fd = -1;
+	pathrs_root_t *root = NULL;
+	pathrs_handle_t *handle = NULL;
 	pathrs_error_t *error = NULL;
 
-	pathrs_root_t *root = pathrs_open(root_path);
+	root = pathrs_open(root_path);
 	error = pathrs_error(PATHRS_ROOT, root);
 	if (error)
 		goto err;
 
-	pathrs_handle_t *handle = pathrs_resolve(root, unsafe_path);
-	if (!handle)
-		goto err_root;
+	handle = pathrs_resolve(root, unsafe_path);
+	error = pathrs_error(PATHRS_ROOT, root);
+	if (error)
+		goto err;
 
 	fd = pathrs_reopen(handle, O_RDONLY);
-	if (fd < 0)
-		goto err_handle;
-
-	goto out;
-
-err_handle:
 	error = pathrs_error(PATHRS_HANDLE, handle);
-	goto err;
-
-err_root:
-	error = pathrs_error(PATHRS_ROOT, root);
-	goto err;
+	if (error)
+		goto err;
 
 err:
 	if (error)
 		print_error(error);
+
 out:
 	pathrs_free(PATHRS_ROOT, root);
 	pathrs_free(PATHRS_HANDLE, handle);
