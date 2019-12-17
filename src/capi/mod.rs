@@ -23,6 +23,7 @@ use libpathrs::{
     syscalls, Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root,
 };
 
+use std::convert::TryInto;
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::Permissions;
 use std::io::Error as IOError;
@@ -179,7 +180,7 @@ impl ErrorWrap for Option<Error> {
 
 /// Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
 /// the FFI user does not modify *any* of these fields.
-#[repr(C)]
+#[repr(align(8), C)]
 pub struct CVec<T> {
     /// Pointer to the head of the vector.
     pub head: *const T,
@@ -227,7 +228,7 @@ impl<T> Drop for CVec<T> {
 
 /// Represents a single entry in a Rust backtrace in C. This structure is
 /// owned by the relevant `pathrs_error_t`.
-#[repr(C)]
+#[repr(align(8), C)]
 pub struct CBacktraceEntry {
     /// Instruction pointer at time of backtrace.
     pub ip: *const c_void,
@@ -324,15 +325,16 @@ impl From<Backtrace> for CBacktrace {
 
 /// Attempts to represent a Rust Error type in C. This structure must be freed
 /// using `pathrs_free(PATHRS_ERROR)`.
-// TODO: #[non_exhaustive]
-#[repr(C)]
+// NOTE: This API is exposed to library users in a read-only manner with memory
+//       management done by libpathrs -- so you may only ever append to it.
+#[repr(align(8), C)]
 pub struct CError {
     /// Raw errno(3) value of the underlying error (or 0 if the source of the
     /// error was not due to a syscall error).
     // We can't call this field "errno" because glibc defines errno(3) as a
     // macro, causing all sorts of problems if you have a struct with an "errno"
     // field. Best to avoid those headaches.
-    pub saved_errno: i32,
+    pub saved_errno: u64,
 
     /// Textual description of the error.
     pub description: *const c_char,
@@ -365,12 +367,12 @@ impl From<&Error> for CError {
             CString::new(desc).expect("CString::new(description) failed in CError generation");
 
         let errno = match err.root_cause().downcast_ref::<IOError>() {
-            Some(err) => err.raw_os_error().unwrap_or(0),
+            Some(err) => err.raw_os_error().unwrap_or(0).abs(),
             _ => 0,
         };
 
         CError {
-            saved_errno: errno,
+            saved_errno: errno.try_into().unwrap_or(0),
             description: desc.into_raw(),
             backtrace: ErrorCompat::backtrace(err)
                 .cloned()
@@ -517,7 +519,7 @@ trait CConfig {
 /// `pathrs_handle_t`. Can be used with `pathrs_configure()` to change the
 /// resolver for a `pathrs_root_t`.
 // TODO: #[non_exhaustive]
-#[repr(C)]
+#[repr(u16)]
 #[allow(non_camel_case_types, dead_code)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CResolver {
@@ -549,11 +551,12 @@ impl Into<Resolver> for CResolver {
 
 /// Configuration for a specific `pathrs_root_t`, for use with
 ///    `pathrs_configure(PATHRS_ROOT, <root>)`
-// TODO: #[non_exhaustive]
-#[repr(packed, C)]
+#[repr(align(8), C)]
 pub struct CRootConfig {
     /// Resolver used for all resolution under this `pathrs_root_t`.
     pub resolver: CResolver,
+    /// Extra padding fields -- must be set to zero.
+    pub __padding: [u16; 3],
 }
 
 impl CConfig for CRootConfig {
@@ -610,13 +613,14 @@ impl CConfig for CRootConfig {
 
 /// Global configuration for pathrs, for use with
 ///    `pathrs_configure(PATHRS_NONE, NULL)`
-// TODO: #[non_exhaustive]
-#[repr(packed, C)]
+#[repr(align(8), C)]
 pub struct CGlobalConfig {
     /// Sets whether backtraces will be generated for errors. This is a global
     /// setting, and defaults to **disabled** for release builds of libpathrs
     /// (but is **enabled** for debug builds).
     pub error_backtraces: bool,
+    /// Extra padding fields -- must be set to zero.
+    pub __padding: [u8; 7],
 }
 
 impl CConfig for CGlobalConfig {
@@ -677,7 +681,7 @@ fn copy_struct_in<T>(dst: &mut T, ptr: *const c_void, ptr_size: usize) -> Result
         }
     }
 
-    // This is safe because dst is a #[repr(packed, C)] struct which the C
+    // This is safe because dst is a #[repr(align(8), C)] struct which the C
     // caller has assured us has the right type and size. dst is definitely not
     // overlapping because it's a stack variable not a C pointer.
     unsafe { ptr::copy_nonoverlapping(ptr as *const u8, dst as *mut T as *mut u8, copy) };
@@ -692,14 +696,15 @@ fn copy_struct_in<T>(dst: &mut T, ptr: *const c_void, ptr_size: usize) -> Result
 fn copy_struct_out<T>(src: &T, ptr: *mut c_void, ptr_size: usize) -> Result<(), Error> {
     let lib_size = mem::size_of::<T>();
 
-    // Zero-fill ptr -- this is safe for the reasons outlined in pathrs_configure.
-    unsafe { ptr::write_bytes(ptr as *mut u8, 0x00, ptr_size) };
+    // Zero-fill ptr -- this is safe for the reasons outlined in
+    // pathrs_configure.
+    unsafe { ptr::write_bytes(ptr as *mut u8, 0, ptr_size) };
 
     // How much should we copy?
     let copy = cmp::min(ptr_size, lib_size);
 
-    // This is safe because dst is a #[repr(packed, C)] struct which the C
-    // caller has assured us has the right type and size. dst is definitely not
+    // This is safe because dst is a #[repr(align(8), C)] struct which the C
+    // caller has assured us has the right type and size. src is definitely not
     // overlapping because it's a stack variable not a C pointer.
     unsafe { ptr::copy_nonoverlapping(src as *const T as *const u8, ptr as *mut u8, copy) };
     Ok(())
@@ -757,9 +762,9 @@ pub extern "C" fn pathrs_configure(
             // bytes to the copy. We then verify that the user's copy doesn't
             // have any trailing non-zero bytes.
             //
-            // This is all entirely safe because the type is #[repr(packed, C)]
-            // and contains no non-nullable values. The C caller assures us that
-            // the type of the struct passed is correct, and that cfg_size
+            // This is all entirely safe because the type is #[repr(align(8),
+            // C)] and contains no non-nullable values. The C caller assures us
+            // that the type of the struct passed is correct, and that cfg_size
             // actually is the size of the struct they've given us.
             //
             // The purpose of this is to implement forward and backwards
@@ -790,9 +795,9 @@ pub extern "C" fn pathrs_configure(
             // bytes to the copy. We then verify that the user's copy doesn't
             // have any trailing non-zero bytes.
             //
-            // This is all entirely safe because the type is #[repr(packed, C)]
-            // and contains no non-nullable values. The C caller assures us that
-            // the type of the struct passed is correct, and that cfg_size
+            // This is all entirely safe because the type is #[repr(align(8),
+            // C)] and contains no non-nullable values. The C caller assures us
+            // that the type of the struct passed is correct, and that cfg_size
             // actually is the size of the struct they've given us.
             //
             // The purpose of this is to implement forward and backwards
@@ -803,12 +808,28 @@ pub extern "C" fn pathrs_configure(
                     let mut new_cfg: CGlobalConfig = unsafe { mem::zeroed() };
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
+                    // Check that padding is zeroed.
+                    ensure!(
+                        new_cfg.__padding.iter().all(|e| *e == 0),
+                        error::InvalidArgument {
+                            name: "new_cfg_ptr",
+                            description: "unused padding fields must be zero",
+                        }
+                    );
                     new_cfg.apply(ptr)?;
                 }
                 CPointerType::PATHRS_ROOT => {
                     let mut new_cfg: CRootConfig = unsafe { mem::zeroed() };
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
+                    // Check that padding is zeroed.
+                    ensure!(
+                        new_cfg.__padding.iter().all(|e| *e == 0),
+                        error::InvalidArgument {
+                            name: "new_cfg_ptr",
+                            description: "unused padding fields must be zero",
+                        }
+                    );
                     new_cfg.apply(ptr)?;
                 }
                 _ => unreachable!(), // already handled above

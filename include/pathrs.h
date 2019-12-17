@@ -16,12 +16,10 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-/*
- * Markers required for Python bindings due to a cffi limitation:
- *  <https://bitbucket.org/cffi/cffi/issues/131>
- */
-// packed-struct=pathrs_config_global_t
-// packed-struct=pathrs_config_root_t
+#ifdef __CBINDGEN_ALIGNED
+#undef __CBINDGEN_ALIGNED
+#endif
+#define __CBINDGEN_ALIGNED(n) __attribute__((aligned(n)))
 
 
 #ifndef LIBPATHRS_H
@@ -68,7 +66,7 @@ typedef enum {
  * `pathrs_handle_t`. Can be used with `pathrs_configure()` to change the
  * resolver for a `pathrs_root_t`.
  */
-typedef enum {
+enum pathrs_resolver_t {
     __PATHRS_INVALID_RESOLVER = 0,
     /**
      * Use the native openat2(2) backend (requires kernel support).
@@ -78,7 +76,8 @@ typedef enum {
      * Use the userspace "emulated" backend.
      */
     PATHRS_EMULATED_RESOLVER = 61441,
-} pathrs_resolver_t;
+};
+typedef uint16_t pathrs_resolver_t;
 
 /**
  * This is only exported to work around a Rust compiler restriction. Consider
@@ -96,7 +95,7 @@ typedef struct __pathrs_root_t __pathrs_root_t;
  * Represents a single entry in a Rust backtrace in C. This structure is
  * owned by the relevant `pathrs_error_t`.
  */
-typedef struct {
+typedef struct __CBINDGEN_ALIGNED(8) {
     /**
      * Instruction pointer at time of backtrace.
      */
@@ -125,7 +124,7 @@ typedef struct {
  * Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
  * the FFI user does not modify *any* of these fields.
  */
-typedef struct {
+typedef struct __CBINDGEN_ALIGNED(8) {
     /**
      * Pointer to the head of the vector.
      */
@@ -150,12 +149,12 @@ typedef __pathrs_backtrace_t pathrs_backtrace_t;
  * Attempts to represent a Rust Error type in C. This structure must be freed
  * using `pathrs_free(PATHRS_ERROR)`.
  */
-typedef struct {
+typedef struct __CBINDGEN_ALIGNED(8) {
     /**
      * Raw errno(3) value of the underlying error (or 0 if the source of the
      * error was not due to a syscall error).
      */
-    int32_t saved_errno;
+    uint64_t saved_errno;
     /**
      * Textual description of the error.
      */
@@ -196,24 +195,32 @@ typedef __pathrs_root_t pathrs_root_t;
  * Global configuration for pathrs, for use with
  *    `pathrs_configure(PATHRS_NONE, NULL)`
  */
-typedef struct __attribute__((packed)) {
+typedef struct __CBINDGEN_ALIGNED(8) {
     /**
      * Sets whether backtraces will be generated for errors. This is a global
      * setting, and defaults to **disabled** for release builds of libpathrs
      * (but is **enabled** for debug builds).
      */
     bool error_backtraces;
+    /**
+     * Extra padding fields -- must be set to zero.
+     */
+    uint8_t __padding[7];
 } pathrs_config_global_t;
 
 /**
  * Configuration for a specific `pathrs_root_t`, for use with
  *    `pathrs_configure(PATHRS_ROOT, <root>)`
  */
-typedef struct __attribute__((packed)) {
+typedef struct __CBINDGEN_ALIGNED(8) {
     /**
      * Resolver used for all resolution under this `pathrs_root_t`.
      */
     pathrs_resolver_t resolver;
+    /**
+     * Extra padding fields -- must be set to zero.
+     */
+    uint16_t __padding[3];
 } pathrs_config_root_t;
 
 /**
@@ -345,3 +352,8 @@ pathrs_handle_t *pathrs_resolve(pathrs_root_t *root, const char *path);
 int pathrs_symlink(pathrs_root_t *root, const char *path, const char *target);
 
 #endif /* LIBPATHRS_H */
+
+#ifdef __CBINDGEN_ALIGNED
+#undef __CBINDGEN_ALIGNED
+#endif
+

@@ -35,12 +35,16 @@ header = """
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-/*
- * Markers required for Python bindings due to a cffi limitation:
- *  <https://bitbucket.org/cffi/cffi/issues/131>
- */
-// packed-struct=pathrs_config_global_t
-// packed-struct=pathrs_config_root_t
+#ifdef __CBINDGEN_ALIGNED
+#undef __CBINDGEN_ALIGNED
+#endif
+#define __CBINDGEN_ALIGNED(n) __attribute__((aligned(n)))
+"""
+
+trailer = """
+#ifdef __CBINDGEN_ALIGNED
+#undef __CBINDGEN_ALIGNED
+#endif
 """
 
 include_guard = "LIBPATHRS_H"
@@ -62,7 +66,7 @@ tab_width = 4
 style = "type"
 
 [layout]
-packed = "__attribute__((packed))"
+aligned_n = "__CBINDGEN_ALIGNED"
 
 [export]
 exclude = [
