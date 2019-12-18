@@ -180,6 +180,7 @@ impl RawFdExt for File {
     }
 
     fn as_unsafe_path(&self) -> Result<PathBuf, Error> {
+        // SAFETY: Caller guarantees that as_unsafe_path usage is safe.
         self.as_raw_fd().as_unsafe_path()
     }
 }

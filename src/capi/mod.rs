@@ -63,9 +63,9 @@ macro_rules! leakable {
         }
 
         fn unleak(&'static mut self) -> Self {
-            // Box::from_raw is safe because the C caller guarantees that the
-            // pointer we get is the same one we gave them, and it will only ever be
-            // called once with the same pointer.
+            // SAFETY: Box::from_raw is safe because the C caller guarantees
+            //         that the pointer we get is the same one we gave them, and
+            //         it will only ever be called once with the same pointer.
             *unsafe { Box::from_raw(self as *mut Self) }
         }
 
@@ -182,7 +182,7 @@ impl ErrorWrap for Option<Error> {
 /// the FFI user does not modify *any* of these fields.
 #[repr(align(8), C)]
 pub struct CVec<T> {
-    /// Pointer to the head of the vector.
+    /// Pointer to the head of the vector (probably shouldn't be modified).
     pub head: *const T,
     /// Number of elements in the vector (must not be modified).
     pub length: usize,
@@ -217,9 +217,9 @@ impl<T> Drop for CVec<T> {
             let head = self.head as *mut T;
             // Clear the pointer to avoid double-frees.
             self.head = ptr::null_mut();
-            // Vec::from_raw_parts is safe because the C caller guarantees that the
-            // (pointer, length, capacity) tuple is unchanged from when we created
-            // the CVec.
+            // SAFETY: Vec::from_raw_parts is safe because the C caller
+            //         guarantees that the (pointer, length, capacity) tuple is
+            //         unchanged from when we created the CVec.
             let _ = unsafe { Vec::from_raw_parts(head, self.length, self.__capacity) };
             // drop the Vec and all its contents
         }
@@ -254,8 +254,8 @@ impl Drop for CBacktraceEntry {
             let symbol_name = self.symbol_name as *mut c_char;
             // Clear the pointer to avoid double-frees.
             self.symbol_name = ptr::null_mut();
-            // CString::from_raw is safe because the C caller guarantees that
-            // the pointer we get is the same one we gave them.
+            // SAFETY: CString::from_raw is safe because the C caller guarantees
+            //         that the pointer we get is the same one we gave them.
             let _ = unsafe { CString::from_raw(symbol_name) };
             // drop the CString
         }
@@ -263,8 +263,8 @@ impl Drop for CBacktraceEntry {
             let symbol_file = self.symbol_file as *mut c_char;
             // Clear the pointer to avoid double-frees.
             self.symbol_file = ptr::null_mut();
-            // CString::from_raw is safe because the C caller guarantees that
-            // the pointer we get is the same one we gave them.
+            // SAFETY: CString::from_raw is safe because the C caller guarantees
+            //         that the pointer we get is the same one we gave them.
             let _ = unsafe { CString::from_raw(symbol_file as *mut c_char) };
             // drop the CString
         }
@@ -388,8 +388,8 @@ impl Drop for CError {
             let description = self.description as *mut c_char;
             // Clear the pointer to avoid double-frees.
             self.description = ptr::null_mut();
-            // CString::from_raw is safe because the C caller guarantees that
-            // the pointer we get is the same one we gave them.
+            // SAFETY: CString::from_raw is safe because the C caller guarantees
+            //         that the pointer we get is the same one we gave them.
             let _ = unsafe { CString::from_raw(description) };
             // drop the CString
         }
@@ -403,7 +403,11 @@ impl Drop for CError {
             // Remove self.backtrace reference before we do free it. We don't
             // want something to dereference it.
             self.backtrace = None;
-            // An finally, free the backtrace.
+            // And finally, free the backtrace.
+            // SAFETY: While this is a &'static mut, we are the effective owner
+            //         of this pointer because the C caller guarantees they
+            //         won't use this pointer. And no Rust code will use it
+            //         because we are in Drop.
             unsafe { &mut *backtrace }.free();
         }
     }
@@ -430,16 +434,18 @@ pub extern "C" fn pathrs_error(
         return None;
     }
 
-    // All of these casts and dereferences are safe because the C caller has
-    // assured us that the type passed is correct.
+    // SAFETY: All of these casts and dereferences are safe because the C caller
+    //         has assured us that the type passed is correct.
     let last_error = match ptr_type {
         CPointerType::PATHRS_NONE => return None,
         CPointerType::PATHRS_ERROR => return None,
         CPointerType::PATHRS_ROOT => {
+            // SAFETY: See above.
             let root = unsafe { &mut *(ptr as *mut CRoot) };
             &mut root.last_error
         }
         CPointerType::PATHRS_HANDLE => {
+            // SAFETY: See above.
             let handle = unsafe { &mut *(ptr as *mut CHandle) };
             &mut handle.last_error
         }
@@ -457,6 +463,7 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
             description: "cannot be NULL",
         }
     );
+    // SAFETY: C caller guarantees that the path is a valid C-style string.
     let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
     Ok(OsStr::from_bytes(bytes).as_ref())
 }
@@ -501,7 +508,7 @@ pub extern "C" fn pathrs_open(path: *const c_char) -> &'static mut CRoot {
 }
 
 /// Represents an FFI-safe configuration structure which supports setting and getting.
-trait CConfig {
+trait CConfig: Default {
     /// Verify that the pointer type and pointer are valid for this type of
     /// `CConfig`. This is mostly a sanity-check (`pathrs_configure()` knows the
     /// mapping between `CPointerType` and Rust type).
@@ -559,6 +566,14 @@ pub struct CRootConfig {
     pub __padding: [u16; 3],
 }
 
+impl Default for CRootConfig {
+    fn default() -> Self {
+        // SAFETY: CRootConfig is a #[repr(C)] with only primitive types and
+        //         thus zeroing it is obviously safe.
+        unsafe { mem::zeroed() }
+    }
+}
+
 impl CConfig for CRootConfig {
     fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<(), Error> {
         // Guaranteed by pathrs_configure.
@@ -571,8 +586,8 @@ impl CConfig for CRootConfig {
             }
         );
 
-        // This cast and dereference is safe because the C caller has assured us
-        // that the type passed is correct.
+        // SAFETY: This cast and dereference is safe because the C caller has
+        //         assured us that the type passed is correct.
         let root = unsafe { &mut *(ptr as *mut CRoot) };
         // Check that it's a valid object.
         ensure!(
@@ -587,8 +602,8 @@ impl CConfig for CRootConfig {
     }
 
     fn fetch(&mut self, ptr: *const c_void) -> Result<(), Error> {
-        // This cast and dereference is safe because the C caller has assured us
-        // that the type passed is correct.
+        // SAFETY: This cast and dereference is safe because the C caller has
+        //         assured us that the type passed is correct.
         let root = unsafe { &*(ptr as *const CRoot) }
             .inner
             .as_ref()
@@ -599,8 +614,8 @@ impl CConfig for CRootConfig {
     }
 
     fn apply(&self, ptr: *mut c_void) -> Result<(), Error> {
-        // This cast and dereference is safe because the C caller has assured us
-        // that the type passed is correct.
+        // SAFETY: This cast and dereference is safe because the C caller has
+        //         assured us that the type passed is correct.
         let root = unsafe { &mut *(ptr as *mut CRoot) }
             .inner
             .as_mut()
@@ -621,6 +636,14 @@ pub struct CGlobalConfig {
     pub error_backtraces: bool,
     /// Extra padding fields -- must be set to zero.
     pub __padding: [u8; 7],
+}
+
+impl Default for CGlobalConfig {
+    fn default() -> Self {
+        // SAFETY: CGlobalConfig is a #[repr(C)] with only primitive types and
+        //         thus zeroing it is obviously safe.
+        unsafe { mem::zeroed() }
+    }
 }
 
 impl CConfig for CGlobalConfig {
@@ -656,11 +679,15 @@ impl CConfig for CGlobalConfig {
 /// forward-compatible (a newer caller that doesn't use new features still
 /// works). New features will always require a non-zero value to be set in a new
 /// struct field (or a new flag but that can be easily detected).
-fn copy_struct_in<T>(dst: &mut T, ptr: *const c_void, ptr_size: usize) -> Result<(), Error> {
+fn copy_struct_in<T: CConfig>(
+    dst: &mut T,
+    ptr: *const c_void,
+    ptr_size: usize,
+) -> Result<(), Error> {
     let lib_size = mem::size_of::<T>();
 
-    // Zero-fill dst -- this is safe for the reasons outlined in pathrs_configure.
-    *dst = unsafe { mem::zeroed() };
+    // Zero-fill dst before we do anything.
+    *dst = Default::default();
 
     // How much should we copy?
     let copy = cmp::min(ptr_size, lib_size);
@@ -668,10 +695,13 @@ fn copy_struct_in<T>(dst: &mut T, ptr: *const c_void, ptr_size: usize) -> Result
 
     if ptr_size > lib_size {
         // Deal with trailing bytes -- this is effectively check_zeroed_user().
-        // Reading this is safe because the caller has guaranteed us that the
-        // pointer passed is valid for ptr_size bytes.
+        // SAFETY: Calculating the offset is safe because the caller has
+        //         guaranteed us that the pointer passed is valid for ptr_size
+        //         (>= copy) bytes.
         let start_ptr = unsafe { (ptr as *const u8).offset(copy as isize) };
         for i in 0..rest {
+            // SAFETY: Reading this is safe because the caller has guaranteed us
+            //         that the pointer passed is valid for ptr_size bytes.
             let val = unsafe { ptr::read_unaligned(start_ptr.offset(i as isize)) };
             // TODO: This should probably be a specific error type...
             ensure!(val == 0, error::InvalidArgument {
@@ -693,19 +723,23 @@ fn copy_struct_in<T>(dst: &mut T, ptr: *const c_void, ptr_size: usize) -> Result
 /// This is conceptually similar to `copy_struct_from_user()` within Linux, and
 /// thus `copy_struct_in()`. However we don't care if there are non-zero bytes
 /// in the Rust side of things -- the caller wouldn't know what to do with them.
-fn copy_struct_out<T>(src: &T, ptr: *mut c_void, ptr_size: usize) -> Result<(), Error> {
+fn copy_struct_out<T: CConfig>(src: &T, ptr: *mut c_void, ptr_size: usize) -> Result<(), Error> {
     let lib_size = mem::size_of::<T>();
 
-    // Zero-fill ptr -- this is safe for the reasons outlined in
-    // pathrs_configure.
+    // Zero-fill ptr before we do anything.
+    // SAFETY: The C caller has guaranteed that the pointer is valid for writing
+    //         for the specified length (and is correctly aligned). The target
+    //         type is #[repr(C)] and safe to zero-fill by design -- see
+    //         pathrs_configure() for more details.
     unsafe { ptr::write_bytes(ptr as *mut u8, 0, ptr_size) };
 
     // How much should we copy?
     let copy = cmp::min(ptr_size, lib_size);
 
-    // This is safe because dst is a #[repr(align(8), C)] struct which the C
-    // caller has assured us has the right type and size. src is definitely not
-    // overlapping because it's a stack variable not a C pointer.
+    // SAFETY: This is safe because dst is a #[repr(align(8), C)] struct which
+    //         the C caller has assured us has the right type and size. src is
+    //         definitely not overlapping because it's a stack variable not a C
+    //         pointer.
     unsafe { ptr::copy_nonoverlapping(src as *const T as *const u8, ptr as *mut u8, copy) };
     Ok(())
 }
@@ -772,13 +806,13 @@ pub extern "C" fn pathrs_configure(
             // versioning doesn't help us with struct extension).
             match ptr_type {
                 CPointerType::PATHRS_NONE => {
-                    let mut old_cfg: CGlobalConfig = unsafe { mem::zeroed() };
+                    let mut old_cfg: CGlobalConfig = Default::default();
                     old_cfg.fetch(ptr)?;
                     copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
                         .wrap("copy libpathrs config to caller old_cfg_ptr")?;
                 }
                 CPointerType::PATHRS_ROOT => {
-                    let mut old_cfg: CRootConfig = unsafe { mem::zeroed() };
+                    let mut old_cfg: CRootConfig = Default::default();
                     old_cfg.fetch(ptr)?;
                     copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
                         .wrap("copy libpathrs config to caller old_cfg_ptr")?;
@@ -805,7 +839,7 @@ pub extern "C" fn pathrs_configure(
             // versioning doesn't help us with struct extension).
             match ptr_type {
                 CPointerType::PATHRS_NONE => {
-                    let mut new_cfg: CGlobalConfig = unsafe { mem::zeroed() };
+                    let mut new_cfg: CGlobalConfig = Default::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
                     // Check that padding is zeroed.
@@ -819,7 +853,7 @@ pub extern "C" fn pathrs_configure(
                     new_cfg.apply(ptr)?;
                 }
                 CPointerType::PATHRS_ROOT => {
-                    let mut new_cfg: CRootConfig = unsafe { mem::zeroed() };
+                    let mut new_cfg: CRootConfig = Default::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
                     // Check that padding is zeroed.
@@ -870,12 +904,15 @@ pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
         return;
     }
 
-    // All of these casts and dereferences are safe because the C caller has
-    // assured us that the type passed is correct.
+    // SAFETY: All of these casts and dereferences are safe because the C caller
+    //         has assured us that the type passed is correct.
     match ptr_type {
         CPointerType::PATHRS_NONE => (),
+        // SAFETY: See above.
         CPointerType::PATHRS_ERROR => unsafe { &mut *(ptr as *mut CError) }.free(),
+        // SAFETY: See above.
         CPointerType::PATHRS_ROOT => unsafe { &mut *(ptr as *mut CRoot) }.free(),
+        // SAFETY: See above.
         CPointerType::PATHRS_HANDLE => unsafe { &mut *(ptr as *mut CHandle) }.free(),
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
     }

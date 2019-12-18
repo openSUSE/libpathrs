@@ -76,9 +76,8 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Re
     // that the path is not ordinarily resolveable). But if this check passes,
     // then we can be fairly sure (barring kernel bugs) that the path was safe
     // at least one point in time.
-    //
-    // as_unsafe_path is safe here since we're explicitly doing a string-based
-    // check to see whether the path we want is correct.
+    // SAFETY: as_unsafe_path is safe here since we're explicitly doing a
+    //         string-based check to see whether the path we want is correct.
     let current_path = current
         .as_unsafe_path()
         .wrap("check fd against expected path")?;

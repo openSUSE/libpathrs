@@ -46,8 +46,8 @@ pub struct FrozenFd(c_int, Option<PathBuf>);
 
 impl From<RawFd> for FrozenFd {
     fn from(fd: RawFd) -> Self {
-        // as_unsafe_path is safe here since it is only used for pretty-printing
-        // error messages and no real logic.
+        // SAFETY: as_unsafe_path is safe here since it is only used for
+        //         pretty-printing error messages and no real logic.
         FrozenFd(fd, fd.as_unsafe_path().ok())
     }
 }
@@ -263,10 +263,12 @@ impl Error {
 /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
 /// [pr62425]: https://github.com/rust-lang/rust/pull/62425
 pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, Error> {
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let newfd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
     let err = IOError::last_os_error();
 
     if newfd >= 0 {
+        // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(newfd) })
     } else {
         return Err(err).context(FcntlDup { fd: fd });
@@ -280,6 +282,7 @@ pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, Error> {
 /// files, so we need to manually unset it when we return certain fds to the C
 /// FFI (in fairness, `O_CLOEXEC` is a good default).
 pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let old = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     let err = IOError::last_os_error();
 
@@ -292,6 +295,7 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
         return Ok(());
     }
 
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe { libc::fcntl(fd, libc::F_SETFD, new) };
     let err = IOError::last_os_error();
 
@@ -315,10 +319,12 @@ pub(crate) fn openat_follow<P: AsRef<Path>>(
     let path = path.as_ref();
     let flags = libc::O_CLOEXEC | libc::O_NOCTTY | flags;
 
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let fd = unsafe { libc::openat(dirfd, path.to_c_string().as_ptr(), flags, mode) };
     let err = IOError::last_os_error();
 
     if fd >= 0 {
+        // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
         return Err(err).context(Openat {
@@ -355,6 +361,7 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
     // SafetyViolation to avoid DoS vectors (because there is no way to get the
     // size of a symlink beforehand, you just have to read it).
     let mut buffer = [0 as u8; 32 * libc::PATH_MAX as usize];
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let len = unsafe {
         libc::readlinkat(
             dirfd,
@@ -385,6 +392,7 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
 /// argument of `mkdirat(2)`. We need the dirfd argument, so we need a wrapper.
 pub(crate) fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Result<(), Error> {
     let path = path.as_ref();
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe { libc::mkdirat(dirfd, path.to_c_string().as_ptr(), mode) };
     let err = IOError::last_os_error();
 
@@ -410,6 +418,7 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
     dev: dev_t,
 ) -> Result<(), Error> {
     let path = path.as_ref();
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe { libc::mknodat(dirfd, path.to_c_string().as_ptr(), mode, dev) };
     let err = IOError::last_os_error();
 
@@ -420,7 +429,9 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
             dirfd: dirfd,
             path: path,
             mode: mode,
+            // SAFETY: Obviously safe-to-use libc function.
             major: unsafe { libc::major(dev) },
+            // SAFETY: Obviously safe-to-use libc function.
             minor: unsafe { libc::minor(dev) },
         });
     }
@@ -432,6 +443,7 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
 /// argument of `unlinkat(2)`. We need the dirfd argument, so we need a wrapper.
 pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> Result<(), Error> {
     let path = path.as_ref();
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe { libc::unlinkat(dirfd, path.to_c_string().as_ptr(), flags) };
     let err = IOError::last_os_error();
 
@@ -458,6 +470,7 @@ pub(crate) fn linkat<P: AsRef<Path>>(
     flags: c_int,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::linkat(
             olddirfd,
@@ -489,6 +502,7 @@ pub(crate) fn linkat<P: AsRef<Path>>(
 /// wrapper.
 pub(crate) fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Result<(), Error> {
     let (target, path) = (target.as_ref(), path.as_ref());
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::symlinkat(
             target.to_c_string().as_ptr(),
@@ -520,6 +534,7 @@ pub(crate) fn renameat<P: AsRef<Path>>(
     newpath: P,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::renameat(
             olddirfd,
@@ -569,6 +584,7 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
     flags: i32,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         // (g)libc doesn't have a renameat2 wrapper in older versions.
         libc::syscall(
@@ -603,8 +619,10 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatfs(2)`.
 pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
-    // repr(C) struct without internal references is definitely valid.
+    // SAFETY: repr(C) struct without internal references is definitely valid. C
+    //         callers are expected to zero it as well.
     let mut buf: statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe { libc::fstatfs(fd, &mut buf as *mut statfs) };
     let err = IOError::last_os_error();
 
@@ -620,11 +638,13 @@ pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatat(2)`.
 pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Error> {
-    // repr(C) struct without internal references is definitely valid.
+    // SAFETY: repr(C) struct without internal references is definitely valid. C
+    //         callers are expected to zero it as well.
     let mut buf: stat = unsafe { std::mem::zeroed() };
     let path = path.as_ref();
     let flags = libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH;
 
+    // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::fstatat(
             dirfd,
@@ -653,8 +673,7 @@ pub(crate) mod unstable {
     use super::*;
 
     /// Arguments for how `openat2` should open the target path.
-    #[repr(C)]
-    #[repr(align(8))]
+    #[repr(align(8), C)]
     #[derive(Clone, Debug)]
     pub struct OpenHow {
         /// O_* flags (`-EINVAL` on unknown or incompatible flags).
@@ -671,10 +690,10 @@ pub(crate) mod unstable {
     /// backwards and forwards compatbility with syscall extensions.
     const OPEN_HOW_SIZE: usize = std::mem::size_of::<OpenHow>();
 
-    impl OpenHow {
-        #[inline]
-        pub fn new() -> Self {
-            // repr(C) struct without internal references is definitely valid.
+    impl Default for OpenHow {
+        fn default() -> Self {
+            // SAFETY: repr(C) struct without internal references is definitely
+            //         valid. C callers are expected to zero it as well.
             unsafe { std::mem::zeroed() }
         }
     }
@@ -724,6 +743,7 @@ pub(crate) mod unstable {
         let mut how = how.clone();
         how.flags |= libc::O_CLOEXEC as u64;
 
+        // SAFETY: Obviously safe-to-use Linux syscall.
         let fd = unsafe {
             libc::syscall(
                 SYS_openat2,
@@ -736,6 +756,7 @@ pub(crate) mod unstable {
         let err = IOError::last_os_error();
 
         if fd >= 0 {
+            // SAFETY: We know it's a real file descriptor.
             Ok(unsafe { File::from_raw_fd(fd) })
         } else {
             return Err(err).context(Openat2 {

@@ -264,10 +264,12 @@ impl Root {
     }
 
     /// Check whether the Root is still valid.
-    // TODO: After some discussion with
+    // TODO: After some discussion with Christian, there's a strong argumnt this
+    //       shouldn't actually be needed and in fact causes extra problems.
     pub(crate) fn check(&self) -> Result<(), Error> {
-        // as_unsafe_path is safe here because we are just comparing the string,
-        // and it is being done as part of a larger security check.
+        // SAFETY: as_unsafe_path is safe here because we are just comparing the
+        //         string, and it is being done as part of a larger security
+        //         check.
         let actualpath = self
             .inner
             .as_unsafe_path()
