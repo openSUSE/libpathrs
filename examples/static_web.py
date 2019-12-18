@@ -25,6 +25,7 @@ import sys
 import errno
 
 import flask
+sys.path.append(os.path.dirname(__file__) + "/../contrib/bindings/python")
 import pathrs
 
 app = flask.Flask(__name__)
