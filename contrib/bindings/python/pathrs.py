@@ -18,9 +18,16 @@
 import re
 import os
 import sys
-import cffi
+
+from _pathrs import ffi, lib as libpathrs_so
 
 __all__ = ["Root", "Handle", "Error"]
+
+# The global resolver setting.
+DEFAULT_RESOLVER = {
+	"kernel": libpathrs_so.PATHRS_KERNEL_RESOLVER,
+	"emulated": libpathrs_so.PATHRS_EMULATED_RESOLVER,
+}.get(os.environ.get("PATHRS_RESOLVER"))
 
 def cstr(pystr):
 	return ffi.new("char[]", pystr.encode("utf8"))
@@ -277,110 +284,3 @@ class Root(object):
 		err = libpathrs_so.pathrs_symlink(self.inner, path, target)
 		if err < 0:
 			raise error(self)
-
-
-def __do_load():
-	global ffi, libpathrs_so
-	ffi = cffi.FFI()
-
-	# Used to indicate that this binding should try to load from "unsafe"
-	# locations (such as paths relative to the working directory). Users should
-	# not enable this -- it's only used for libpathrs internal testing.
-	INSECURE_FFI = "__PATHRS_INSECURE_FFI" in os.environ
-
-	ROOT_DIR = None
-	if INSECURE_FFI:
-		# Figure out where the libpathrs source dir is.
-		candidate = os.path.dirname(sys.path[0] or os.getcwd())
-		while candidate != "/":
-			try:
-				# Look for a Cargo.toml which says it's pathrs.
-				candidate_toml = os.path.join(candidate, "Cargo.toml")
-				with open(candidate_toml, "r") as f:
-					content = f.read()
-				if re.findall(r'^name = "pathrs"$', content, re.MULTILINE):
-					ROOT_DIR = candidate
-					break
-			except:
-				pass
-
-			candidate = os.path.dirname(candidate)
-
-	# Figure out the header path.
-	include_path = "/usr/include/pathrs.h"
-	if not os.path.exists(include_path):
-		if INSECURE_FFI and ROOT_DIR:
-			# Okay, let's try falling back to the source header.
-			include_path = os.path.join(ROOT_DIR, "include/pathrs.h")
-	if not os.path.exists(include_path):
-		raise Error("Cannot find 'libpathrs' header.")
-
-	with open(include_path) as f:
-		hdr = f.read()
-
-	# Get the set of structs which have __attribute__((packed)) so we can
-	# declare they're packed in cffi terms. For more details, see
-	# <https://bitbucket.org/cffi/cffi/issues/131>.
-	# NOTE: Rather than parsing C using regex (very bad idea), the pathrs
-	#       header is guaranteed to include helper comments.
-	packed_structs = re.findall(r"^//\s*packed-struct=(\w+)", hdr, flags=re.MULTILINE)
-
-	# Strip out #-lines.
-	hdr = re.sub(r"^#.*", "", hdr, flags=re.MULTILINE)
-	# Strip out __attribute__((packed)).
-	hdr = re.sub(r"__attribute__\s*\(\(packed\)\)", "", hdr, flags=re.MULTILINE)
-
-	# Ideally we'd use ffi.pack_structure() but that doesn't exist, so we need
-	# to do this in a slightly more janky way. Because the header is generated
-	# by cbindgen and is based on Rust types (which doesn't have a concept of
-	# nested or anonymous types), we know that there won't be any nested
-	# brackets in struct definitions. So in theory, regex should be fine here
-	# -- not to mention that the headers are written by the same person who
-	# wrote this. :P
-	packed_hdr = ""
-	for struct in packed_structs:
-		# struct definition
-		pattern = re.compile("^typedef\s*struct[^{;]+{[^}]*}\s*%s\s*;?" % (struct,), flags=re.MULTILINE)
-
-		# Add the matched pattern to the packed header.
-		try:
-			packed_hdr += re.search(pattern, hdr).group() + "\n"
-		except:
-			raise RuntimeError("pathrs.h invalid -- packed-struct=%s listed but struct not defined" % (struct,))
-
-		# And drop it from the original header.
-		hdr = re.sub(pattern, "", hdr)
-
-	ffi.cdef("typedef uint32_t dev_t;")
-	ffi.cdef(hdr)
-	ffi.cdef(packed_hdr, packed=True)
-
-	try:
-		# First, try system search paths.
-		libpathrs_so = ffi.dlopen("pathrs")
-	except OSError:
-		if INSECURE_FFI and ROOT_DIR:
-			# Okay, let's try falling back to source tree's binaries.
-			paths = []
-			for mode in ["debug", "release"]:
-				so_path = os.path.join(ROOT_DIR, "target/%s/libpathrs.so" % (mode,))
-				if os.path.exists(so_path):
-					paths.append(so_path)
-		if not paths:
-			raise Error("Cannot find 'libpathrs' library.")
-
-		# Use the last-modified library, since that's presumably what we want.
-		paths = sorted(paths, key=lambda path: -os.path.getmtime(path))
-		libpathrs_so = ffi.dlopen(paths[0])
-
-	# Resolvers supported by pathrs -- can be configured with PATHRS_RESOLVER.
-	# TODO: This is less than ideal, and should be exposed through the Root
-	#       object instead of being done magically.
-	global DEFAULT_RESOLVER
-	DEFAULT_RESOLVER = {
-		"kernel": libpathrs_so.PATHRS_KERNEL_RESOLVER,
-		"emulated": libpathrs_so.PATHRS_EMULATED_RESOLVER,
-	}.get(os.environ.get("PATHRS_RESOLVER"))
-
-# Initialise our libpathrs handles.
-__do_load()
