@@ -75,12 +75,12 @@ int open_in_root(const char *root_path, const char *unsafe_path)
 
 	handle = pathrs_resolve(root, unsafe_path);
 	error = pathrs_error(PATHRS_ROOT, root);
-	if (error)
+	if (error) /* or (!handle) */
 		goto err;
 
 	fd = pathrs_reopen(handle, O_RDONLY);
 	error = pathrs_error(PATHRS_HANDLE, handle);
-	if (error)
+	if (error) /* or (fd < 0) */
 		goto err;
 
 err:
