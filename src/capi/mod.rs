@@ -568,9 +568,11 @@ pub struct CRootConfig {
 
 impl Default for CRootConfig {
     fn default() -> Self {
-        // SAFETY: CRootConfig is a #[repr(C)] with only primitive types and
-        //         thus zeroing it is obviously safe.
-        unsafe { mem::zeroed() }
+        // Zero-fill by default to match C.
+        Self {
+            resolver: CResolver::__PATHRS_INVALID_RESOLVER,
+            __padding: [0; 3],
+        }
     }
 }
 
@@ -640,9 +642,11 @@ pub struct CGlobalConfig {
 
 impl Default for CGlobalConfig {
     fn default() -> Self {
-        // SAFETY: CGlobalConfig is a #[repr(C)] with only primitive types and
-        //         thus zeroing it is obviously safe.
-        unsafe { mem::zeroed() }
+        // Zero-fill by default to match C.
+        Self {
+            error_backtraces: false,
+            __padding: [0; 7],
+        }
     }
 }
 

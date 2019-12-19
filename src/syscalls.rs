@@ -692,9 +692,13 @@ pub(crate) mod unstable {
 
     impl Default for OpenHow {
         fn default() -> Self {
-            // SAFETY: repr(C) struct without internal references is definitely
-            //         valid. C callers are expected to zero it as well.
-            unsafe { std::mem::zeroed() }
+            // Zero-fill to match C.
+            Self {
+                flags: 0,
+                mode: 0,
+                __padding: [0; 3],
+                resolve: 0,
+            }
         }
     }
 
