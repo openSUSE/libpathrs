@@ -18,7 +18,8 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
-    resolvers, syscalls,
+    resolvers::Resolver,
+    syscalls,
     utils::PATH_SEPARATOR,
     Handle,
 };
@@ -90,49 +91,6 @@ pub enum InodeType<'a> {
     //DetachedSocket(),
 }
 
-/// The backend used for path resolution within a [`Root`] to get a [`Handle`].
-///
-/// We don't generally recommend specifying this, since libpathrs will
-/// automatically detect the best backend for your platform (which is the value
-/// returned by [`Resolver::default`]). However, this can be useful for testing.
-///
-/// [`Root`]: struct.Root.html
-/// [`Handle`]: struct.Handle.html
-/// [`Resolver::default`]: enum.Resolver.html
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub enum Resolver {
-    /// Use the native `openat2(2)` backend (requires kernel support).
-    Kernel,
-    /// Use the userspace "emulated" backend.
-    Emulated,
-    // TODO: Implement a HardcoreEmulated which does pivot_root(2) and all the
-    //       rest of it. It'd be useful to compare against and for some
-    //       hyper-concerned users.
-}
-
-lazy_static! {
-    static ref DEFAULT_RESOLVER: Resolver = match *resolvers::kernel::IS_SUPPORTED {
-        true => Resolver::Kernel,
-        false => Resolver::Emulated,
-    };
-}
-
-impl Default for Resolver {
-    fn default() -> Self {
-        *DEFAULT_RESOLVER
-    }
-}
-
-impl Resolver {
-    /// Is this resolver supported by the current platform?
-    pub fn supported(&self) -> bool {
-        match self {
-            Resolver::Kernel => *resolvers::kernel::IS_SUPPORTED,
-            Resolver::Emulated => true,
-        }
-    }
-}
-
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
 fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), Error> {
@@ -169,7 +127,8 @@ fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), Error> {
 /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/rename.2.html
 /// [`Root::rename`]: struct.Root.html#method.rename
 /// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// TODO: Switch to bitflags!.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RenameFlags(pub c_int);
 
 impl RenameFlags {
@@ -212,11 +171,8 @@ pub struct Root {
     /// root. This affects not just [`Root::resolve`] but also all other methods
     /// which have to implicitly resolve a path underneath `Root`.
     ///
-    /// [`Resolver`]: enum.Resolver.html
-    /// [`Root::resolve`]: struct.Root.html#method.resolve
-    // TODO: In theory we should have more options for the resolver so that we
-    //       can further restrict it (such as disabling symlinks or mount-point
-    //       crossings).
+    /// [`Resolver`]: struct.Resolver.html
+    /// [`Root::resolve`]: #method.resolve
     pub resolver: Resolver,
 }
 
@@ -235,7 +191,7 @@ impl Root {
     /// might be relaxed in the future.
     ///
     /// [`Root`]: struct.Root.html
-    /// [`Resolver`]: enum.Resolver.html
+    /// [`Resolver`]: struct.Resolver.html
     // TODO: We really need to provide a dirfd as a source, though the main
     //       problem here is that it's unclear what the "correct" path is for
     //       the emulated backend to check against. We could just read the dirfd
@@ -272,11 +228,9 @@ impl Root {
     //       all symlinks or disallowing mount-point crossings). Arguably we
     //       might even want to expose an equivalent of RESOLVE_* flags since
     //       that would make it simpler...
+    #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
-        match self.resolver {
-            Resolver::Kernel => resolvers::kernel::resolve(self, path),
-            Resolver::Emulated => resolvers::user::resolve(self, path),
-        }
+        self.resolver.resolve(&self.inner, path)
     }
 
     /// Within the [`Root`]'s tree, create an inode at `path` as specified by

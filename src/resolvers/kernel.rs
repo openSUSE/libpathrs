@@ -16,12 +16,12 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::syscalls::unstable;
 use crate::{
     error::{self, Error, ErrorExt},
-    resolvers,
+    resolvers::{self, ResolverFlags},
+    syscalls::unstable,
+    Handle,
 };
-use crate::{Handle, Root};
 
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
@@ -37,7 +37,11 @@ lazy_static! {
 }
 
 /// Resolve `path` within `root` through `openat2(2)`.
-pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Error> {
+pub(crate) fn resolve<P: AsRef<Path>>(
+    root: &File,
+    path: P,
+    flags: ResolverFlags,
+) -> Result<Handle, Error> {
     ensure!(*IS_SUPPORTED, error::NotSupported { feature: "openat2" });
 
     let mut how: unstable::OpenHow = Default::default();
@@ -46,7 +50,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     // resolving magic-links. RESOLVE_IN_ROOT already blocks magic-link
     // crossings, but that may change in the future (if the magic-links are
     // considered "safe") but we should still explicitly avoid them entirely.
-    how.resolve = unstable::RESOLVE_IN_ROOT | unstable::RESOLVE_NO_MAGICLINKS;
+    how.resolve = unstable::RESOLVE_IN_ROOT | unstable::RESOLVE_NO_MAGICLINKS | flags.bits;
 
     // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
     // *anywhere on the system*. This can happen pretty frequently, so what we
@@ -54,7 +58,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     // userspace emulation.
     let mut handle: Option<File> = None;
     for _ in 0..16 {
-        match unstable::openat2(root.inner.as_raw_fd(), path.as_ref(), &how) {
+        match unstable::openat2(root.as_raw_fd(), path.as_ref(), &how) {
             Ok(file) => {
                 handle = Some(file);
                 break;
@@ -75,7 +79,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
 
     handle.map_or_else(
         || {
-            resolvers::user::resolve(root, path)
+            resolvers::user::resolve(root, path, flags)
                 .wrap("fallback user-space resolution for RESOLVE_IN_ROOT")
         },
         |file| Handle::new(file).wrap("convert RESOLVE_IN_ROOT fd to Handle"),

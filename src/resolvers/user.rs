@@ -37,10 +37,11 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
+    resolvers::ResolverFlags,
     syscalls,
     utils::{FileExt, RawFdExt, PATH_SEPARATOR},
+    Handle,
 };
-use crate::{Handle, Root};
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -54,13 +55,12 @@ use snafu::ResultExt;
 const MAX_SYMLINK_TRAVERSALS: usize = 128;
 
 /// Ensure that the expected path within the root matches the current fd.
-fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Result<(), Error> {
+fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Result<(), Error> {
     // SAFETY: as_unsafe_path is safe here since we're using it to build a path
     //         for a string-based check as part of a larger safety setup. This
     //         path will be re-checked after the unsafe "current_path" is
     //         generated.
     let root_path = root
-        .inner
         .as_unsafe_path()
         .wrap("get root path to construct expected path")?;
 
@@ -105,7 +105,6 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Re
     // SAFETY: as_unsafe_path path is safe here because it's just used in a
     //         string check -- and it's known that this check isn't perfect.
     let new_root_path = root
-        .inner
         .as_unsafe_path()
         .wrap("get root path to double-check it hasn't moved")?;
     ensure!(
@@ -119,7 +118,11 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Re
 }
 
 /// Resolve `path` within `root` through user-space emulation.
-pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Error> {
+pub(crate) fn resolve<P: AsRef<Path>>(
+    root: &File,
+    path: P,
+    flags: ResolverFlags,
+) -> Result<Handle, Error> {
     let path = path.as_ref();
 
     // What is the final path we expect to get after we do the final open? This
@@ -130,10 +133,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let mut current = root
-        .inner
-        .try_clone_hotfix()
-        .wrap("dup root as starting point")?;
+    let mut current = root.try_clone_hotfix().wrap("dup root as starting point")?;
 
     // Get initial set of components from the passed path. We remove  all components
     let mut components: VecDeque<_> = path
@@ -219,6 +219,14 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
             continue;
         }
 
+        // Don't continue walking if user asked for no symlinks.
+        if flags.contains(ResolverFlags::NO_SYMLINKS) {
+            return error::SafetyViolation {
+                description: "next is a symlink and symlink resolution disabled",
+            }
+            .fail();
+        }
+
         // Check if it's safe for us to touch. In principle this should never be
         // an actual security issue (since we readlink(2) the symlink) but it's
         // much better to be safe than sorry here.
@@ -266,10 +274,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
         // current back to the root.
         expected_path.pop();
         if contents.is_absolute() {
-            current = root
-                .inner
-                .try_clone_hotfix()
-                .wrap("dup root as next current")?;
+            current = root.try_clone_hotfix().wrap("dup root as next current")?;
         }
     }
 

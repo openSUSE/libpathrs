@@ -77,7 +77,7 @@ enum pathrs_resolver_t {
      */
     PATHRS_EMULATED_RESOLVER = 61441,
 };
-typedef uint16_t pathrs_resolver_t;
+typedef uint64_t pathrs_resolver_t;
 
 /**
  * This is only exported to work around a Rust compiler restriction. Consider
@@ -218,9 +218,10 @@ typedef struct __CBINDGEN_ALIGNED(8) {
      */
     pathrs_resolver_t resolver;
     /**
-     * Extra padding fields -- must be set to zero.
+     * Flags to pass to resolver. These must be valid `RESOLVE_*` flags. At
+     * time of writing, only `RESOLVE_NO_SYMLINKS` is supported.
      */
-    uint16_t __padding[3];
+    uint64_t flags;
 } pathrs_config_root_t;
 
 /**

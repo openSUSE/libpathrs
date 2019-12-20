@@ -20,7 +20,8 @@
 use crate as libpathrs;
 use libpathrs::{
     error::{self, Error, ErrorExt},
-    syscalls, Handle, InodeType, OpenFlags, RenameFlags, Resolver, Root,
+    resolvers::{Resolver, ResolverBackend, ResolverFlags},
+    syscalls, Handle, InodeType, OpenFlags, RenameFlags, Root,
 };
 
 use std::convert::TryInto;
@@ -523,7 +524,7 @@ trait CConfig: Default {
 /// `pathrs_handle_t`. Can be used with `pathrs_configure()` to change the
 /// resolver for a `pathrs_root_t`.
 // TODO: #[non_exhaustive]
-#[repr(u16)]
+#[repr(u64, C)]
 #[allow(non_camel_case_types, dead_code)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CResolver {
@@ -534,20 +535,20 @@ pub enum CResolver {
     PATHRS_EMULATED_RESOLVER = 0xF001,
 }
 
-impl From<Resolver> for CResolver {
-    fn from(other: Resolver) -> Self {
+impl From<ResolverBackend> for CResolver {
+    fn from(other: ResolverBackend) -> Self {
         match other {
-            Resolver::Kernel => CResolver::PATHRS_KERNEL_RESOLVER,
-            Resolver::Emulated => CResolver::PATHRS_EMULATED_RESOLVER,
+            ResolverBackend::Kernel => CResolver::PATHRS_KERNEL_RESOLVER,
+            ResolverBackend::Emulated => CResolver::PATHRS_EMULATED_RESOLVER,
         }
     }
 }
 
-impl Into<Resolver> for CResolver {
-    fn into(self) -> Resolver {
+impl Into<ResolverBackend> for CResolver {
+    fn into(self) -> ResolverBackend {
         match self {
-            CResolver::PATHRS_KERNEL_RESOLVER => Resolver::Kernel,
-            CResolver::PATHRS_EMULATED_RESOLVER => Resolver::Emulated,
+            CResolver::PATHRS_KERNEL_RESOLVER => ResolverBackend::Kernel,
+            CResolver::PATHRS_EMULATED_RESOLVER => ResolverBackend::Emulated,
             _ => panic!("invalid resolver: {:?}", self),
         }
     }
@@ -559,8 +560,9 @@ impl Into<Resolver> for CResolver {
 pub struct CRootConfig {
     /// Resolver used for all resolution under this `pathrs_root_t`.
     pub resolver: CResolver,
-    /// Extra padding fields -- must be set to zero.
-    pub __padding: [u16; 3],
+    /// Flags to pass to resolver. These must be valid `RESOLVE_*` flags. At
+    /// time of writing, only `RESOLVE_NO_SYMLINKS` is supported.
+    pub flags: u64,
 }
 
 impl Default for CRootConfig {
@@ -568,7 +570,7 @@ impl Default for CRootConfig {
         // Zero-fill by default to match C.
         Self {
             resolver: CResolver::__PATHRS_INVALID_RESOLVER,
-            __padding: [0; 3],
+            flags: 0,
         }
     }
 }
@@ -608,7 +610,10 @@ impl CConfig for CRootConfig {
             .as_ref()
             .expect("object must be valid");
 
-        self.resolver = root.resolver.into();
+        *self = Self {
+            resolver: root.resolver.backend.into(),
+            flags: root.resolver.flags.bits(),
+        };
         Ok(())
     }
 
@@ -620,7 +625,13 @@ impl CConfig for CRootConfig {
             .as_mut()
             .expect("object must be valid");
 
-        root.resolver = self.resolver.into();
+        root.resolver = Resolver {
+            backend: self.resolver.into(),
+            flags: ResolverFlags::from_bits(self.flags).context(error::InvalidArgument {
+                name: "pathrs_config_global_t.flags",
+                description: "must only contain valid flags",
+            })?,
+        };
         Ok(())
     }
 }
@@ -857,14 +868,6 @@ pub extern "C" fn pathrs_configure(
                     let mut new_cfg: CRootConfig = Default::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
-                    // Check that padding is zeroed.
-                    ensure!(
-                        new_cfg.__padding.iter().all(|e| *e == 0),
-                        error::InvalidArgument {
-                            name: "new_cfg_ptr",
-                            description: "unused padding fields must be zero",
-                        }
-                    );
                     new_cfg.apply(ptr)?;
                 }
                 _ => unreachable!(), // already handled above

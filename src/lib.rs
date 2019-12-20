@@ -111,6 +111,9 @@
 // libpathrs only supports Linux at the moment.
 #![cfg(target_os = "linux")]
 
+extern crate backtrace;
+#[macro_use]
+extern crate bitflags;
 extern crate errno;
 #[macro_use]
 extern crate lazy_static;
@@ -131,6 +134,7 @@ pub mod error;
 
 // Backend resolver implementations.
 mod resolvers;
+pub use resolvers::{Resolver, ResolverBackend, ResolverFlags};
 
 // C API.
 mod capi;
