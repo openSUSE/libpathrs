@@ -40,6 +40,7 @@ use libc::c_int;
 /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
 /// [`RawFd`]: https://doc.rust-lang.org/std/os/unix/io/type.RawFd.html
 /// [`libc::openat`]: https://docs.rs/libc/latest/libc/fn.openat.html
+#[derive(Debug)]
 pub struct Handle {
     pub(crate) inner: File,
 }

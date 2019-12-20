@@ -23,6 +23,7 @@ use crate::{
 };
 use crate::{Handle, Root};
 
+use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
@@ -51,11 +52,11 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
     // *anywhere on the system*. This can happen pretty frequently, so what we
     // do is attempt the openat2(2) a couple of times, and then fall-back to
     // userspace emulation.
-    let mut handle: Option<Handle> = None;
+    let mut handle: Option<File> = None;
     for _ in 0..16 {
         match unstable::openat2(root.inner.as_raw_fd(), path.as_ref(), &how) {
             Ok(file) => {
-                handle = Some(Handle::new(file).wrap("convert RESOLVE_IN_ROOT fd to Handle")?);
+                handle = Some(file);
                 break;
             }
             Err(err) => match err.root_cause().raw_os_error() {
@@ -72,8 +73,11 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
         }
     }
 
-    Ok(handle.unwrap_or(
-        resolvers::user::resolve(root, path)
-            .wrap("fallback user-space resolution for RESOLVE_IN_ROOT")?,
-    ))
+    handle.map_or_else(
+        || {
+            resolvers::user::resolve(root, path)
+                .wrap("fallback user-space resolution for RESOLVE_IN_ROOT")
+        },
+        |file| Handle::new(file).wrap("convert RESOLVE_IN_ROOT fd to Handle"),
+    )
 }
