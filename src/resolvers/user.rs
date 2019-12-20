@@ -55,9 +55,18 @@ const MAX_SYMLINK_TRAVERSALS: usize = 128;
 
 /// Ensure that the expected path within the root matches the current fd.
 fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Result<(), Error> {
+    // SAFETY: as_unsafe_path is safe here since we're using it to build a path
+    //         for a string-based check as part of a larger safety setup. This
+    //         path will be re-checked after the unsafe "current_path" is
+    //         generated.
+    let root_path = root
+        .inner
+        .as_unsafe_path()
+        .wrap("get root path to construct expected path")?;
+
     // Combine the root path and our expected_path to get the full path to
     // compare current against.
-    let full_path: PathBuf = root.path.join(
+    let full_path: PathBuf = root_path.join(
         expected
             .as_ref()
             .components()
@@ -81,12 +90,31 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &Root, expected: P) -> Re
     let current_path = current
         .as_unsafe_path()
         .wrap("check fd against expected path")?;
+
+    // The paths should be identical.
     ensure!(
         current_path == full_path,
         error::SafetyViolation {
             description: "fd doesn't match expected path"
         }
     );
+
+    // And the root should not have moved. Note that this check could (in
+    // theory) be bypassed by an attacker -- so it important that users be aware
+    // that allowing roots to be moved by an attacker is a very bad idea.
+    // SAFETY: as_unsafe_path path is safe here because it's just used in a
+    //         string check -- and it's known that this check isn't perfect.
+    let new_root_path = root
+        .inner
+        .as_unsafe_path()
+        .wrap("get root path to double-check it hasn't moved")?;
+    ensure!(
+        root_path == new_root_path,
+        error::SafetyViolation {
+            description: "root moved during lookup"
+        }
+    );
+
     Ok(())
 }
 
@@ -247,9 +275,6 @@ pub(crate) fn resolve<P: AsRef<Path>>(root: &Root, path: P) -> Result<Handle, Er
 
     // Make sure that the path is what we expect...
     check_current(&current, root, &expected_path).wrap("check final handle didn't escape")?;
-
-    // Make sure the root path is still correct.
-    root.check()?;
 
     // Everything is Kosher here -- convert to a handle.
     Handle::new(current)

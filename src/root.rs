@@ -16,16 +16,16 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::Handle;
 use crate::{
     error::{self, Error, ErrorExt},
     resolvers, syscalls,
-    utils::{RawFdExt, PATH_SEPARATOR},
+    utils::PATH_SEPARATOR,
+    Handle,
 };
 
 use std::fs::{File, Permissions};
 use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use libc::{c_int, dev_t};
 use snafu::{OptionExt, ResultExt};
@@ -205,10 +205,15 @@ impl RenameFlags {
 /// [`Root`]: struct.Root.html
 /// [`Error::SafetyViolation`]: enum.Error.html#variant.SafetyViolation
 pub struct Root {
+    /// The underlying `O_PATH` `File` for this root handle.
     pub(crate) inner: File,
-    // TODO: Root.path handling really needs to be relaxed. Really, we should
-    //       just store the root path as a cache and re-fetch it if it changes.
-    pub(crate) path: PathBuf,
+
+    /// The underlying [`Resolver`] to use for all operations underneath this
+    /// root. This affects not just [`Root::resolve`] but also all other methods
+    /// which have to implicitly resolve a path underneath `Root`.
+    ///
+    /// [`Resolver`]: enum.Resolver.html
+    /// [`Root::resolve`]: struct.Root.html#method.resolve
     // TODO: In theory we should have more options for the resolver so that we
     //       can further restrict it (such as disabling symlinks or mount-point
     //       crossings).
@@ -238,16 +243,6 @@ impl Root {
     //       provide a backup path to check against, but then why not just use
     //       that path in the first place?
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let path = path.as_ref();
-
-        ensure!(
-            path.is_absolute(),
-            error::InvalidArgument {
-                name: "path",
-                description: "must be an absolute path",
-            }
-        );
-
         let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
             .context(error::RawOsError {
                 operation: "open root handle",
@@ -256,33 +251,9 @@ impl Root {
         let root = Root {
             inner: file,
             resolver: Default::default(),
-            path: path.into(),
         };
 
-        root.check()?;
         Ok(root)
-    }
-
-    /// Check whether the Root is still valid.
-    // TODO: After some discussion with Christian, there's a strong argumnt this
-    //       shouldn't actually be needed and in fact causes extra problems.
-    pub(crate) fn check(&self) -> Result<(), Error> {
-        // SAFETY: as_unsafe_path is safe here because we are just comparing the
-        //         string, and it is being done as part of a larger security
-        //         check.
-        let actualpath = self
-            .inner
-            .as_unsafe_path()
-            .wrap("get current path of rootfd for root check")?;
-
-        ensure!(
-            actualpath == self.path,
-            error::SafetyViolation {
-                description: "root directory doesn't match original path",
-            }
-        );
-
-        Ok(())
     }
 
     /// Within the given [`Root`]'s tree, resolve `path` and return a
@@ -302,7 +273,6 @@ impl Root {
     //       might even want to expose an equivalent of RESOLVE_* flags since
     //       that would make it simpler...
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
-        self.check()?;
         match self.resolver {
             Resolver::Kernel => resolvers::kernel::resolve(self, path),
             Resolver::Emulated => resolvers::user::resolve(self, path),
@@ -319,8 +289,6 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
-        self.check()?;
-
         // Use create_file if that's the inode_type. We drop the File returned
         // (it was free to create anyway because we used openat(2)).
         if let InodeType::File(perm) = inode_type {
@@ -410,8 +378,6 @@ impl Root {
         path: P,
         perm: &Permissions,
     ) -> Result<Handle, Error> {
-        self.check()?;
-
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
@@ -450,8 +416,6 @@ impl Root {
     /// [`Handle`]: trait.Handle.html
     /// [`Root::remove_all`]: struct.Root.html#method.remove_all
     pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
-        self.check()?;
-
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.

@@ -126,7 +126,7 @@ typedef struct __CBINDGEN_ALIGNED(8) {
  */
 typedef struct __CBINDGEN_ALIGNED(8) {
     /**
-     * Pointer to the head of the vector.
+     * Pointer to the head of the vector (probably shouldn't be modified).
      */
     const __pathrs_backtrace_entry_t *head;
     /**
@@ -296,10 +296,7 @@ int pathrs_mknod(pathrs_root_t *root,
  * You can switch the resolver used with pathrs_configure() -- though this
  * is not strictly recommended unless you have a good reason to do it.
  *
- * The provided path must be an existing directory. If using the emulated
- * driver, it also must be the fully-expanded path to a real directory (with no
- * symlink components) because the given path is used to double-check that the
- * open operation was not affected by an attacker.
+ * The provided path must be an existing directory.
  *
  * NOTE: Unlike other libpathrs methods, pathrs_open will *always* return a
  *       pathrs_root_t (but in the case of an error, the returned root handle
