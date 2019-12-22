@@ -818,13 +818,13 @@ pub extern "C" fn pathrs_configure(
             // versioning doesn't help us with struct extension).
             match ptr_type {
                 CPointerType::PATHRS_NONE => {
-                    let mut old_cfg: CGlobalConfig = Default::default();
+                    let mut old_cfg = CGlobalConfig::default();
                     old_cfg.fetch(ptr)?;
                     copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
                         .wrap("copy libpathrs config to caller old_cfg_ptr")?;
                 }
                 CPointerType::PATHRS_ROOT => {
-                    let mut old_cfg: CRootConfig = Default::default();
+                    let mut old_cfg = CRootConfig::default();
                     old_cfg.fetch(ptr)?;
                     copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
                         .wrap("copy libpathrs config to caller old_cfg_ptr")?;
@@ -851,7 +851,7 @@ pub extern "C" fn pathrs_configure(
             // versioning doesn't help us with struct extension).
             match ptr_type {
                 CPointerType::PATHRS_NONE => {
-                    let mut new_cfg: CGlobalConfig = Default::default();
+                    let mut new_cfg = CGlobalConfig::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
                     // Check that padding is zeroed.
@@ -865,7 +865,7 @@ pub extern "C" fn pathrs_configure(
                     new_cfg.apply(ptr)?;
                 }
                 CPointerType::PATHRS_ROOT => {
-                    let mut new_cfg: CRootConfig = Default::default();
+                    let mut new_cfg = CRootConfig::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
                     new_cfg.apply(ptr)?;

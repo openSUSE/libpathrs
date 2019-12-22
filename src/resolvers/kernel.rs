@@ -30,10 +30,8 @@ use std::path::Path;
 use snafu::ResultExt;
 
 lazy_static! {
-    pub(crate) static ref IS_SUPPORTED: bool = {
-        let how: unstable::OpenHow = Default::default();
-        unstable::openat2(libc::AT_FDCWD, ".", &how).is_ok()
-    };
+    pub(crate) static ref IS_SUPPORTED: bool =
+        unstable::openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
 }
 
 /// Resolve `path` within `root` through `openat2(2)`.
@@ -44,7 +42,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 ) -> Result<Handle, Error> {
     ensure!(*IS_SUPPORTED, error::NotSupported { feature: "openat2" });
 
-    let mut how: unstable::OpenHow = Default::default();
+    let mut how = unstable::OpenHow::default();
     how.flags = libc::O_PATH as u64;
     // RESOLVE_IN_ROOT does exactly what we want, but we also want to avoid
     // resolving magic-links. RESOLVE_IN_ROOT already blocks magic-link
