@@ -224,10 +224,6 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
-    // TODO: We need to add a way to restrict more things (such as disallowing
-    //       all symlinks or disallowing mount-point crossings). Arguably we
-    //       might even want to expose an equivalent of RESOLVE_* flags since
-    //       that would make it simpler...
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.resolver.resolve(&self.inner, path)
@@ -254,11 +250,11 @@ impl Root {
         // the parent.
         let (parent, name) =
             path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
-        let dirfd = self
+        let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
-            .inner
-            .as_raw_fd();
+            .inner;
+        let dirfd = dir.as_raw_fd();
 
         match inode_type {
             InodeType::File(_) => unreachable!(), /* We dealt with this above. */
@@ -275,11 +271,11 @@ impl Root {
             InodeType::Hardlink(target) => {
                 let (oldparent, oldname) =
                     path_split(target).wrap("split hardlink source path into (parent, name)")?;
-                let olddirfd = self
+                let olddir = self
                     .resolve(oldparent)
                     .wrap("resolve hardlink source parent for hardlink")?
-                    .inner
-                    .as_raw_fd();
+                    .inner;
+                let olddirfd = olddir.as_raw_fd();
                 syscalls::linkat(olddirfd, oldname, dirfd, name, 0)
             }
             InodeType::Fifo(perm) => {
@@ -337,11 +333,11 @@ impl Root {
         // the parent.
         let (parent, name) =
             path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
-        let dirfd = self
+        let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
-            .inner
-            .as_raw_fd();
+            .inner;
+        let dirfd = dir.as_raw_fd();
 
         // TODO: openat2(2) supports doing O_CREAT on trailing symlinks without
         //       O_NOFOLLOW. We might want to expose that here, though because
@@ -375,11 +371,11 @@ impl Root {
         // the parent.
         let (parent, name) =
             path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
-        let dirfd = self
+        let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
-            .inner
-            .as_raw_fd();
+            .inner;
+        let dirfd = dir.as_raw_fd();
 
         // There is no kernel API to "just remove this inode please". You need
         // to know ahead-of-time what inode type it is. So we will try a couple
@@ -442,16 +438,16 @@ impl Root {
         let (dst_parent, dst_name) =
             path_split(destination.as_ref()).wrap("split target path into (parent, name)")?;
 
-        let src_dirfd = self
+        let src_dir = self
             .resolve(src_parent)
             .wrap("resolve source path for rename")?
-            .inner
-            .as_raw_fd();
-        let dst_dirfd = self
+            .inner;
+        let src_dirfd = src_dir.as_raw_fd();
+        let dst_dir = self
             .resolve(dst_parent)
             .wrap("resolve target path for rename")?
-            .inner
-            .as_raw_fd();
+            .inner;
+        let dst_dirfd = dst_dir.as_raw_fd();
 
         syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0).context(
             error::RawOsError {
