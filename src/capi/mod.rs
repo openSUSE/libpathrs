@@ -57,7 +57,13 @@ trait Leakable {
 /// A macro to implement the trivial methods of Leakable -- due to a restriction
 /// of the Rust compiler (you cannot have default trait methods that use Self
 /// directly, because the size of Self is not known by the trait).
+///
+/// ```
+/// leakable!{ impl Leakable for CError; }
+/// leakable!{ impl<T> Leakable for CVec<T>; }
+/// ```
 macro_rules! leakable {
+    // Inner implementation.
     (...) => {
         fn leak(self) -> &'static mut Self {
             Box::leak(Box::new(self))
@@ -82,8 +88,7 @@ macro_rules! leakable {
         }
     };
 
-    // Use [A,B,C] instead of <A,B,C> to get around a macro_rules! limitation.
-    (impl [$($generics:tt),+] Leakable for $type:ty ;) => {
+    (impl <$($generics:tt),+> Leakable for $type:ty ;) => {
         impl<$($generics),+> Leakable for $type {
             leakable!(...);
         }
@@ -102,7 +107,7 @@ pub struct CPointer<T> {
 }
 
 leakable! {
-    impl[T] Leakable for CPointer<T>;
+    impl<T> Leakable for CPointer<T>;
 }
 
 impl<T> From<T> for CPointer<T> {
@@ -192,7 +197,7 @@ pub struct CVec<T> {
 }
 
 leakable! {
-    impl[T] Leakable for CVec<T>;
+    impl<T> Leakable for CVec<T>;
 }
 
 impl<T> From<Vec<T>> for CVec<T> {
@@ -524,7 +529,7 @@ trait CConfig: Default {
 /// `pathrs_handle_t`. Can be used with `pathrs_configure()` to change the
 /// resolver for a `pathrs_root_t`.
 // TODO: #[non_exhaustive]
-#[repr(u64, C)]
+#[repr(u64)]
 #[allow(non_camel_case_types, dead_code)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CResolver {
