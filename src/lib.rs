@@ -123,17 +123,20 @@ extern crate snafu;
 
 // `Handle` implementation.
 mod handle;
+#[doc(inline)]
 pub use handle::*;
 
 // `Root` implementation.
 mod root;
+#[doc(inline)]
 pub use root::*;
 
-/// Errors returned by libpathrs.
+// `Error` definitions.
 pub mod error;
 
 // Backend resolver implementations.
 mod resolvers;
+#[doc(inline)]
 pub use resolvers::{Resolver, ResolverBackend, ResolverFlags};
 
 // C API.

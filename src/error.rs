@@ -26,6 +26,7 @@
 //  * `std::error::Error::chain` is stabilised.
 //  * I figure out a nice way to implement GlobalBacktrace...
 
+#[doc(inline)]
 pub use crate::syscalls::{Error as SyscallError, FrozenFd};
 
 use std::error::Error as StdError;
