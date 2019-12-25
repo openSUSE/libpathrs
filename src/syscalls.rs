@@ -16,6 +16,9 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+// We need to permit unsafe code because we are interacting with libc APIs.
+#![allow(unsafe_code)]
+
 use crate::error::Backtrace;
 use crate::utils::{RawFdExt, ToCString};
 

@@ -16,6 +16,8 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#![forbid(unsafe_code)]
+
 use crate::{error::Error, utils::RawFdExt};
 
 use std::fs::File;

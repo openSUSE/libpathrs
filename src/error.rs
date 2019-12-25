@@ -16,6 +16,8 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#![forbid(unsafe_code)]
+
 //! Error types for libpathrs.
 
 // NOTE: This module is mostly a workaround until several issues have been

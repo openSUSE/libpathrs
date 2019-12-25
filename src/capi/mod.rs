@@ -16,9 +16,11 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Import ourselves to make this an example of using libpathrs.
-use crate as libpathrs;
-use libpathrs::{
+// We need to permit unsafe code because we are exposing C APIs over FFI and
+// thus need to interact with C callers.
+#![allow(unsafe_code)]
+
+use crate::{
     error::{self, Error, ErrorExt},
     resolvers::{Resolver, ResolverBackend, ResolverFlags},
     syscalls, Handle, InodeType, OpenFlags, RenameFlags, Root,
