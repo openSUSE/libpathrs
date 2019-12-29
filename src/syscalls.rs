@@ -19,18 +19,22 @@
 // We need to permit unsafe code because we are interacting with libc APIs.
 #![allow(unsafe_code)]
 
-use crate::error::Backtrace;
-use crate::utils::{RawFdExt, ToCString};
-
-use std::ffi::OsStr;
-use std::fmt;
-use std::fs::File;
-use std::io::Error as IOError;
-use std::os::unix::{
-    ffi::OsStrExt,
-    io::{FromRawFd, RawFd},
+use crate::{
+    error::Backtrace,
+    utils::{RawFdExt, ToCString},
 };
-use std::path::{Path, PathBuf};
+
+use std::{
+    ffi::OsStr,
+    fmt,
+    fs::File,
+    io::Error as IOError,
+    os::unix::{
+        ffi::OsStrExt,
+        io::{FromRawFd, RawFd},
+    },
+    path::{Path, PathBuf},
+};
 
 use libc::{c_int, dev_t, mode_t, stat, statfs};
 use snafu::ResultExt;

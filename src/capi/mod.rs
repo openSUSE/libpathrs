@@ -26,18 +26,20 @@ use crate::{
     syscalls, Handle, InodeType, OpenFlags, RenameFlags, Root,
 };
 
-use std::convert::TryInto;
-use std::ffi::{CStr, CString, OsStr};
-use std::fs::Permissions;
-use std::io::Error as IOError;
-use std::os::unix::{
-    ffi::OsStrExt,
-    fs::PermissionsExt,
-    io::{AsRawFd, IntoRawFd, RawFd},
+use std::{
+    convert::TryInto,
+    ffi::{CStr, CString, OsStr},
+    fs::Permissions,
+    io::Error as IOError,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::PermissionsExt,
+        io::{AsRawFd, IntoRawFd, RawFd},
+    },
+    path::Path,
+    sync::atomic::Ordering,
+    {cmp, mem, ptr},
 };
-use std::path::Path;
-use std::sync::atomic::Ordering;
-use std::{cmp, mem, ptr};
 
 use backtrace::Backtrace;
 use libc::{c_char, c_int, c_uint, c_void, dev_t};

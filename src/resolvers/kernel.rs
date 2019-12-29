@@ -23,9 +23,7 @@ use crate::{
     Handle,
 };
 
-use std::fs::File;
-use std::os::unix::io::AsRawFd;
-use std::path::Path;
+use std::{fs::File, os::unix::io::AsRawFd, path::Path};
 
 use snafu::ResultExt;
 

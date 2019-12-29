@@ -20,8 +20,7 @@
 
 use crate::{error::Error, syscalls::unstable, Handle};
 
-use std::fs::File;
-use std::path::Path;
+use std::{fs::File, path::Path};
 
 /// `openat2(2)`-based in-kernel resolver.
 pub mod kernel;

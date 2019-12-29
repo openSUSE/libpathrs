@@ -23,14 +23,16 @@ use crate::{
     syscalls, OpenFlags,
 };
 
-use std::ffi::{CString, OsStr};
-use std::fs::File;
-use std::os::unix::{
-    ffi::OsStrExt,
-    fs::MetadataExt,
-    io::{AsRawFd, RawFd},
+use std::{
+    ffi::{CString, OsStr},
+    fs::File,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::MetadataExt,
+        io::{AsRawFd, RawFd},
+    },
+    path::{Path, PathBuf},
 };
-use std::path::{Path, PathBuf};
 
 use snafu::ResultExt;
 

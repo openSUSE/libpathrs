@@ -43,11 +43,13 @@ use crate::{
     Handle,
 };
 
-use std::collections::VecDeque;
-use std::fs::File;
-use std::io::Error as IOError;
-use std::os::unix::{ffi::OsStrExt, io::AsRawFd};
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::VecDeque,
+    fs::File,
+    io::Error as IOError,
+    os::unix::{ffi::OsStrExt, io::AsRawFd},
+    path::{Component, Path, PathBuf},
+};
 
 use snafu::ResultExt;
 

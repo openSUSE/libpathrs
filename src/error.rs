@@ -31,9 +31,11 @@
 #[doc(inline)]
 pub use crate::syscalls::{Error as SyscallError, FrozenFd};
 
-use std::error::Error as StdError;
-use std::io::Error as IOError;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    error::Error as StdError,
+    io::Error as IOError,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use snafu::{GenerateBacktrace, ResultExt};
 

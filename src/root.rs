@@ -26,9 +26,11 @@ use crate::{
     Handle,
 };
 
-use std::fs::{File, Permissions};
-use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd};
-use std::path::Path;
+use std::{
+    fs::{File, Permissions},
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd},
+    path::Path,
+};
 
 use libc::{c_int, dev_t};
 use snafu::{OptionExt, ResultExt};
