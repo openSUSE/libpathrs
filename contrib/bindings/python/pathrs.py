@@ -149,6 +149,21 @@ class Handle(object):
 	def __del__(self):
 		libpathrs_so.pathrs_free(self._type, self._inner)
 
+	def __copy__(self):
+		# "Shallow copy" makes no sense since we are using FFI resources.
+		return self.__deepcopy__({})
+
+	def __deepcopy__(self, memo):
+		new_inner = libpathrs_so.pathrs_duplicate(self._type, self._inner)
+		if new_inner == ffi.NULL:
+			raise self._error()
+		# Construct a new Root without going through __init__.
+		cls = self.__class__
+		new = cls.__new__(cls)
+		new._type = self._type
+		new._inner = new_inner
+		return new
+
 	def _error(self):
 		return Error.fetch(self._type, self._inner)
 
@@ -225,12 +240,27 @@ class Root(object):
 			if err:
 				raise self._error()
 
-	def _error(self):
-		return Error.fetch(self._type, self._inner)
-
 	def __del__(self):
 		if self._inner is not None:
 			libpathrs_so.pathrs_free(self._type, self._inner)
+
+	def __copy__(self):
+		# "Shallow copy" makes no sense since we are using FFI resources.
+		return self.__deepcopy__({})
+
+	def __deepcopy__(self, memo):
+		new_inner = libpathrs_so.pathrs_duplicate(self._type, self._inner)
+		if new_inner == ffi.NULL:
+			raise self._error()
+		# Construct a new Root without going through __init__.
+		cls = self.__class__
+		new = cls.__new__(cls)
+		new._type = self._type
+		new._inner = new_inner
+		return new
+
+	def _error(self):
+		return Error.fetch(self._type, self._inner)
 
 	def resolve(self, path):
 		path = cstr(path)
