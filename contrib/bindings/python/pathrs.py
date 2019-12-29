@@ -38,15 +38,6 @@ def pystr(cstr):
 def pyptr(cptr):
 	return int(ffi.cast("uintptr_t", cptr))
 
-def objtype(obj):
-	if isinstance(obj, Root):
-		return libpathrs_so.PATHRS_ROOT
-	elif isinstance(obj, Handle):
-		return libpathrs_so.PATHRS_HANDLE
-	else:
-		raise Error("internal error: %r is not a pathrs object" % (obj,))
-
-
 class Error(Exception):
 	def __init__(self, message, *_, errno=None, backtrace=None):
 		# Construct Exception.
@@ -64,6 +55,22 @@ class Error(Exception):
 				self.strerror = os.strerror(errno)
 			except ValueError:
 				self.strerror = str(errno)
+
+	# NOTE: We probably shouldn't be exporting this...
+	@classmethod
+	def fetch(cls, typ, obj):
+		err = libpathrs_so.pathrs_error(typ, obj)
+		if err == ffi.NULL:
+			return None
+
+		description = pystr(err.description)
+		errno = err.saved_errno or None
+		backtrace = Backtrace(err.backtrace) or None
+
+		libpathrs_so.pathrs_free(libpathrs_so.PATHRS_ERROR, err)
+		del err
+
+		return cls(description, backtrace=backtrace, errno=errno)
 
 	def __str__(self):
 		if self.errno is None:
@@ -133,32 +140,17 @@ class Backtrace(list):
 			self.append(BacktraceEntry(c_entry))
 
 
-def error(obj):
-	try:
-		err = libpathrs_so.pathrs_error(objtype(obj), obj.inner)
-	except Error:
-		# Most likely, obj is a raw pathrs_error_t.
-		# TODO: Should probably do an isinstance() check here...
-		err = obj
-	if err == ffi.NULL:
-		return None
-
-	errno = err.saved_errno
-	description = pystr(err.description)
-	backtrace = Backtrace(err.backtrace)
-
-	libpathrs_so.pathrs_free(libpathrs_so.PATHRS_ERROR, err)
-	del err
-
-	return Error(description, backtrace=backtrace or None, errno=errno or None)
-
-
 class Handle(object):
+	# NOTE: We probably shouldn't be exporting the constructor...
 	def __init__(self, handle):
-		self.inner = handle
+		self._type = libpathrs_so.PATHRS_HANDLE
+		self._inner = handle
 
 	def __del__(self):
-		libpathrs_so.pathrs_free(objtype(self), self.inner)
+		libpathrs_so.pathrs_free(self._type, self._inner)
+
+	def _error(self):
+		return Error.fetch(self._type, self._inner)
 
 	# XXX: This is _super_ ugly but so is the one in CPython.
 	@staticmethod
@@ -200,9 +192,9 @@ class Handle(object):
 
 	def reopen(self, mode="r", extra_flags=0):
 		flags = self._convert_mode(mode) | extra_flags
-		fd = libpathrs_so.pathrs_reopen(self.inner, flags)
+		fd = libpathrs_so.pathrs_reopen(self._inner, flags)
 		if fd < 0:
-			raise error(self)
+			raise self._error()
 		try:
 			return os.fdopen(fd, mode)
 		except Exception as e:
@@ -212,16 +204,15 @@ class Handle(object):
 
 class Root(object):
 	def __init__(self, path, resolver=None):
-		self.inner = None
 		path = cstr(path)
-		root = libpathrs_so.pathrs_open(path)
-		if root == ffi.NULL:
+		self._type = libpathrs_so.PATHRS_ROOT
+		self._inner = libpathrs_so.pathrs_open(path)
+		if self._inner == ffi.NULL:
 			# This should never actually happen.
 			raise Error("pathrs_root allocation failed")
-		self.inner = root
 
 		# If there was an error in pathrs_open, we find out now.
-		err = error(self)
+		err = self._error()
 		if err:
 			raise err
 
@@ -230,57 +221,60 @@ class Root(object):
 			new_config = ffi.new("pathrs_config_root_t *")
 			new_config.resolver = DEFAULT_RESOLVER
 
-			err = libpathrs_so.pathrs_configure(objtype(self), self.inner, ffi.NULL, new_config, ffi.sizeof(new_config))
+			err = libpathrs_so.pathrs_configure(self._type, self._inner, ffi.NULL, new_config, ffi.sizeof(new_config))
 			if err:
-				raise error(err)
+				raise self._error()
+
+	def _error(self):
+		return Error.fetch(self._type, self._inner)
 
 	def __del__(self):
-		if self.inner is not None:
-			libpathrs_so.pathrs_free(objtype(self), self.inner)
+		if self._inner is not None:
+			libpathrs_so.pathrs_free(self._type, self._inner)
 
 	def resolve(self, path):
 		path = cstr(path)
-		handle = libpathrs_so.pathrs_resolve(self.inner, path)
+		handle = libpathrs_so.pathrs_resolve(self._inner, path)
 		if handle == ffi.NULL:
-			raise error(self)
+			raise self._error()
 		return Handle(handle)
 
 	def rename(self, src, dst, flags=0):
 		src = cstr(src)
 		dst = cstr(dst)
-		err = libpathrs_so.pathrs_rename(self.inner, src, dst, flags)
+		err = libpathrs_so.pathrs_rename(self._inner, src, dst, flags)
 		if err < 0:
-			raise error(self)
+			raise self._error()
 
 	def creat(self, path, mode):
 		path = cstr(path)
-		handle = libpathrs_so.pathrs_creat(self.inner, path, mode)
+		handle = libpathrs_so.pathrs_creat(self._inner, path, mode)
 		if handle == ffi.NULL:
-			raise error(self)
+			raise self._error()
 		return Handle(handle)
 
 	def mkdir(self, path, mode):
 		path = cstr(path)
-		err = libpathrs_so.pathrs_mkdir(self.inner, path, mode)
+		err = libpathrs_so.pathrs_mkdir(self._inner, path, mode)
 		if err < 0:
-			raise error(self)
+			raise self._error()
 
 	def mknod(self, path, mode, dev):
 		path = cstr(path)
-		err = libpathrs_so.pathrs_mknod(self.inner, path, mode, dev)
+		err = libpathrs_so.pathrs_mknod(self._inner, path, mode, dev)
 		if err < 0:
-			raise error(self)
+			raise self._error()
 
 	def hardlink(self, path, target):
 		path = cstr(path)
 		target = cstr(target)
-		err = libpathrs_so.pathrs_hardlink(self.inner, path, target)
+		err = libpathrs_so.pathrs_hardlink(self._inner, path, target)
 		if err < 0:
-			raise error(self)
+			raise self._error()
 
 	def symlink(self, path, target):
 		path = cstr(path)
 		target = cstr(target)
-		err = libpathrs_so.pathrs_symlink(self.inner, path, target)
+		err = libpathrs_so.pathrs_symlink(self._inner, path, target)
 		if err < 0:
-			raise error(self)
+			raise self._error()
