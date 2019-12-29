@@ -680,8 +680,8 @@ pub(crate) mod unstable {
     use super::*;
 
     /// Arguments for how `openat2` should open the target path.
-    #[repr(align(8), C)]
-    #[derive(Clone, Debug)]
+    #[repr(C)]
+    #[derive(Clone, Debug, Default)]
     pub struct OpenHow {
         /// O_* flags (`-EINVAL` on unknown or incompatible flags).
         pub flags: u64,
@@ -696,18 +696,6 @@ pub(crate) mod unstable {
     /// `sizeof(struct open_how)` to be passed to `openat2(2)` to allow for
     /// backwards and forwards compatbility with syscall extensions.
     const OPEN_HOW_SIZE: usize = std::mem::size_of::<OpenHow>();
-
-    impl Default for OpenHow {
-        fn default() -> Self {
-            // Zero-fill to match C.
-            Self {
-                flags: 0,
-                mode: 0,
-                __padding: [0; 3],
-                resolve: 0,
-            }
-        }
-    }
 
     impl fmt::Display for OpenHow {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
