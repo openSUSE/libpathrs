@@ -22,7 +22,7 @@ use crate::{
     error::{self, Error, ErrorExt},
     resolvers::Resolver,
     syscalls,
-    utils::PATH_SEPARATOR,
+    utils::{FileExt, PATH_SEPARATOR},
     Handle,
 };
 
@@ -167,6 +167,7 @@ impl RenameFlags {
 ///
 /// [`Root`]: struct.Root.html
 /// [`Error::SafetyViolation`]: enum.Error.html#variant.SafetyViolation
+#[derive(Debug)]
 pub struct Root {
     /// The underlying `O_PATH` `File` for this root handle.
     pub(crate) inner: File,
@@ -177,6 +178,7 @@ pub struct Root {
     ///
     /// [`Resolver`]: struct.Resolver.html
     /// [`Root::resolve`]: #method.resolve
+    // TODO: Drop this and switch to builder-pattern...
     pub resolver: Resolver,
 }
 
@@ -196,24 +198,65 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`Resolver`]: struct.Resolver.html
-    // TODO: We really need to provide a dirfd as a source, though the main
-    //       problem here is that it's unclear what the "correct" path is for
-    //       the emulated backend to check against. We could just read the dirfd
-    //       but now we have more races to deal with. We could ask the user to
-    //       provide a backup path to check against, but then why not just use
-    //       that path in the first place?
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
             .context(error::RawOsError {
                 operation: "open root handle",
             })?;
+        Ok(Root::from_file_unchecked(file))
+    }
 
-        let root = Root {
-            inner: file,
+    /// Create a copy of an existing [`Root`].
+    ///
+    /// The new handle is completely independent from the original, but
+    /// references the same underlying file and has the same configuration.
+    ///
+    /// [`Root`]: struct.Root.html
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        Ok(Self {
+            inner: self.inner.try_clone_hotfix()?,
+            resolver: self.resolver,
+        })
+    }
+
+    /// Unwrap a [`Root`] to reveal the underlying [`File`].
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    pub fn into_file(self) -> File {
+        self.inner
+    }
+
+    /// Wrap a [`File`] into a [`Root`].
+    ///
+    /// The configuration is set to the system default and should be configured
+    /// prior to usage, if appropriate.
+    ///
+    /// # Safety
+    ///
+    /// The caller guarantees that the provided file is an `O_PATH` file
+    /// descriptor with exactly the same semantics as one created through
+    /// [`Root::open`]. This means that this function should usually be used to
+    /// convert a [`File`] returned from [`Root::into_file`] (possibly from
+    /// another process) into a [`Root`].
+    ///
+    /// While this function is not marked as `unsafe` (because the safety
+    /// guarantee required is not related to memory-safety), users should still
+    /// take great care when using this method because it can cause other kinds
+    /// of unsafety.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    /// [`Root::open`]: struct.Root.html#method.open
+    /// [`Root::into_file`]: struct.Root.html#method.into_file
+    // TODO: We should probably have a `Root::from_file` which attempts to
+    //       re-open the path with `O_PATH | O_DIRECTORY`, to allow for an
+    //       alternative to `Root::open`.
+    pub fn from_file_unchecked(inner: File) -> Self {
+        Self {
+            inner: inner,
             resolver: Default::default(),
-        };
-
-        Ok(root)
+        }
     }
 
     /// Within the given [`Root`]'s tree, resolve `path` and return a
@@ -343,15 +386,16 @@ impl Root {
             .inner;
         let dirfd = dir.as_raw_fd();
 
-        // TODO: openat2(2) supports doing O_CREAT on trailing symlinks without
-        //       O_NOFOLLOW. We might want to expose that here, though because
-        //       it can't be done with the emulated backend that might be a bad
-        //       idea.
+        // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
+        //      O_NOFOLLOW. We might want to expose that here, though because it
+        //      can't be done with the emulated backend that might be a bad
+        //      idea.
         let file = syscalls::openat(dirfd, name, libc::O_CREAT | libc::O_EXCL, perm.mode())
             .context(error::RawOsError {
                 operation: "pathrs create_file",
             })?;
-        Ok(Handle::new(file).wrap("convert O_CREAT fd to Handle")?)
+        // TODO: We should probably turn this to an `O_PATH`...
+        Ok(Handle::from_file_unchecked(file))
     }
 
     /// Within the [`Root`]'s tree, remove the inode at `path`.

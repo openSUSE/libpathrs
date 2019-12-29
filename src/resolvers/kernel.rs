@@ -78,6 +78,6 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             resolvers::user::resolve(root, path, flags)
                 .wrap("fallback user-space resolution for RESOLVE_IN_ROOT")
         },
-        |file| Handle::new(file).wrap("convert RESOLVE_IN_ROOT fd to Handle"),
+        |file| Ok(Handle::from_file_unchecked(file)),
     )
 }

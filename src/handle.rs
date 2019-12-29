@@ -18,7 +18,10 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{error::Error, utils::RawFdExt};
+use crate::{
+    error::Error,
+    utils::{FileExt, RawFdExt},
+};
 
 use std::fs::File;
 
@@ -47,13 +50,6 @@ pub struct Handle {
     pub(crate) inner: File,
 }
 
-impl Handle {
-    pub(crate) fn new(file: File) -> Result<Self, Error> {
-        // TODO: Check if the file is valid.
-        Ok(Handle { inner: file })
-    }
-}
-
 /// Wrapper for the underlying `libc`'s `O_*` flags.
 ///
 /// The flag values and their meaning is identical to the description in the
@@ -65,6 +61,7 @@ impl Handle {
 /// the access mode and are actually treated as a 2-bit number. So, it is
 /// incorrect to attempt to do any checks on the access mode without masking it
 /// correctly. So some helpers were added to make usage more ergonomic.
+// TODO: Should probably be a u64, and use a constructor...
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OpenFlags(pub c_int);
 
@@ -94,11 +91,12 @@ impl OpenFlags {
 }
 
 impl Handle {
-    /// "Upgrade" the handle to a usable [`File`] handle suitable for reading
-    /// and writing. This does not consume the original handle (allowing for it
-    /// to be used many times).
+    /// "Upgrade" the handle to a usable [`File`] handle.
     ///
-    /// The handle will be opened with `O_NOCTTY` and `O_CLOEXEC` set,
+    /// This new [`File`] handle is suitable for reading and writing. This does
+    /// not consume the original handle (allowing for it to be used many times).
+    ///
+    /// The [`File`] handle will be opened with `O_NOCTTY` and `O_CLOEXEC` set,
     /// regardless of whether those flags are present in the `flags` argument.
     /// You can correct these yourself if these defaults are not ideal for you:
     ///
@@ -111,6 +109,49 @@ impl Handle {
     /// [`Root::create`]: struct.Root.html#method.create
     pub fn reopen(&self, flags: OpenFlags) -> Result<File, Error> {
         self.inner.reopen(flags)
+    }
+
+    /// Create a copy of an existing [`Handle`].
+    ///
+    /// The new handle is completely independent from the original, but
+    /// references the same underlying file.
+    ///
+    /// [`Handle`]: struct.Handle.html
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        Ok(Self {
+            inner: self.inner.try_clone_hotfix()?,
+        })
+    }
+
+    /// Unwrap a [`Handle`] to reveal the underlying [`File`].
+    ///
+    /// [`Handle`]: struct.Handle.html
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    pub fn into_file(self) -> File {
+        self.inner
+    }
+
+    /// Wrap a [`File`] into a [`Handle`].
+    ///
+    /// # Safety
+    ///
+    /// The caller guarantees that the provided file is an `O_PATH` file
+    /// descriptor with exactly the same semantics as one created through
+    /// [`Root::resolve`]. This means that this function should usually be used
+    /// to convert a [`File`] returned from [`Handle::into_file`] (possibly from
+    /// another process) into a [`Handle`].
+    ///
+    /// While this function is not marked as `unsafe` (because the safety
+    /// guarantee required is not related to memory-safety), users should still
+    /// take great care when using this method because it can cause other kinds
+    /// of unsafety.
+    ///
+    /// [`Handle`]: struct.Handle.html
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    /// [`Root::resolve`]: struct.Root.html#method.resolve
+    /// [`Handle::into_file`]: struct.Handle.html#method.into_file
+    pub fn from_file_unchecked(inner: File) -> Self {
+        Self { inner: inner }
     }
 
     // TODO: All the different stat* interfaces?

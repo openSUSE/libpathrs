@@ -284,5 +284,5 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     check_current(&current, root, &expected_path).wrap("check final handle didn't escape")?;
 
     // Everything is Kosher here -- convert to a handle.
-    Handle::new(current)
+    Ok(Handle::from_file_unchecked(current))
 }
