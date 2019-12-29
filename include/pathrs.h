@@ -258,6 +258,24 @@ pathrs_handle_t *pathrs_creat(pathrs_root_t *root,
                               unsigned int mode);
 
 /**
+ * Duplicate a file-based libpathrs object.
+ *
+ * The new object will have a separate lifetime from the original, but will
+ * refer to the same underlying file (and contain the same configuration, if
+ * applicable).
+ *
+ * Only certain objects can be duplicated with pathrs_duplicate():
+ *
+ *   * PATHRS_ROOT, with pathrs_root_t.
+ *   * PATHRS_HANDLE, with pathrs_handle_t.
+ *
+ * If an error occurs, NULL is returned. The object passed with this request
+ * will store the error (which can be retrieved with pathrs_error). If the
+ * object type is not one of the permitted values above, the error is lost.
+ */
+void *pathrs_duplicate(pathrs_type_t ptr_type, void *ptr);
+
+/**
  * Retrieve the error stored by a pathrs object.
  *
  * Whenever an error occurs during an operation on a pathrs object, the object
@@ -281,7 +299,71 @@ pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, void *ptr);
  */
 void pathrs_free(pathrs_type_t ptr_type, void *ptr);
 
+/**
+ * Construct a new file-based libpathrs object from a file descriptor.
+ *
+ * The main purpose of this interface (combined with pathrs_into_fd) is to
+ * allow for libpathrs objects to be passed to other processes through Unix
+ * sockets (with SCM_RIGHTS) or other such tricks. The underlying file
+ * descriptor of such an object can be thought of as the "serialised" version
+ * of the object, and this method effectively "de-serialises" it.
+ *
+ * Once the file descriptor has been passed to libpathrs, libpathrs takes
+ * control of its lifetime. This means that the file descriptor will be closed
+ * even if an error was returned.
+ *
+ * Only certain objects can be constructed from file descriptors with
+ * pathrs_from_fd():
+ *
+ *   * PATHRS_ROOT, producing a pathrs_root_t.
+ *     (NOTE: The configuration will be the system default.)
+ *   * PATHRS_HANDLE, producing a pathrs_handle_t.
+ *
+ * It is critical that the file descriptor provided has the same semantics as
+ * file descriptors which libpathrs would generate itself. This usually means
+ * that you should only ever call pathrs_from_fd() with a file descriptor that
+ * originally came from pathrs_into_fd().
+ *
+ * If an error occurs, an object of the requested type is returned containing
+ * the error (which can be retrieved with pathrs_error). If the object type
+ * requested is not one of the permitted values above, NULL is returned.
+ */
+void *pathrs_from_fd(pathrs_type_t fd_type, int fd);
+
 int pathrs_hardlink(pathrs_root_t *root, const char *path, const char *target);
+
+/**
+ * Unwrap a file-based libpathrs object to obtain its underlying file
+ * descriptor.
+ *
+ * The main purpose of this interface (combined with pathrs_from_fd) is to
+ * allow for libpathrs objects to be passed to other processes through Unix
+ * sockets (with SCM_RIGHTS) or other such tricks. The underlying file
+ * descriptor of such an object can be thought of as the "serialised" version
+ * of the object.
+ *
+ * This consumes the original object, and it is the caller's responsibility to
+ * close the file descriptor (with close) or otherwise handle its lifetime.
+ *
+ * Only certain objects can be converted into file descriptors with
+ * pathrs_into_fd():
+ *
+ *   * PATHRS_ROOT, with pathrs_root_t.
+ *   * PATHRS_HANDLE, with pathrs_handle_t.
+ *
+ * It is critical that you do not operate on this file descriptor yourself,
+ * because the security properties of libpathrs depend on users doing all
+ * relevant filesystem operations through libpathrs.
+ *
+ * If an error occurs, -1 is returned. You may retrieve the error by calling
+ * pathrs_error on the passed object (as long as the object is one of the
+ * permitted ones listed above).
+ *
+ * If an error occurs, -1 is returned. The object passed with this request will
+ * store the error (which can be retrieved with pathrs_error). If the object
+ * type is not one of the permitted values above, the error is lost.
+ */
+int pathrs_into_fd(pathrs_type_t ptr_type, void *ptr);
 
 int pathrs_mkdir(pathrs_root_t *root, const char *path, unsigned int mode);
 

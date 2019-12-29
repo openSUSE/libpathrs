@@ -24,5 +24,7 @@
 pub mod config;
 // Core pathrs function wrappers.
 pub mod core;
-//  Miscellaneous helper functions.
+// Convert between pathrs wrapped objects and the underlying fds.
+pub mod transmute;
+// Miscellaneous helper functions.
 pub mod utils;

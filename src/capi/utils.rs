@@ -469,7 +469,7 @@ pub extern "C" fn pathrs_error(
     //         has assured us that the type passed is correct.
     let last_error = match ptr_type {
         CPointerType::PATHRS_NONE => return None,
-        CPointerType::PATHRS_ERROR => return None,
+        CPointerType::PATHRS_ERROR => return None, // TODO: Clone the CError.
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
             let root = unsafe { &mut *(ptr as *mut CRoot) };
