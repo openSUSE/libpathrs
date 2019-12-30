@@ -30,9 +30,10 @@ edition = "2018"
 
 [badges]
 maintenance = { status = "experimental" }
+travis-ci = { repository = "openSUSE/libpathrs" }
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 [profile.release]
 # Enable link-time optimisations.

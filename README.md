@@ -1,7 +1,9 @@
 ## `libpathrs` ##
 
-![License: LGPL-3.0-or-later](https://img.shields.io/github/license/openSUSE/libpathrs.svg)
+[![build status](https://travis-ci.org/openSUSE/libpathrs.svg?branch=master)](https://travis-ci.org/openSUSE/libpathrs)
 [![dependency status](https://deps.rs/repo/github/openSUSE/libpathrs/status.svg)](https://deps.rs/repo/github/openSUSE/libpathrs)
+
+![License: LGPL-3.0-or-later](https://img.shields.io/github/license/openSUSE/libpathrs.svg)
 
 This library implements a set of C-friendly APIs (written in Rust) to make path
 resolution within a potentially-untrusted directory safe on GNU/Linux. There
