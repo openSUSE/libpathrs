@@ -48,9 +48,11 @@ use snafu::ResultExt;
 /// # Caveats
 /// Note that the file descriptor value is very unlikely to reference a live
 /// file descriptor. Its value is only used for informational purposes.
+// TODO: Should probably be #[doc(hidden)].
 #[derive(Clone, Debug)]
 pub struct FrozenFd(c_int, Option<PathBuf>);
 
+// TODO: Should probably be a pub(crate) impl.
 impl From<RawFd> for FrozenFd {
     fn from(fd: RawFd) -> Self {
         // SAFETY: as_unsafe_path is safe here since it is only used for

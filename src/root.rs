@@ -38,6 +38,7 @@ use snafu::{OptionExt, ResultExt};
 /// An inode type to be created with [`Root::create`].
 ///
 /// [`Root::create`]: struct.Root.html#method.create
+#[derive(Copy, Clone, Debug)]
 pub enum InodeType<'a> {
     /// Ordinary file, as in [`creat(2)`].
     ///

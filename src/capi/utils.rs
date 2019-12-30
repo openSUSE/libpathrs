@@ -126,6 +126,7 @@ macro_rules! leakable {
 // because DSTs (fat pointers) like dyn T (and thus &dyn T) have no FFI-safe
 // representation. So we need to hide it within an FFI-safe pointer (such as a
 // trivial struct).
+#[derive(Debug)]
 pub struct CPointer<T> {
     pub(crate) inner: Option<T>,
     pub(crate) last_error: Option<Error>,
@@ -168,6 +169,7 @@ pub type CHandle = CPointer<Handle>;
 /// Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
 /// the FFI user does not modify *any* of these fields.
 #[repr(align(8), C)]
+#[derive(Debug)]
 pub struct CVec<T> {
     /// Pointer to the head of the vector (probably shouldn't be modified).
     pub head: *const T,
@@ -216,6 +218,7 @@ impl<T> Drop for CVec<T> {
 /// Represents a single entry in a Rust backtrace in C. This structure is
 /// owned by the relevant `pathrs_error_t`.
 #[repr(align(8), C)]
+#[derive(Debug)]
 pub struct CBacktraceEntry {
     /// Instruction pointer at time of backtrace.
     pub ip: *const c_void,

@@ -82,6 +82,7 @@ impl Into<ResolverBackend> for CResolver {
 /// Configuration for a specific `pathrs_root_t`, for use with
 ///    `pathrs_configure(PATHRS_ROOT, <root>)`
 #[repr(align(8), C)]
+#[derive(Debug)]
 pub struct CRootConfig {
     /// Resolver used for all resolution under this `pathrs_root_t`.
     pub resolver: CResolver,
@@ -164,6 +165,7 @@ impl CConfig for CRootConfig {
 /// Global configuration for pathrs, for use with
 ///    `pathrs_configure(PATHRS_NONE, NULL)`
 #[repr(align(8), C)]
+#[derive(Debug, Default)]
 pub struct CGlobalConfig {
     /// Sets whether backtraces will be generated for errors. This is a global
     /// setting, and defaults to **disabled** for release builds of libpathrs
@@ -171,16 +173,6 @@ pub struct CGlobalConfig {
     pub error_backtraces: bool,
     /// Extra padding fields -- must be set to zero.
     pub __padding: [u8; 7],
-}
-
-impl Default for CGlobalConfig {
-    fn default() -> Self {
-        // Zero-fill by default to match C.
-        Self {
-            error_backtraces: false,
-            __padding: [0; 7],
-        }
-    }
 }
 
 impl CConfig for CGlobalConfig {
