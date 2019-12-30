@@ -65,6 +65,12 @@ pub struct Handle {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OpenFlags(pub c_int);
 
+impl From<c_int> for OpenFlags {
+    fn from(flags: c_int) -> Self {
+        Self(flags)
+    }
+}
+
 impl OpenFlags {
     /// Grab the access mode bits from the flags.
     #[inline]
@@ -107,8 +113,8 @@ impl Handle {
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create
-    pub fn reopen(&self, flags: OpenFlags) -> Result<File, Error> {
-        self.inner.reopen(flags)
+    pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
+        self.inner.reopen(flags.into())
     }
 
     /// Create a copy of an existing [`Handle`].

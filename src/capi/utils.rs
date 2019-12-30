@@ -327,19 +327,14 @@ impl ErrorWrap for Option<Error> {
     /// associated with the object being operated on) while the C FFI binding
     /// returns a C-friendly error code.
     ///
-    /// ```
-    /// # use std::os::raw::c_char;
-    /// # fn main() {}
-    /// use libpathrs::{Error, error, ffi::error};
-    ///
+    /// ```dead_code
     /// #[no_mangle]
-    /// pub extern fn func(msg: *const c_char) -> c_int {
+    /// pub extern "C" fn func(msg: *const c_char) -> c_int {
     ///     let mut last_error: Option<Error> = None;
     ///     last_error.wrap(-1, move || {
-    ///         ensure!(!msg.is_null(), error::InvalidArgument {
-    ///             name: "msg",
-    ///             description: "must not be a null pointer",
-    ///         });
+    ///         if msg.is_null {
+    ///             return Err(Error("msg must not be a null pointer"))
+    ///         }
     ///         Ok(42)
     ///     })
     /// }

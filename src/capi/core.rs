@@ -40,19 +40,20 @@ use snafu::{OptionExt, ResultExt};
 ///
 /// The provided path must be an existing directory.
 ///
-/// NOTE: Unlike other libpathrs methods, pathrs_open will *always* return a
-///       pathrs_root_t (but in the case of an error, the returned root handle
-///       will be a "dummy" which is just used to store the error encountered
-///       during setup). Errors during pathrs_open() can only be detected by
-///       immediately calling pathrs_error() with the returned root handle --
-///       and as with valid root handles, the caller must free it with
-///       pathrs_free().
+/// # Errors
 ///
-///       This unfortunate API wart is necessary because there is no obvious
-///       place to store a libpathrs error when first creating an root handle
-///       (other than using thread-local storage but that opens several other
-///       cans of worms). This approach was chosen because in principle users
-///       could call pathrs_error() after every libpathrs API call.
+///  Unlike other libpathrs methods, pathrs_open will *always* return a
+///  pathrs_root_t (but in the case of an error, the returned root handle will
+///  be a "dummy" which is just used to store the error encountered during
+///  setup). Errors during pathrs_open() can only be detected by immediately
+///  calling pathrs_error() with the returned root handle -- and as with valid
+///  root handles, the caller must free it with pathrs_free().
+///
+///  This unfortunate API wart is necessary because there is no obvious place to
+///  store a libpathrs error when first creating an root handle (other than
+///  using thread-local storage but that opens several other cans of worms).
+///  This approach was chosen because in principle users could call
+///  pathrs_error() after every libpathrs API call.
 #[no_mangle]
 pub extern "C" fn pathrs_open(path: *const c_char) -> &'static mut CRoot {
     match utils::parse_path(path).and_then(Root::open) {

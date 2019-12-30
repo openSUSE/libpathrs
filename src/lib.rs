@@ -48,17 +48,19 @@
 //!
 //! ```
 //! # extern crate libc;
-//! # use crate::Error;
+//! # use pathrs::{error::Error, Root, OpenFlags};
 //! # fn main() -> Result<(), Error> {
+//! let (root_path, unsafe_path) = ("/path/to/root", "/etc/passwd");
+//! # let root_path = "/";
 //! // Get a root handle for resolution.
-//! let root = Root::open("/path/to/root")?;
+//! let root = Root::open(root_path)?;
 //! // Resolve the path.
-//! let handle = root.resolve("/etc/passwd")?;
+//! let handle = root.resolve(unsafe_path)?;
 //! // Upgrade the handle to a full std::fs::File.
 //! let file = handle.reopen(libc::O_RDONLY)?;
 //!
 //! // Or, in one line:
-//! let file = root.resolve("/etc/passwd")?
+//! let file = root.resolve(unsafe_path)?
 //!                .reopen(libc::O_RDONLY)?;
 //! # Ok(())
 //! # }
@@ -71,17 +73,20 @@
 //!
 //! int get_my_fd(void)
 //! {
+//!     const char *root_path = "/path/to/root";
+//!     const char *unsafe_path = "/etc/passwd";
+//!
 //!     int fd = -1;
 //!     pathrs_root_t *root = NULL;
 //!     pathrs_handle_t *handle = NULL;
 //!     pathrs_error_t *error = NULL;
 //!
-//!     root = pathrs_open("/path/to/root");
+//!     root = pathrs_open(root_path);
 //!     error = pathrs_error(PATHRS_ROOT, root);
 //!     if (error)
 //!         goto err;
 //!
-//!     handle = pathrs_resolve(root, "/etc/passwd");
+//!     handle = pathrs_resolve(root, unsafe_path);
 //!     error = pathrs_error(PATHRS_ROOT, root);
 //!     if (error) /* or (!handle) */
 //!         goto err;
@@ -94,8 +99,6 @@
 //! err:
 //!     if (error)
 //!         fprintf(stderr, "Uh-oh: %s (errno=%d)\n", error->description, error->saved_errno);
-//!
-//! out:
 //!     pathrs_free(PATHRS_ROOT, root);
 //!     pathrs_free(PATHRS_HANDLE, handle);
 //!     pathrs_free(PATHRS_ERROR, error);

@@ -350,7 +350,7 @@ impl Root {
     ///
     /// However, unlike the trivial way of doing the above:
     ///
-    /// ```
+    /// ```dead_code
     /// root.create(path, inode_type)?;
     /// // What happens if the file is replaced here!?
     /// let handle = root.resolve(path, perm)?;
