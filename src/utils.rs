@@ -111,7 +111,7 @@ impl ToCString for OsStr {
         let filtered: Vec<_> = self
             .as_bytes()
             .iter()
-            .map(|&c| c) // .copied() is in Rust >= 1.36.0
+            .copied()
             .take_while(|&c| c != b'\0')
             .collect();
         CString::new(filtered).expect("nul bytes should've been excluded")
@@ -141,7 +141,7 @@ pub(crate) trait RawFdExt {
 
 fn proc_subpath(fd: RawFd) -> Result<String, Error> {
     if fd == libc::AT_FDCWD {
-        Ok(format!("self/cwd"))
+        Ok("self/cwd".to_string())
     } else if fd.is_positive() {
         Ok(format!("self/fd/{}", fd))
     } else {
@@ -212,8 +212,8 @@ lazy_static! {
     // XXX: This list is only correct for Linux 5.4. We should go back into old
     //      kernel versions to see who else used nd_jump_link() in the past.
     static ref DANGEROUS_FILESYSTEMS: Vec<i64> = vec![
-        libc::PROC_SUPER_MAGIC,            // procfs
-        0x5a3c69f0 /* libc::AAFS_MAGIC */, // apparmorfs
+        libc::PROC_SUPER_MAGIC,             // procfs
+        0x5a3c_69f0 /* libc::AAFS_MAGIC */, // apparmorfs
     ];
 }
 

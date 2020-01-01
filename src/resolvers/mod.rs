@@ -57,9 +57,10 @@ pub enum ResolverBackend {
 }
 
 lazy_static! {
-    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = match *kernel::IS_SUPPORTED {
-        true => ResolverBackend::Kernel,
-        false => ResolverBackend::Emulated,
+    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *kernel::IS_SUPPORTED {
+        ResolverBackend::Kernel
+    } else {
+        ResolverBackend::Emulated
     };
 }
 
@@ -71,7 +72,7 @@ impl Default for ResolverBackend {
 
 impl ResolverBackend {
     /// Checks if the resolver is supported on the current platform.
-    pub fn supported(&self) -> bool {
+    pub fn supported(self) -> bool {
         match self {
             ResolverBackend::Kernel => *kernel::IS_SUPPORTED,
             ResolverBackend::Emulated => true,

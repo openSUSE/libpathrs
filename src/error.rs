@@ -65,10 +65,11 @@ pub static BACKTRACES_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertion
 
 impl GenerateBacktrace for Backtrace {
     fn generate() -> Self {
-        Backtrace(match BACKTRACES_ENABLED.load(Ordering::SeqCst) {
-            true => Some(backtrace::Backtrace::new()),
-            false => None,
-        })
+        if BACKTRACES_ENABLED.load(Ordering::SeqCst) {
+            Backtrace(Some(backtrace::Backtrace::new()))
+        } else {
+            Backtrace(None)
+        }
     }
 
     fn as_backtrace(&self) -> Option<&snafu::Backtrace> {

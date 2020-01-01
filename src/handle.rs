@@ -74,13 +74,13 @@ impl From<c_int> for OpenFlags {
 impl OpenFlags {
     /// Grab the access mode bits from the flags.
     #[inline]
-    pub fn access_mode(&self) -> c_int {
+    pub fn access_mode(self) -> c_int {
         self.0 & libc::O_ACCMODE
     }
 
     /// Does the access mode imply read access?
     #[inline]
-    pub fn wants_read(&self) -> bool {
+    pub fn wants_read(self) -> bool {
         let acc = self.access_mode();
         acc == libc::O_RDONLY || acc == libc::O_RDWR
     }
@@ -90,7 +90,7 @@ impl OpenFlags {
     /// of the access mode, and thus a `false` value from `.wants_write()` does
     /// not guarantee that the kernel will not do a `MAY_WRITE` check.
     #[inline]
-    pub fn wants_write(&self) -> bool {
+    pub fn wants_write(self) -> bool {
         let acc = self.access_mode();
         acc == libc::O_WRONLY || acc == libc::O_RDWR
     }
@@ -157,7 +157,7 @@ impl Handle {
     /// [`Root::resolve`]: struct.Root.html#method.resolve
     /// [`Handle::into_file`]: struct.Handle.html#method.into_file
     pub fn from_file_unchecked(inner: File) -> Self {
-        Self { inner: inner }
+        Self { inner }
     }
 
     // TODO: All the different stat* interfaces?

@@ -227,11 +227,11 @@ fn copy_struct_in<T: CConfig>(
         // SAFETY: Calculating the offset is safe because the caller has
         //         guaranteed us that the pointer passed is valid for ptr_size
         //         (>= copy) bytes.
-        let start_ptr = unsafe { (ptr as *const u8).offset(copy as isize) };
+        let start_ptr = unsafe { (ptr as *const u8).add(copy) };
         for i in 0..rest {
             // SAFETY: Reading this is safe because the caller has guaranteed us
             //         that the pointer passed is valid for ptr_size bytes.
-            let val = unsafe { ptr::read_unaligned(start_ptr.offset(i as isize)) };
+            let val = unsafe { ptr::read_unaligned(start_ptr.add(i)) };
             // TODO: This should probably be a specific error type...
             ensure!(val == 0, error::InvalidArgument {
                 name: "new_cfg_ptr",

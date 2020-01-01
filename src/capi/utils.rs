@@ -193,8 +193,8 @@ impl<T> From<Vec<T>> for CVec<T> {
         mem::forget(vec);
 
         CVec {
-            head: head,
-            length: length,
+            head,
+            length,
             __capacity: capacity,
         }
     }

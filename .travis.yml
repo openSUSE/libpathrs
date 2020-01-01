@@ -21,11 +21,31 @@ rust:
   - beta
   - nightly
 
+matrix:
+  include:
+  - name: "rust-fmt"
+    rust: 1.40.0
+    install:
+      - rustup component add rustfmt-preview
+    script:
+      - cargo fmt -- --check
+  - name: "rust-clippy"
+    rust: 1.40.0
+    install:
+      - rustup component add clippy-preview
+    script:
+      - cargo clippy --all-features -- -D clippy::all
+  - name: "rust-warn"
+    env: RUSTFLAGS="-D warnings"
+    rust: stable
+    script:
+      - cargo check --tests
+
 jobs:
   allow_failures:
     - rust: nightly
-  fast_finish: true
+    - name: "rust-warn"
 
 script:
-  - cargo build --verbose --all
-  - cargo test --verbose --all
+  - cargo build --all
+  - cargo test --all

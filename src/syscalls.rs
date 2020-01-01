@@ -65,7 +65,7 @@ impl fmt::Display for FrozenFd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             libc::AT_FDCWD => write!(f, "[AT_FDCWD]")?,
-            fd @ _ => write!(f, "[{}]", fd)?,
+            fd => write!(f, "[{}]", fd)?,
         };
         match &self.1 {
             Some(path) => write!(f, "{:?}", path)?,
@@ -280,7 +280,7 @@ pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, Error> {
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(newfd) })
     } else {
-        return Err(err).context(FcntlDup { fd: fd });
+        Err(err).context(FcntlDup { fd })
     }
 }
 
@@ -296,7 +296,7 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     let err = IOError::last_os_error();
 
     if old < 0 {
-        return Err(err).context(FcntlGetFlags { fd: fd });
+        return Err(err).context(FcntlGetFlags { fd });
     }
 
     let new = old & !libc::FD_CLOEXEC;
@@ -311,7 +311,7 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     if ret >= 0 {
         Ok(())
     } else {
-        return Err(err).context(FcntlSetFlags { fd: fd, flags: new });
+        Err(err).context(FcntlSetFlags { fd, flags: new })
     }
 }
 
@@ -336,12 +336,12 @@ pub(crate) fn openat_follow<P: AsRef<Path>>(
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        return Err(err).context(Openat {
-            dirfd: dirfd,
-            path: path,
-            flags: flags,
-            mode: mode,
-        });
+        Err(err).context(Openat {
+            dirfd,
+            path,
+            flags,
+            mode,
+        })
     }
 }
 
@@ -385,10 +385,7 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
         if maybe_truncated {
             err = IOError::from_raw_os_error(libc::ENAMETOOLONG);
         }
-        return Err(err).context(Readlinkat {
-            dirfd: dirfd,
-            path: path,
-        });
+        Err(err).context(Readlinkat { dirfd, path })
     } else {
         let content = OsStr::from_bytes(&buffer[..(len as usize)]);
         Ok(PathBuf::from(content))
@@ -408,11 +405,7 @@ pub(crate) fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Re
     if ret >= 0 {
         Ok(())
     } else {
-        return Err(err).context(Mkdirat {
-            dirfd: dirfd,
-            path: path,
-            mode: mode,
-        });
+        Err(err).context(Mkdirat { dirfd, path, mode })
     }
 }
 
@@ -434,15 +427,15 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        return Err(err).context(Mknodat {
-            dirfd: dirfd,
-            path: path,
-            mode: mode,
+        Err(err).context(Mknodat {
+            dirfd,
+            path,
+            mode,
             // SAFETY: Obviously safe-to-use libc function.
             major: unsafe { libc::major(dev) },
             // SAFETY: Obviously safe-to-use libc function.
             minor: unsafe { libc::minor(dev) },
-        });
+        })
     }
 }
 
@@ -459,11 +452,7 @@ pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> R
     if ret >= 0 {
         Ok(())
     } else {
-        return Err(err).context(Unlinkat {
-            dirfd: dirfd,
-            path: path,
-            flags: flags,
-        });
+        Err(err).context(Unlinkat { dirfd, path, flags })
     }
 }
 
@@ -494,13 +483,13 @@ pub(crate) fn linkat<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        return Err(err).context(Linkat {
-            olddirfd: olddirfd,
-            oldpath: oldpath,
-            newdirfd: newdirfd,
-            newpath: newpath,
-            flags: flags,
-        });
+        Err(err).context(Linkat {
+            olddirfd,
+            oldpath,
+            newdirfd,
+            newpath,
+            flags,
+        })
     }
 }
 
@@ -524,11 +513,11 @@ pub(crate) fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Res
     if ret >= 0 {
         Ok(())
     } else {
-        return Err(err).context(Symlinkat {
-            dirfd: dirfd,
-            path: path,
-            target: target,
-        });
+        Err(err).context(Symlinkat {
+            dirfd,
+            path,
+            target,
+        })
     }
 }
 
@@ -557,12 +546,12 @@ pub(crate) fn renameat<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        return Err(err).context(Renameat {
-            olddirfd: olddirfd,
-            oldpath: oldpath,
-            newdirfd: newdirfd,
-            newpath: newpath,
-        });
+        Err(err).context(Renameat {
+            olddirfd,
+            oldpath,
+            newdirfd,
+            newpath,
+        })
     }
 }
 
@@ -614,13 +603,13 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
             // Fall back to renameat(2) if possible.
             return renameat(olddirfd, oldpath, newdirfd, newpath);
         }
-        return Err(err).context(Renameat2 {
-            olddirfd: olddirfd,
-            oldpath: oldpath,
-            newdirfd: newdirfd,
-            newpath: newpath,
-            flags: flags,
-        });
+        Err(err).context(Renameat2 {
+            olddirfd,
+            oldpath,
+            newdirfd,
+            newpath,
+            flags,
+        })
     }
 }
 
@@ -638,7 +627,7 @@ pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
     if ret >= 0 {
         Ok(buf)
     } else {
-        return Err(err).context(Fstatfs { fd: fd });
+        Err(err).context(Fstatfs { fd })
     }
 }
 
@@ -667,11 +656,7 @@ pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Err
     if ret >= 0 {
         Ok(buf)
     } else {
-        return Err(err).context(Fstatat {
-            dirfd: dirfd,
-            path: path,
-            flags: flags,
-        });
+        Err(err).context(Fstatat { dirfd, path, flags })
     }
 }
 
@@ -760,12 +745,12 @@ pub(crate) mod unstable {
             // SAFETY: We know it's a real file descriptor.
             Ok(unsafe { File::from_raw_fd(fd) })
         } else {
-            return Err(err).context(Openat2 {
-                dirfd: dirfd,
-                path: path,
-                how: how,
+            Err(err).context(Openat2 {
+                dirfd,
+                path,
+                how,
                 size: OPEN_HOW_SIZE,
-            });
+            })
         }
     }
 }

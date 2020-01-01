@@ -16,6 +16,8 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#![deny(warnings)]
+
 //! libpathrs provides a series of primitives for Linux programs to safely
 //! handle path operations inside an untrusted directory tree.
 //!

@@ -98,9 +98,9 @@ pub enum InodeType<'a> {
 
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
-fn path_split<'p>(path: &'p Path) -> Result<(&'p Path, &'p Path), Error> {
+fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
     // Get the parent path.
-    let parent = path.parent().unwrap_or("/".as_ref());
+    let parent = path.parent().unwrap_or_else(|| "/".as_ref());
 
     // Now construct the trailing portion of the target.
     let name = path.file_name().context(error::InvalidArgument {
@@ -138,7 +138,7 @@ pub struct RenameFlags(pub c_int);
 
 impl RenameFlags {
     /// Is this set of RenameFlags supported by the running kernel?
-    pub fn supported(&self) -> bool {
+    pub fn supported(self) -> bool {
         self.0 == 0 || *syscalls::RENAME_FLAGS_SUPPORTED
     }
 }
@@ -255,7 +255,7 @@ impl Root {
     //       alternative to `Root::open`.
     pub fn from_file_unchecked(inner: File) -> Self {
         Self {
-            inner: inner,
+            inner,
             resolver: Default::default(),
         }
     }
