@@ -1,6 +1,7 @@
 ## `libpathrs` ##
 
 [![build status](https://travis-ci.org/openSUSE/libpathrs.svg?branch=master)](https://travis-ci.org/openSUSE/libpathrs)
+[![docs](https://docs.rs/pathrs/badge.svg)](https://docs.rs/pathrs/)
 [![dependency status](https://deps.rs/repo/github/openSUSE/libpathrs/status.svg)](https://deps.rs/repo/github/openSUSE/libpathrs)
 
 ![License: LGPL-3.0-or-later](https://img.shields.io/github/license/openSUSE/libpathrs.svg)
