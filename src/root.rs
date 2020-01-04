@@ -55,7 +55,7 @@ pub enum InodeType<'a> {
 
     /// Symlink with the given [`Path`], as in [`symlinkat(2)`].
     ///
-    /// Note that symlinks can contain any arbitrary [`CStr`]-style string (it
+    /// Note that symlinks can contain any arbitrary `CStr`-style string (it
     /// doesn't need to be a real pathname). We don't do any verification of the
     /// target name.
     ///

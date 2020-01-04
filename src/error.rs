@@ -149,11 +149,6 @@ pub enum Error {
         backtrace: Backtrace,
     },
 
-    /// The requested libpathrs operation directly resulted in an operating
-    /// system error. This should be contrasted with [`InternalOsError`]
-    /// (which is an error triggered internally by libpathrs while servicing
-    /// the user request).
-    ///
     /// The requested libpathrs operation resulted in a [`SyscallError`] by
     /// one of libpathrs's syscall wrappers. This should be contrasted with
     /// [`OsError`] -- which indicates an error triggered by a Rust stdlib

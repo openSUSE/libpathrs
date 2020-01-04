@@ -86,7 +86,7 @@ impl ResolverBackend {
 /// conduct path resolutions. It's not recommended to change the
 /// [`ResolverBackend`] but it wouldn't hurt.
 ///
-/// [`Root`] /struct.Root.html
+/// [`Root`]: struct.Root.html
 /// [`ResolverBackend`]: enum.ResolverBackend.html
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Resolver {
