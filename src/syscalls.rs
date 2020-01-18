@@ -673,9 +673,7 @@ pub(crate) mod unstable {
         /// O_* flags (`-EINVAL` on unknown or incompatible flags).
         pub flags: u64,
         /// O_CREAT or O_TMPFILE file mode (must be zero otherwise).
-        pub mode: u16,
-        /// Padding -- must be zeroed.
-        pub __padding: [u16; 3],
+        pub mode: u64,
         /// RESOLVE_* flags (`-EINVAL` on unknown flags).
         pub resolve: u64,
     }
