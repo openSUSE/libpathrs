@@ -119,7 +119,6 @@
 extern crate backtrace;
 #[macro_use]
 extern crate bitflags;
-extern crate errno;
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;

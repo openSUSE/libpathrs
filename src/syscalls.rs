@@ -379,7 +379,7 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
             buffer.len(),
         )
     };
-    let mut err: IOError = errno::errno().into();
+    let mut err = IOError::last_os_error();
     let maybe_truncated = len >= (buffer.len() as isize);
     if len < 0 || maybe_truncated {
         if maybe_truncated {
@@ -557,16 +557,17 @@ pub(crate) fn renameat<P: AsRef<Path>>(
 
 lazy_static! {
     pub(crate) static ref RENAME_FLAGS_SUPPORTED: bool = {
-        let ret = renameat2(
+        match renameat2(
             libc::AT_FDCWD,
             ".",
             libc::AT_FDCWD,
             ".",
             libc::RENAME_EXCHANGE,
-        );
-        let err = errno::errno();
-        // We expect EBUSY here, but just to be safe we only check for ENOSYS.
-        (ret.is_ok() || err.0 != libc::ENOSYS)
+        ) {
+            Ok(_) => true,
+            // We expect EBUSY, but just to be safe we only check for ENOSYS.
+            Err(err) => err.root_cause().raw_os_error() != Some(libc::ENOSYS),
+        }
     };
 }
 
