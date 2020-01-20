@@ -47,31 +47,49 @@ lazy_static! {
     /// that anyone doing funny business with the `/proc` mount on the host
     /// won't be able to impact our re-opening attempts (because this handle is
     /// checked against PROC_SUPER_MAGIC).
-    // TODO: This "grab a handle to /proc" setup is not ideal, for several
-    //       reasons -- and we should seriously improve it.
+    // TODO TODO TODO TODO
     //
-    //       First of all, it doesn't completely defend against the potential
-    //       attack scenario. An attacker could just mount over /proc/self or
-    //       /proc/self/fd to re-enact the same attack scenario.
+    // This "grab a handle to /proc" setup is far from ideal and will need to be
+    // pretty massively reworked. The main issue is that bind-mounts could be
+    // placed over subpaths of /proc, and all of the semi-obvious approaches to
+    // work around this are non-starters for the following reasons:
     //
-    //       A naive solution might be to open /proc/self (or /proc/self/fd).
-    //       However, this doesn't solve the problem -- any subpath could still
-    //       be mounted over. However, this scenario actually reveals an even
-    //       more serious attack that shows that PROC_SUPER_MAGIC checks aren't
-    //       sufficient -- what if the attacker bind-mounts /proc/$pid over
-    //       /proc/self in order to trick us into re-opening *their* fds?
+    // * Using the safe-lookup code itself will be difficult because of
+    //   re-entrancy problems. These could be worked-around by adding additional
+    //   restrictions to our usage of procfs (don't go through any symlinks, for
+    //   instance) and being a bit more clever about procfs usage for procfs
+    //   lookups. But then you run into the other issues...
     //
-    //       And finally, will this type of check break "good" examples of proc
-    //       over-mounting such as LXCFS. LXCFS doesn't touch /proc/$pid at time
-    //       of writing (because it operates by bind-mounting the FUSE files
-    //       over specific /proc files instead of over all of /proc), but it's
-    //       something to keep in mind.
+    // * Checking whether the target of an operation is the correct filesystem
+    //   is a pointless "hardening" because there are procfs files which can be
+    //   used to substitute any procfs file with a no-op one (/proc/self/sched
+    //   and /proc/self/environ). So we *really* need to detect bind-mount
+    //   crossings as well.
     //
-    //       RESOLVE_NO_XDEV blocks all of this, but unfortunately depending on
-    //       it would break the whole idea of having a secure library for
-    //       pre-5.X kernels. The one silver lining is that these kinds of
-    //       attacks likely require privileges and thus are not of huge concern
-    //       for now.
+    // * RESOLVE_NO_XDEV requires Linux 5.6, and in older kernels there was no
+    //   trivial way to emulate it. The closest you can get is MNT_EXPIRE
+    //   (umount) but that approach is incredibly fragile (a stray ".." and
+    //   you've broken your check) and also requires privileges that are not
+    //   accessible everywhere.
+    //
+    // * It's possible to mount over symlinks -- meaning that any magic-link
+    //   operations (which we have to do a proper in-kernel symlink follow
+    //   through) cannot be trusted. RESOLVE_NO_XDEV would work "too well" here
+    //   (all magic-links would be blocked because they'd almost certainly
+    //   involve a mount-point crossing).
+    //
+    // While this may seem like a theoretical concern, it has been exploited in
+    // the past[1,2]. See [3] for a longer explanation of the many other issues
+    // that /proc-based checking is needed to protect against.
+    //
+    // Another issue is how do we deal with "good" examples of /proc mounting
+    // such as LXCFS. LXCFS doesn't touch /proc/$pid right now (and we only care
+    // about /proc/$pid right now), but it's something to keep in mind --
+    // especially if we end up exposing this to C callers.
+    //
+    // [1]: https://nvd.nist.gov/vuln/detail/CVE-2019-16884
+    // [2]: https://nvd.nist.gov/vuln/detail/CVE-2019-19921
+    // [3]: https://youtu.be/tGseJW_uBB8
     static ref PROCFS_HANDLE: File = {
         // Get a /proc handle for the lifetime of the process.
         let proc = syscalls::openat(
