@@ -21,24 +21,17 @@ package pathrs
 // #include <pathrs.h>
 import "C"
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
 	"os"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
 // Root holds the responsibility to provide safe api to functions of pathrs root api
 type Root struct {
 	root *C.pathrs_root_t
-}
-
-// Handle represents an handle pathrs api interface
-type Handle struct {
-	handle  *C.pathrs_handle_t
-	nameGen *rand.Rand
 }
 
 // Open opens directory as a root directory
@@ -52,9 +45,10 @@ func Open(path string) (*Root, error) {
 	return &Root{root: root}, nil
 }
 
-// RootFromFd constructs a new file-based libpathrs object of root from a file descriptor
-// Uses often in combination with Root.IntoFd methood
-func RootFromFd(fd int) (*Root, error) {
+// RootFromFile constructs a new file-based libpathrs object of root from a file descriptor
+// Uses often in combination with Root.IntoFile methood
+func RootFromFile(file *os.File) (*Root, error) {
+	fd := file.Fd()
 	root := (*C.pathrs_root_t)(C.pathrs_from_fd(C.PATHRS_ROOT, C.int(fd)))
 	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(root))
 	if err != nil {
@@ -62,18 +56,6 @@ func RootFromFd(fd int) (*Root, error) {
 	}
 
 	return &Root{root: root}, nil
-}
-
-// HandleFromFd constructs a new file-based libpathrs object of handle from a file descriptor
-// Uses often in combination with Handle.IntoFd methood
-func HandleFromFd(fd int) (*Handle, error) {
-	handler := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
-	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(handler))
-	if err != nil {
-		return nil, err
-	}
-
-	return newHandle(handler), nil
 }
 
 // Resolve resolves the given path within the given root's tree
@@ -85,17 +67,17 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	}
 
-	return newHandle(handler), nil
+	return &Handle{handle: handler}, nil
 }
 
-// Creat creates a file with a such mode by path according with the root path
-func (r *Root) Creat(path string, mode uint) (*Handle, error) {
+// Create creates a file with a such mode by path according with the root path
+func (r *Root) Create(path string, mode uint) (*Handle, error) {
 	handler := C.pathrs_creat(r.root, C.CString(path), C.uint(mode))
 	if handler == nil {
 		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	}
 
-	return newHandle(handler), nil
+	return &Handle{handle: handler}, nil
 }
 
 // Rename Within the given root's tree, perform the rename of src to dst,
@@ -130,26 +112,36 @@ func (r *Root) Symlink(path, target string) error {
 	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 }
 
-// IntoFd unwraps a file-based libpathrs object to obtain its underlying file
+// IntoFile unwraps a file-based libpathrs object to obtain its underlying file
 // descriptor.
 //
 // It is critical that you do not operate on this file descriptor yourself,
 // because the security properties of libpathrs depend on users doing all
 // relevant filesystem operations through libpathrs.
-func (r *Root) IntoFd() (int, error) {
-	fd := int(C.pathrs_into_fd(C.PATHRS_ROOT, unsafe.Pointer(r.root)))
-	if fd < 0 {
-		return 0, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+func (r *Root) IntoFile() (*os.File, error) {
+	cloned, err := r.Clone()
+	if err != nil {
+		return nil, err
 	}
 
-	return fd, nil
+	fd := int(C.pathrs_into_fd(C.PATHRS_ROOT, unsafe.Pointer(cloned.root)))
+	if fd < 0 {
+		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(cloned.root))
+	}
+
+	name, err := randName(32)
+	if err != nil {
+		return nil, err
+	}
+
+	return os.NewFile(uintptr(fd), "pathrs-root:"+name), nil
 }
 
 // Clone creates a copy of root handler the new object will have a separate lifetime
 // from the original, but will refer to the same underlying file
 func (r *Root) Clone() (*Root, error) {
 	newRoot := (*C.pathrs_root_t)(C.pathrs_duplicate(C.PATHRS_ROOT, unsafe.Pointer(r.root)))
-	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(newRoot))
+	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	if err != nil {
 		return nil, err
 	}
@@ -157,30 +149,46 @@ func (r *Root) Clone() (*Root, error) {
 	return &Root{root: newRoot}, nil
 }
 
-// Free frees underling caught resources
-func (r *Root) Free() {
+// Close frees underling caught resources
+func (r *Root) Close() {
 	if r != nil {
 		C.pathrs_free(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	}
 }
 
-func newHandle(handlePtr *C.pathrs_handle_t) *Handle {
-	return &Handle{
-		handle:  handlePtr,
-		nameGen: rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
-	}
+// Handle represents an handle pathrs api interface
+type Handle struct {
+	handle *C.pathrs_handle_t
 }
 
-// Reopen upgrade the handle to a file representation
-// which holds a usable fd, suitable for reading and writing
-func (h *Handle) Reopen(flags int) (*os.File, error) {
+// HandleFromFd constructs a new file-based libpathrs object of handle from a file descriptor
+// Uses often in combination with Handle.IntoFd methood
+func HandleFromFd(fd int) (*Handle, error) {
+	handler := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
+	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(handler))
+	if err != nil {
+		return nil, err
+	}
+
+	return &Handle{handle: handler}, nil
+}
+
+// Open upgrade the handle to a file representation
+// which holds a usable fd, suitable for reading
+func (h *Handle) Open() (*os.File, error) {
+	return h.OpenFile(os.O_RDONLY)
+}
+
+// OpenFile upgrade the handle to a file representation
+// which holds a usable fd, with a specific settings by provided flags
+func (h *Handle) OpenFile(flags int) (*os.File, error) {
 	fd := C.pathrs_reopen(h.handle, C.int(flags))
 	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
 	if err != nil {
 		return nil, err
 	}
 
-	name, err := randName(h.nameGen, 32)
+	name, err := randName(32)
 	if err != nil {
 		return nil, err
 	}
@@ -208,21 +216,19 @@ func (h *Handle) IntoFd() (int, error) {
 // from the original, but will refer to the same underlying file
 func (h *Handle) Clone() (*Handle, error) {
 	newHandler := (*C.pathrs_handle_t)(C.pathrs_duplicate(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
-	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(newHandler))
+	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
 	if err != nil {
 		return nil, err
 	}
 
-	return newHandle(newHandler), nil
+	return &Handle{handle: newHandler}, nil
 }
 
-// Free frees underling caught resources
-func (h *Handle) Free() {
-	if h == nil {
-		return
+// Close frees underling caught resources
+func (h *Handle) Close() {
+	if h != nil {
+		C.pathrs_free(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
 	}
-
-	C.pathrs_free(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
 }
 
 // Error representation of rust error
@@ -287,7 +293,7 @@ func newError(e *C.pathrs_error_t) error {
 	if e.backtrace != nil {
 		head := uintptr(unsafe.Pointer(e.backtrace.head))
 		length := uintptr(e.backtrace.length)
-		sizeof := unsafe.Sizeof(C.__pathrs_backtrace_entry_t{})
+		sizeof := uintptr(C.sizeof___pathrs_backtrace_entry_t)
 		for ptr := head; ptr < head+length*sizeof; ptr += sizeof {
 			entry := (*C.__pathrs_backtrace_entry_t)(unsafe.Pointer(ptr))
 			line := backtraceLine{
@@ -310,7 +316,7 @@ func handleErr(ptrType C.pathrs_type_t, ptr unsafe.Pointer) error {
 	return newError(err)
 }
 
-func randName(rand *rand.Rand, len int) (string, error) {
+func randName(len int) (string, error) {
 	var nameBuf strings.Builder
 	lenBuf := len / 2
 	randBuf := make([]byte, lenBuf)
