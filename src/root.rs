@@ -22,7 +22,7 @@ use crate::{
     error::{self, Error, ErrorExt},
     resolvers::Resolver,
     syscalls,
-    utils::{FileExt, PATH_SEPARATOR},
+    utils::FileExt,
     Handle,
 };
 
@@ -111,7 +111,7 @@ fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
     // It's critical we are only touching the final component in the path.
     // If there are any other path components we must bail.
     ensure!(
-        !name.as_bytes().contains(&PATH_SEPARATOR),
+        !name.as_bytes().contains(&b'/'),
         error::SafetyViolation {
             description: "trailing component of split pathname contains '/'",
         }

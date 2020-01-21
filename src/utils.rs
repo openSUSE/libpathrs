@@ -36,9 +36,6 @@ use std::{
 
 use snafu::ResultExt;
 
-/// The path separator on Linux.
-pub(crate) const PATH_SEPARATOR: u8 = b'/';
-
 // This is part of Linux's ABI.
 const PROC_ROOT_INO: u64 = 1;
 

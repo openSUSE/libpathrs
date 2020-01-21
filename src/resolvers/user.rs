@@ -39,7 +39,7 @@ use crate::{
     error::{self, Error, ErrorExt},
     resolvers::ResolverFlags,
     syscalls,
-    utils::{FileExt, RawFdExt, PATH_SEPARATOR},
+    utils::{FileExt, RawFdExt},
     Handle,
 };
 
@@ -165,7 +165,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                 // are any other path components we must bail. This shouldn't
                 // ever happen, but it's better to be safe.
                 ensure!(
-                    !part.as_bytes().contains(&PATH_SEPARATOR),
+                    !part.as_bytes().contains(&b'/'),
                     error::SafetyViolation {
                         description: "component of path resolution contains '/'",
                     }
