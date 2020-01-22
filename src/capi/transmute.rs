@@ -53,8 +53,8 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *mut c_void) -> 
 
     // Temporary enum to avoid risking aliased &muts.
     enum Inner<'a> {
-        Root(&'a mut Option<Root>),
-        Handle(&'a mut Option<Handle>),
+        Root(&'a Option<Root>),
+        Handle(&'a Option<Handle>),
     }
 
     // SAFETY: All of these casts and dereferences are safe because the C caller
@@ -66,19 +66,19 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *mut c_void) -> 
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
             let root = unsafe { &mut *(ptr as *mut CRoot) };
-            (Inner::Root(&mut root.inner), &mut root.last_error)
+            (Inner::Root(&root.inner), &mut root.last_error)
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
             let handle = unsafe { &mut *(ptr as *mut CHandle) };
-            (Inner::Handle(&mut handle.inner), &mut handle.last_error)
+            (Inner::Handle(&handle.inner), &mut handle.last_error)
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
     };
 
     last_error.wrap(ptr::null_mut(), move || match inner {
         Inner::Root(inner) => inner
-            .take()
+            .as_ref()
             .context(error::InvalidArgument {
                 name: "ptr",
                 description: "invalid pathrs object",
@@ -88,7 +88,7 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *mut c_void) -> 
             .map(Leakable::leak)
             .map(|p| p as *mut _ as *mut c_void),
         Inner::Handle(inner) => inner
-            .take()
+            .as_ref()
             .context(error::InvalidArgument {
                 name: "ptr",
                 description: "invalid pathrs object",
