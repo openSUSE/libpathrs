@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -36,18 +37,25 @@ type Root struct {
 
 // Open opens directory as a root directory
 func Open(path string) (*Root, error) {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	root := C.pathrs_open(C.CString(path))
 	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(root))
 	if err != nil {
 		return nil, err
 	}
-
 	return &Root{root: root}, nil
 }
 
 // RootFromFile constructs a new file-based libpathrs object of root from a file descriptor
 // Uses often in combination with Root.IntoFile methood
 func RootFromFile(file *os.File) (*Root, error) {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	fd := file.Fd()
 	root := (*C.pathrs_root_t)(C.pathrs_from_fd(C.PATHRS_ROOT, C.int(fd)))
 	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(root))
@@ -62,33 +70,47 @@ func RootFromFile(file *os.File) (*Root, error) {
 // and return a handle to that path. The path must
 // already exist, otherwise an error will occur.
 func (r *Root) Resolve(path string) (*Handle, error) {
-	handler := C.pathrs_resolve(r.root, C.CString(path))
-	if handler == nil {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	handle := C.pathrs_resolve(r.root, C.CString(path))
+	if handle == nil {
 		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	}
-
-	return &Handle{handle: handler}, nil
+	return &Handle{handle: handle}, nil
 }
 
 // Create creates a file with a such mode by path according with the root path
 func (r *Root) Create(path string, mode uint) (*Handle, error) {
-	handler := C.pathrs_creat(r.root, C.CString(path), C.uint(mode))
-	if handler == nil {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	handle := C.pathrs_creat(r.root, C.CString(path), C.uint(mode))
+	if handle == nil {
 		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	}
-
-	return &Handle{handle: handler}, nil
+	return &Handle{handle: handle}, nil
 }
 
 // Rename Within the given root's tree, perform the rename of src to dst,
 // or change flags on this file if the names are the same it's only change the flags
 func (r *Root) Rename(src, dst string, flags int) error {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	C.pathrs_rename(r.root, C.CString(src), C.CString(dst), C.int(flags))
 	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 }
 
 // Mkdir creates a directory with a such mode by path
 func (r *Root) Mkdir(path string, mode uint) error {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	C.pathrs_mkdir(r.root, C.CString(path), C.uint(mode))
 	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 }
@@ -96,18 +118,30 @@ func (r *Root) Mkdir(path string, mode uint) error {
 // Mknod creates a filesystem node named path
 // with attributes mode and dev
 func (r *Root) Mknod(path string, mode uint, dev int) error {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	C.pathrs_mknod(r.root, C.CString(path), C.uint(mode), C.dev_t(dev))
 	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 }
 
 // Hardlink creates a hardlink of file named target and place it to path
 func (r *Root) Hardlink(path, target string) error {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	C.pathrs_hardlink(r.root, C.CString(path), C.CString(target))
 	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 }
 
 // Symlink creates a symlink of file named target and place it to path
 func (r *Root) Symlink(path, target string) error {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	C.pathrs_symlink(r.root, C.CString(path), C.CString(target))
 	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 }
@@ -119,6 +153,10 @@ func (r *Root) Symlink(path, target string) error {
 // because the security properties of libpathrs depend on users doing all
 // relevant filesystem operations through libpathrs.
 func (r *Root) IntoFile() (*os.File, error) {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	cloned, err := r.Clone()
 	if err != nil {
 		return nil, err
@@ -137,15 +175,18 @@ func (r *Root) IntoFile() (*os.File, error) {
 	return os.NewFile(uintptr(fd), "pathrs-root:"+name), nil
 }
 
-// Clone creates a copy of root handler the new object will have a separate lifetime
+// Clone creates a copy of root handle the new object will have a separate lifetime
 // from the original, but will refer to the same underlying file
 func (r *Root) Clone() (*Root, error) {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	newRoot := (*C.pathrs_root_t)(C.pathrs_duplicate(C.PATHRS_ROOT, unsafe.Pointer(r.root)))
 	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	if err != nil {
 		return nil, err
 	}
-
 	return &Root{root: newRoot}, nil
 }
 
@@ -164,13 +205,16 @@ type Handle struct {
 // HandleFromFd constructs a new file-based libpathrs object of handle from a file descriptor
 // Uses often in combination with Handle.IntoFd methood
 func HandleFromFd(fd int) (*Handle, error) {
-	handler := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
-	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(handler))
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	handle := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
+	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(handle))
 	if err != nil {
 		return nil, err
 	}
-
-	return &Handle{handle: handler}, nil
+	return &Handle{handle: handle}, nil
 }
 
 // Open upgrade the handle to a file representation
@@ -182,6 +226,10 @@ func (h *Handle) Open() (*os.File, error) {
 // OpenFile upgrade the handle to a file representation
 // which holds a usable fd, with a specific settings by provided flags
 func (h *Handle) OpenFile(flags int) (*os.File, error) {
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	fd := C.pathrs_reopen(h.handle, C.int(flags))
 	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
 	if err != nil {
@@ -204,24 +252,27 @@ func (h *Handle) OpenFile(flags int) (*os.File, error) {
 // because the security properties of libpathrs depend on users doing all
 // relevant filesystem operations through libpathrs.
 func (h *Handle) IntoFd() (int, error) {
-	fd := int(C.pathrs_into_fd(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
-	if fd < 0 {
-		return 0, handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
-	}
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
-	return fd, nil
+	fd := int(C.pathrs_into_fd(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
+	return fd, handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
 }
 
-// Clone creates a copy of root handler the new object will have a separate lifetime
+// Clone creates a copy of root handle the new object will have a separate lifetime
 // from the original, but will refer to the same underlying file
 func (h *Handle) Clone() (*Handle, error) {
-	newHandler := (*C.pathrs_handle_t)(C.pathrs_duplicate(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
+	// Needed because libpathrs has per-thread errors.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	newHandle := (*C.pathrs_handle_t)(C.pathrs_duplicate(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
 	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
 	if err != nil {
 		return nil, err
 	}
-
-	return &Handle{handle: newHandler}, nil
+	return &Handle{handle: newHandle}, nil
 }
 
 // Close frees underling caught resources
