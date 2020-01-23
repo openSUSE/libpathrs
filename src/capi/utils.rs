@@ -22,6 +22,7 @@ use crate::{
 };
 
 use std::{
+    collections::HashMap,
     convert::TryInto,
     ffi::{CStr, CString, OsStr},
     io::Error as IOError,
@@ -29,6 +30,8 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::Path,
     ptr,
+    sync::{Arc, Mutex},
+    thread::{self, ThreadId},
 };
 
 use backtrace::Backtrace;
@@ -120,27 +123,75 @@ macro_rules! leakable {
     };
 }
 
+#[derive(Debug)]
+pub(crate) struct CPointerInner<T> {
+    pub(crate) inner: Option<T>,
+    pub(crate) last_error: HashMap<ThreadId, Option<Error>>,
+}
+
+impl<T> CPointerInner<T> {
+    pub(crate) fn take_err(&mut self) -> Option<Error> {
+        self.last_error
+            .remove(&thread::current().id())
+            // .flatten() is in Rust 1.40.0.
+            .and_then(|e| e)
+    }
+
+    pub(crate) fn get_inner(&mut self) -> (&Option<T>, &mut Option<Error>) {
+        let err = self
+            .last_error
+            .entry(thread::current().id())
+            .or_insert(None);
+        (&self.inner, err)
+    }
+
+    pub(crate) fn get_mut_inner(&mut self) -> (&mut Option<T>, &mut Option<Error>) {
+        let err = self
+            .last_error
+            .entry(thread::current().id())
+            .or_insert(None);
+        (&mut self.inner, err)
+    }
+}
+
 /// This is only exported to work around a Rust compiler restriction. Consider
 /// it an implementation detail and don't make use of it.
 // Wrapping struct which we can given C a pointer to. &T isn't an option,
 // because DSTs (fat pointers) like dyn T (and thus &dyn T) have no FFI-safe
 // representation. So we need to hide it within an FFI-safe pointer (such as a
 // trivial struct).
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct CPointer<T> {
-    pub(crate) inner: Option<T>,
-    pub(crate) last_error: Option<Error>,
+    pub(crate) inner: Arc<Mutex<CPointerInner<T>>>,
 }
 
 leakable! {
     impl<T> Leakable for CPointer<T>;
 }
 
+impl<T> CPointer<T> {
+    pub(crate) fn from_err(err: Error) -> Self {
+        CPointer {
+            inner: Arc::new(Mutex::new(CPointerInner {
+                inner: None,
+                last_error: {
+                    let mut map = HashMap::new();
+                    map.insert(thread::current().id(), Some(err));
+                    map
+                },
+            })),
+        }
+    }
+}
+
 impl<T> From<T> for CPointer<T> {
     fn from(inner: T) -> Self {
         CPointer {
-            inner: Some(inner),
-            last_error: None,
+            inner: Arc::new(Mutex::new(CPointerInner {
+                inner: Some(inner),
+                last_error: HashMap::new(),
+            })),
         }
     }
 }
@@ -154,6 +205,7 @@ impl<T> From<T> for CPointer<T> {
 /// dangerous than just opening a directory tree which is not inside a
 /// potentially-untrusted directory.
 pub type CRoot = CPointer<Root>;
+pub(crate) type CRootInner = CPointerInner<Root>;
 
 /// A handle to a path within a given Root. This handle references an
 /// already-resolved path which can be used for only one purpose -- to "re-open"
@@ -465,23 +517,23 @@ pub extern "C" fn pathrs_error(
 
     // SAFETY: All of these casts and dereferences are safe because the C caller
     //         has assured us that the type passed is correct.
-    let last_error = match ptr_type {
+    let err = match ptr_type {
         CPointerType::PATHRS_NONE => return None,
         CPointerType::PATHRS_ERROR => return None, // TODO: Clone the CError.
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
             let root = unsafe { &mut *(ptr as *mut CRoot) };
-            &mut root.last_error
+            root.inner.lock().unwrap().take_err()
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
             let handle = unsafe { &mut *(ptr as *mut CHandle) };
-            &mut handle.last_error
+            handle.inner.lock().unwrap().take_err()
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
     };
 
-    last_error.as_ref().map(CError::from).map(Leakable::leak)
+    err.as_ref().map(CError::from).map(Leakable::leak)
 }
 
 /// Free a libpathrs object.

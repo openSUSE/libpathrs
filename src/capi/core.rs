@@ -57,14 +57,8 @@ use snafu::{OptionExt, ResultExt};
 #[no_mangle]
 pub extern "C" fn pathrs_open(path: *const c_char) -> &'static mut CRoot {
     match utils::parse_path(path).and_then(Root::open) {
-        Ok(root) => CRoot {
-            inner: Some(root),
-            last_error: None,
-        },
-        Err(err) => CRoot {
-            inner: None,
-            last_error: Some(err),
-        },
+        Ok(root) => CRoot::from(root),
+        Err(err) => CRoot::from_err(err),
     }
     .leak()
 }
@@ -81,12 +75,13 @@ pub extern "C" fn pathrs_open(path: *const c_char) -> &'static mut CRoot {
 /// want to use the path as a controlling terminal, you will have to do
 /// ioctl(fd, TIOCSCTTY, 0) yourself.
 #[no_mangle]
-pub extern "C" fn pathrs_reopen(handle: &mut CHandle, flags: c_int) -> RawFd {
-    let flags = OpenFlags(flags);
+pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
+    let mut handle = handle.inner.lock().unwrap();
     // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let inner = &handle.inner;
+    let (inner, last_error) = handle.get_inner();
 
-    handle.last_error.wrap(-1, || {
+    last_error.wrap(-1, move || {
+        let flags = OpenFlags(flags);
         let file = inner
             .as_ref()
             .context(error::InvalidArgument {
@@ -110,13 +105,14 @@ pub extern "C" fn pathrs_reopen(handle: &mut CHandle, flags: c_int) -> RawFd {
 /// already exist*, otherwise an error will occur.
 #[no_mangle]
 pub extern "C" fn pathrs_resolve(
-    root: &mut CRoot,
+    root: &CRoot,
     path: *const c_char,
 ) -> Option<&'static mut CHandle> {
+    let mut root = root.inner.lock().unwrap();
     // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let inner = &root.inner;
+    let (inner, last_error) = root.get_inner();
 
-    root.last_error.wrap(None, move || {
+    last_error.wrap(None, move || {
         inner
             .as_ref()
             .context(error::InvalidArgument {
@@ -140,11 +136,12 @@ pub extern "C" fn pathrs_rename(
     dst: *const c_char,
     flags: c_int,
 ) -> c_int {
-    let flags = RenameFlags(flags);
+    let mut root = root.inner.lock().unwrap();
     // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let inner = &root.inner;
+    let (inner, last_error) = root.get_inner();
 
-    root.last_error.wrap(-1, move || {
+    last_error.wrap(-1, move || {
+        let flags = RenameFlags(flags);
         inner
             .as_ref()
             .context(error::InvalidArgument {
@@ -168,12 +165,13 @@ pub extern "C" fn pathrs_creat(
     path: *const c_char,
     mode: c_uint,
 ) -> Option<&'static mut CHandle> {
-    let mode = mode & !libc::S_IFMT;
-    let perm = Permissions::from_mode(mode);
+    let mut root = root.inner.lock().unwrap();
     // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let inner = &root.inner;
+    let (inner, last_error) = root.get_inner();
 
-    root.last_error.wrap(None, move || {
+    last_error.wrap(None, move || {
+        let mode = mode & !libc::S_IFMT;
+        let perm = Permissions::from_mode(mode);
         inner
             .as_ref()
             .context(error::InvalidArgument {
@@ -201,12 +199,13 @@ pub extern "C" fn pathrs_mknod(
     mode: c_uint,
     dev: dev_t,
 ) -> c_int {
-    let fmt = mode & libc::S_IFMT;
-    let perms = Permissions::from_mode(mode ^ fmt);
+    let mut root = root.inner.lock().unwrap();
     // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let inner = &root.inner;
+    let (inner, last_error) = root.get_inner();
 
-    root.last_error.wrap(-1, move || {
+    last_error.wrap(-1, move || {
+        let fmt = mode & libc::S_IFMT;
+        let perms = Permissions::from_mode(mode ^ fmt);
         let path = utils::parse_path(path)?;
         let inode_type = match fmt {
             libc::S_IFREG => InodeType::File(&perms),
@@ -241,10 +240,11 @@ pub extern "C" fn pathrs_symlink(
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
+    let mut root = root.inner.lock().unwrap();
     // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let inner = &root.inner;
+    let (inner, last_error) = root.get_inner();
 
-    root.last_error.wrap(-1, move || {
+    last_error.wrap(-1, move || {
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
 
@@ -265,10 +265,11 @@ pub extern "C" fn pathrs_hardlink(
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
+    let mut root = root.inner.lock().unwrap();
     // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let inner = &root.inner;
+    let (inner, last_error) = root.get_inner();
 
-    root.last_error.wrap(-1, move || {
+    last_error.wrap(-1, move || {
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
 

@@ -20,7 +20,7 @@
 //       unlikely work for very long in the long-term.
 
 use crate::{
-    capi::utils::{CError, CPointerType, CRoot, ErrorWrap, Leakable},
+    capi::utils::{CError, CPointerType, CRoot, CRootInner, ErrorWrap, Leakable},
     error::{self, Error, ErrorExt},
     resolvers::{Resolver, ResolverBackend, ResolverFlags},
 };
@@ -32,17 +32,20 @@ use snafu::OptionExt;
 
 /// Represents an FFI-safe configuration structure which supports setting and getting.
 trait CConfig: Default {
+    type Object;
+    type ObjectInner;
+
     /// Verify that the pointer type and pointer are valid for this type of
     /// `CConfig`. This is mostly a sanity-check (`pathrs_configure()` knows the
     /// mapping between `CPointerType` and Rust type).
-    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<(), Error>;
+    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<&'static Self::Object, Error>;
 
     /// Fetch the configuration from the ptr object, and store it in this config
     /// object.
-    fn fetch(&mut self, ptr: *const c_void) -> Result<(), Error>;
+    fn fetch(&mut self, from: &Self::ObjectInner) -> Result<(), Error>;
 
     /// Apply a configuration to the given ptr object.
-    fn apply(&self, ptr: *mut c_void) -> Result<(), Error>;
+    fn apply(&self, to: &mut Self::ObjectInner) -> Result<(), Error>;
 }
 
 /// The backend used for path resolution within a `pathrs_root_t` to get a
@@ -102,7 +105,10 @@ impl Default for CRootConfig {
 }
 
 impl CConfig for CRootConfig {
-    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<(), Error> {
+    type Object = CRoot;
+    type ObjectInner = CRootInner;
+
+    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<&'static Self::Object, Error> {
         // Guaranteed by pathrs_configure.
         assert!(ptr_type == CPointerType::PATHRS_ROOT);
         ensure!(
@@ -115,26 +121,27 @@ impl CConfig for CRootConfig {
 
         // SAFETY: This cast and dereference is safe because the C caller has
         //         assured us that the type passed is correct.
-        let root = unsafe { &mut *(ptr as *mut CRoot) };
-        // Check that it's a valid object.
-        ensure!(
-            root.inner.is_some(),
-            error::InvalidArgument {
-                name: "ptr",
-                description: "invalid pathrs object",
-            }
-        );
+        let root = unsafe { &*(ptr as *const CRoot) };
+        {
+            // Check that it's a valid object.
+            let root = root.inner.lock().unwrap();
+            ensure!(
+                root.inner.is_some(),
+                error::InvalidArgument {
+                    name: "ptr",
+                    description: "invalid pathrs object",
+                }
+            );
+        }
 
-        Ok(())
+        Ok(root)
     }
 
-    fn fetch(&mut self, ptr: *const c_void) -> Result<(), Error> {
-        // SAFETY: This cast and dereference is safe because the C caller has
-        //         assured us that the type passed is correct.
-        let root = unsafe { &*(ptr as *const CRoot) }
-            .inner
-            .as_ref()
-            .expect("object must be valid");
+    fn fetch(&mut self, ptr: &Self::ObjectInner) -> Result<(), Error> {
+        let root = ptr.inner.as_ref().context(error::InvalidArgument {
+            name: "ptr",
+            description: "invalid pathrs object",
+        })?;
 
         *self = Self {
             resolver: root.resolver.backend.into(),
@@ -143,13 +150,11 @@ impl CConfig for CRootConfig {
         Ok(())
     }
 
-    fn apply(&self, ptr: *mut c_void) -> Result<(), Error> {
-        // SAFETY: This cast and dereference is safe because the C caller has
-        //         assured us that the type passed is correct.
-        let root = unsafe { &mut *(ptr as *mut CRoot) }
-            .inner
-            .as_mut()
-            .expect("object must be valid");
+    fn apply(&self, ptr: &mut Self::ObjectInner) -> Result<(), Error> {
+        let root = ptr.inner.as_mut().context(error::InvalidArgument {
+            name: "ptr",
+            description: "invalid pathrs object",
+        })?;
 
         root.resolver = Resolver {
             backend: self.resolver.into(),
@@ -176,7 +181,10 @@ pub struct CGlobalConfig {
 }
 
 impl CConfig for CGlobalConfig {
-    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<(), Error> {
+    type Object = ();
+    type ObjectInner = ();
+
+    fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<&'static Self::Object, Error> {
         // Guaranteed by pathrs_configure.
         assert!(ptr_type == CPointerType::PATHRS_NONE);
         ensure!(
@@ -186,15 +194,15 @@ impl CConfig for CGlobalConfig {
                 description: "ptr must be NULL with PATHRS_NONE",
             }
         );
-        Ok(())
+        Ok(&())
     }
 
-    fn fetch(&mut self, _ptr: *const c_void) -> Result<(), Error> {
+    fn fetch(&mut self, _ptr: &Self::ObjectInner) -> Result<(), Error> {
         self.error_backtraces = error::BACKTRACES_ENABLED.load(Ordering::SeqCst);
         Ok(())
     }
 
-    fn apply(&self, _ptr: *mut c_void) -> Result<(), Error> {
+    fn apply(&self, _ptr: &mut Self::ObjectInner) -> Result<(), Error> {
         error::BACKTRACES_ENABLED.store(self.error_backtraces, Ordering::SeqCst);
         Ok(())
     }
@@ -302,72 +310,21 @@ pub extern "C" fn pathrs_configure(
     new_cfg_ptr: *const c_void,
     cfg_size: usize,
 ) -> Option<&'static mut CError> {
-    // XXX: All of this could probably be made quite a bit neater with a macro.
+    // TODO: This entire interface should be rewritten and redesigned.
 
     let mut error: Option<Error> = None;
     error.wrap((), move || {
         // First, check that ptr is valid and ptr_type can be configured.
         match ptr_type {
-            CPointerType::PATHRS_NONE => CGlobalConfig::verify(ptr_type, ptr),
-            CPointerType::PATHRS_ROOT => CRootConfig::verify(ptr_type, ptr),
-            _ => error::InvalidArgument {
-                name: "ptr_type",
-                description: "type cannot be configured",
-            }
-            .fail(),
-        }?;
-
-        // First, get the original configuration (if requested).
-        if !old_cfg_ptr.is_null() {
-            // In all of the following cases, we are going to create a copy of
-            // the library's internal config structure (zero-filled by default)
-            // and then copy min(cfg_size, mem::size_of::<internal config>())
-            // bytes to the copy. We then verify that the user's copy doesn't
-            // have any trailing non-zero bytes.
-            //
-            // This is all entirely safe because the type is #[repr(align(8),
-            // C)] and contains no non-nullable values. The C caller assures us
-            // that the type of the struct passed is correct, and that cfg_size
-            // actually is the size of the struct they've given us.
-            //
-            // The purpose of this is to implement forward and backwards
-            // compatibility, a-la openat2(2) and similar syscalls (symbol
-            // versioning doesn't help us with struct extension).
-            match ptr_type {
-                CPointerType::PATHRS_NONE => {
+            CPointerType::PATHRS_NONE => {
+                let _ = CGlobalConfig::verify(ptr_type, ptr)?;
+                if !old_cfg_ptr.is_null() {
                     let mut old_cfg = CGlobalConfig::default();
-                    old_cfg.fetch(ptr)?;
+                    old_cfg.fetch(&())?;
                     copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
                         .wrap("copy libpathrs config to caller old_cfg_ptr")?;
                 }
-                CPointerType::PATHRS_ROOT => {
-                    let mut old_cfg = CRootConfig::default();
-                    old_cfg.fetch(ptr)?;
-                    copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
-                        .wrap("copy libpathrs config to caller old_cfg_ptr")?;
-                }
-                _ => unreachable!(), // already handled above
-            };
-        }
-
-        // Finally, set the new configuration (if requested).
-        if !new_cfg_ptr.is_null() {
-            // In all of the following cases, we are going to create a copy of
-            // the library's internal config structure (zero-filled by default)
-            // and then copy min(cfg_size, mem::size_of::<internal config>())
-            // bytes to the copy. We then verify that the user's copy doesn't
-            // have any trailing non-zero bytes.
-            //
-            // This is all entirely safe because the type is #[repr(align(8),
-            // C)] and contains no non-nullable values. The C caller assures us
-            // that the type of the struct passed is correct, and that cfg_size
-            // actually is the size of the struct they've given us.
-            //
-            // The purpose of this is to implement forward and backwards
-            // compatibility, a-la openat2(2) and similar syscalls (symbol
-            // versioning doesn't help us with struct extension).
-            match ptr_type {
-                CPointerType::PATHRS_NONE => {
+                if !new_cfg_ptr.is_null() {
                     let mut new_cfg = CGlobalConfig::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
@@ -379,18 +336,34 @@ pub extern "C" fn pathrs_configure(
                             description: "unused padding fields must be zero",
                         }
                     );
-                    new_cfg.apply(ptr)?;
+                    new_cfg.apply(&mut ())?;
                 }
-                CPointerType::PATHRS_ROOT => {
+            }
+            CPointerType::PATHRS_ROOT => {
+                let obj = CRootConfig::verify(ptr_type, ptr)?;
+                let mut obj_inner = obj.inner.lock().unwrap();
+
+                if !old_cfg_ptr.is_null() {
+                    let mut old_cfg = CRootConfig::default();
+                    old_cfg.fetch(&obj_inner)?;
+                    copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
+                        .wrap("copy libpathrs config to caller old_cfg_ptr")?;
+                }
+                if !new_cfg_ptr.is_null() {
                     let mut new_cfg = CRootConfig::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
-                    new_cfg.apply(ptr)?;
+                    new_cfg.apply(&mut obj_inner)?;
                 }
-                _ => unreachable!(), // already handled above
-            };
-        }
-
+            }
+            _ => {
+                return error::InvalidArgument {
+                    name: "ptr_type",
+                    description: "type cannot be configured",
+                }
+                .fail()?;
+            }
+        };
         Ok(())
     });
 

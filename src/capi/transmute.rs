@@ -46,58 +46,55 @@ use snafu::OptionExt;
 /// will store the error (which can be retrieved with pathrs_error). If the
 /// object type is not one of the permitted values above, the error is lost.
 #[no_mangle]
-pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *mut c_void) -> *mut c_void {
+pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *const c_void) -> *const c_void {
     if ptr.is_null() {
         return ptr::null_mut();
-    }
-
-    // Temporary enum to avoid risking aliased &muts.
-    enum Inner<'a> {
-        Root(&'a Option<Root>),
-        Handle(&'a Option<Handle>),
     }
 
     // SAFETY: All of these casts and dereferences are safe because the C caller
     //         has assured us that the type passed is correct. We also make sure
     //         to not create aliased &muts by accident by destructuring the
     //         CPointer<T>s into (inner, last_error).
-    let (inner, last_error) = match ptr_type {
-        CPointerType::PATHRS_NONE | CPointerType::PATHRS_ERROR => return ptr::null_mut(),
+    match ptr_type {
+        CPointerType::PATHRS_NONE | CPointerType::PATHRS_ERROR => ptr::null_mut(),
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
-            let root = unsafe { &mut *(ptr as *mut CRoot) };
-            (Inner::Root(&root.inner), &mut root.last_error)
+            let mut root = unsafe { &*(ptr as *const CRoot) }.inner.lock().unwrap();
+            let (inner, last_error) = root.get_inner();
+
+            last_error.wrap(ptr::null_mut(), move || {
+                inner
+                    .as_ref()
+                    .context(error::InvalidArgument {
+                        name: "ptr",
+                        description: "invalid pathrs object",
+                    })?
+                    .try_clone()
+                    .map(CRoot::from)
+                    .map(Leakable::leak)
+                    .map(|p| p as *const _ as *const c_void)
+            })
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
-            let handle = unsafe { &mut *(ptr as *mut CHandle) };
-            (Inner::Handle(&handle.inner), &mut handle.last_error)
+            let mut handle = unsafe { &*(ptr as *const CHandle) }.inner.lock().unwrap();
+            let (inner, last_error) = handle.get_inner();
+
+            last_error.wrap(ptr::null_mut(), move || {
+                inner
+                    .as_ref()
+                    .context(error::InvalidArgument {
+                        name: "ptr",
+                        description: "invalid pathrs object",
+                    })?
+                    .try_clone()
+                    .map(CHandle::from)
+                    .map(Leakable::leak)
+                    .map(|p| p as *const _ as *const c_void)
+            })
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
-    };
-
-    last_error.wrap(ptr::null_mut(), move || match inner {
-        Inner::Root(inner) => inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "ptr",
-                description: "invalid pathrs object",
-            })?
-            .try_clone()
-            .map(CRoot::from)
-            .map(Leakable::leak)
-            .map(|p| p as *mut _ as *mut c_void),
-        Inner::Handle(inner) => inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "ptr",
-                description: "invalid pathrs object",
-            })?
-            .try_clone()
-            .map(CHandle::from)
-            .map(Leakable::leak)
-            .map(|p| p as *mut _ as *mut c_void),
-    })
+    }
 }
 
 /// Unwrap a file-based libpathrs object to obtain its underlying file
@@ -130,55 +127,51 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *mut c_void) -> 
 /// store the error (which can be retrieved with pathrs_error). If the object
 /// type is not one of the permitted values above, the error is lost.
 #[no_mangle]
-pub extern "C" fn pathrs_into_fd(ptr_type: CPointerType, ptr: *mut c_void) -> RawFd {
+pub extern "C" fn pathrs_into_fd(ptr_type: CPointerType, ptr: *const c_void) -> RawFd {
     if ptr.is_null() {
         return -1;
-    }
-
-    // Temporary enum to avoid risking aliased &muts.
-    enum Inner<'a> {
-        Root(&'a mut Option<Root>),
-        Handle(&'a mut Option<Handle>),
     }
 
     // SAFETY: All of these casts and dereferences are safe because the C caller
     //         has assured us that the type passed is correct. We also make sure
     //         to not create aliased &muts by accident by destructuring the
     //         CPointer<T>s into (inner, last_error).
-    let (inner, last_error) = match ptr_type {
-        CPointerType::PATHRS_NONE | CPointerType::PATHRS_ERROR => return -1,
+    match ptr_type {
+        CPointerType::PATHRS_NONE | CPointerType::PATHRS_ERROR => -1,
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
-            let root = unsafe { &mut *(ptr as *mut CRoot) };
-            (Inner::Root(&mut root.inner), &mut root.last_error)
+            let mut root = unsafe { &*(ptr as *const CRoot) }.inner.lock().unwrap();
+            let (inner, last_error) = root.get_mut_inner();
+
+            last_error.wrap(-1, move || {
+                Ok(inner
+                    .take()
+                    .context(error::InvalidArgument {
+                        name: "ptr",
+                        description: "invalid pathrs object",
+                    })?
+                    .into_file()
+                    .into_raw_fd())
+            })
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
-            let handle = unsafe { &mut *(ptr as *mut CHandle) };
-            (Inner::Handle(&mut handle.inner), &mut handle.last_error)
+            let mut handle = unsafe { &*(ptr as *const CHandle) }.inner.lock().unwrap();
+            let (inner, last_error) = handle.get_mut_inner();
+
+            last_error.wrap(-1, move || {
+                Ok(inner
+                    .take()
+                    .context(error::InvalidArgument {
+                        name: "ptr",
+                        description: "invalid pathrs object",
+                    })?
+                    .into_file()
+                    .into_raw_fd())
+            })
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
-    };
-
-    last_error.wrap(-1, move || {
-        let file = match inner {
-            Inner::Root(inner) => inner
-                .take()
-                .context(error::InvalidArgument {
-                    name: "ptr",
-                    description: "invalid pathrs object",
-                })?
-                .into_file(),
-            Inner::Handle(inner) => inner
-                .take()
-                .context(error::InvalidArgument {
-                    name: "ptr",
-                    description: "invalid pathrs object",
-                })?
-                .into_file(),
-        };
-        Ok(file.into_raw_fd())
-    })
+    }
 }
 
 /// Construct a new file-based libpathrs object from a file descriptor.
@@ -252,16 +245,8 @@ pub extern "C" fn pathrs_from_fd(fd_type: CPointerType, fd: RawFd) -> *mut c_voi
     match last_error {
         None => ret,
         Some(err) => match fd_type {
-            CPointerType::PATHRS_ROOT => CRoot {
-                inner: None,
-                last_error: Some(err),
-            }
-            .leak() as *mut _ as *mut c_void,
-            CPointerType::PATHRS_HANDLE => CHandle {
-                inner: None,
-                last_error: Some(err),
-            }
-            .leak() as *mut _ as *mut c_void,
+            CPointerType::PATHRS_ROOT => CRoot::from_err(err).leak() as *mut _ as *mut c_void,
+            CPointerType::PATHRS_HANDLE => CHandle::from_err(err).leak() as *mut _ as *mut c_void,
             // Nothing more we can do. We could return a CError for
             // PATHRS_ERROR, but callers might not correctly handle that (if you
             // call pathrs_error(PATHRS_ERROR) you currently get NULL).
