@@ -23,7 +23,7 @@ use crate::{
 
 use std::{
     collections::HashMap,
-    convert::TryInto,
+    convert::{self, TryInto},
     ffi::{CStr, CString, OsStr},
     io::Error as IOError,
     mem,
@@ -130,19 +130,16 @@ pub(crate) struct CPointerInner<T> {
 }
 
 impl<T> CPointerInner<T> {
-    pub(crate) fn take_err(&mut self) -> Option<Error> {
+    fn take_err(&mut self) -> Option<Error> {
         self.last_error
             .remove(&thread::current().id())
             // .flatten() is in Rust 1.40.0.
-            .and_then(|e| e)
+            .and_then(convert::identity)
     }
 
     pub(crate) fn get_inner(&mut self) -> (&Option<T>, &mut Option<Error>) {
-        let err = self
-            .last_error
-            .entry(thread::current().id())
-            .or_insert(None);
-        (&self.inner, err)
+        let (inner, err) = self.get_mut_inner();
+        (inner, err)
     }
 
     pub(crate) fn get_mut_inner(&mut self) -> (&mut Option<T>, &mut Option<Error>) {
