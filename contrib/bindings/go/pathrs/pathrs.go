@@ -49,9 +49,9 @@ func Open(path string) (*Root, error) {
 	return &Root{root: root}, nil
 }
 
-// RootFromFile constructs a new file-based libpathrs object of root from a file descriptor
-// Uses often in combination with Root.IntoFile methood
-func RootFromFile(file *os.File) (*Root, error) {
+// RootFromRaw constructs a new file-based libpathrs object of root from a file descriptor
+// Uses often in combination with Root.IntoRaw methood
+func RootFromRaw(file *os.File) (*Root, error) {
 	// Needed because libpathrs has per-thread errors.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -62,7 +62,6 @@ func RootFromFile(file *os.File) (*Root, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return &Root{root: root}, nil
 }
 
@@ -146,33 +145,31 @@ func (r *Root) Symlink(path, target string) error {
 	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 }
 
-// IntoFile unwraps a file-based libpathrs object to obtain its underlying file
+// IntoRaw unwraps a file-based libpathrs object to obtain its underlying file
 // descriptor.
 //
 // It is critical that you do not operate on this file descriptor yourself,
 // because the security properties of libpathrs depend on users doing all
 // relevant filesystem operations through libpathrs.
-func (r *Root) IntoFile() (*os.File, error) {
+//
+// After this operation, the root should still be freed with root.Close() but
+// the root is otherwise invalid and libpathrs will produce an error each time
+// it is used.
+func (r *Root) IntoRaw() (*os.File, error) {
 	// Needed because libpathrs has per-thread errors.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	cloned, err := r.Clone()
-	if err != nil {
-		return nil, err
-	}
-
-	fd := int(C.pathrs_into_fd(C.PATHRS_ROOT, unsafe.Pointer(cloned.root)))
+	fd := int(C.pathrs_into_fd(C.PATHRS_ROOT, unsafe.Pointer(r.root)))
 	if fd < 0 {
-		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(cloned.root))
+		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
 	}
 
 	name, err := randName(32)
 	if err != nil {
 		return nil, err
 	}
-
-	return os.NewFile(uintptr(fd), "pathrs-root:"+name), nil
+	return os.NewFile(uintptr(fd), "pathrs-raw-root:"+name), nil
 }
 
 // Clone creates a copy of root handle the new object will have a separate lifetime
@@ -202,13 +199,14 @@ type Handle struct {
 	handle *C.pathrs_handle_t
 }
 
-// HandleFromFd constructs a new file-based libpathrs object of handle from a file descriptor
-// Uses often in combination with Handle.IntoFd methood
-func HandleFromFd(fd int) (*Handle, error) {
+// HandleFromRaw constructs a new file-based libpathrs object of handle from a file descriptor
+// Uses often in combination with Handle.IntoRaw methood
+func HandleFromRaw(file *os.File) (*Handle, error) {
 	// Needed because libpathrs has per-thread errors.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	fd := file.Fd()
 	handle := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
 	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(handle))
 	if err != nil {
@@ -240,24 +238,34 @@ func (h *Handle) OpenFile(flags int) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	file := os.NewFile(uintptr(fd), "pathrs-handle:"+name)
-	return file, nil
+	return os.NewFile(uintptr(fd), "pathrs-handle:"+name), nil
 }
 
-// IntoFd unwraps a file-based libpathrs object to obtain its underlying file
+// IntoRaw unwraps a file-based libpathrs object to obtain its underlying file
 // descriptor.
 //
 // It is critical that you do not operate on this file descriptor yourself,
 // because the security properties of libpathrs depend on users doing all
 // relevant filesystem operations through libpathrs.
-func (h *Handle) IntoFd() (int, error) {
+//
+// After this operation, the handle should still be freed with handle.Close()
+// but the handle is otherwise invalid and libpathrs will produce an error each
+// time it is used.
+func (h *Handle) IntoRaw() (*os.File, error) {
 	// Needed because libpathrs has per-thread errors.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	fd := int(C.pathrs_into_fd(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
-	return fd, handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
+	if fd < 0 {
+		return nil, handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
+	}
+
+	name, err := randName(32)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), "pathrs-raw-handle:"+name), nil
 }
 
 // Clone creates a copy of root handle the new object will have a separate lifetime
