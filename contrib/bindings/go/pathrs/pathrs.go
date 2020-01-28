@@ -67,7 +67,10 @@ func Open(path string) (*Root, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	rootInner := C.pathrs_open(C.CString(path))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	rootInner := C.pathrs_open(cPath)
 	root := &Root{root: rootInner}
 	return root, fetchError(root)
 }
@@ -95,7 +98,10 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	handle := C.pathrs_resolve(r.root, C.CString(path))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	handle := C.pathrs_resolve(r.root, cPath)
 	return &Handle{handle: handle}, fetchError(r)
 }
 
@@ -106,7 +112,10 @@ func (r *Root) Create(path string, mode os.FileMode) (*Handle, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	handle := C.pathrs_creat(r.root, C.CString(path), C.uint(mode))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	handle := C.pathrs_creat(r.root, cPath, C.uint(mode))
 	return &Handle{handle: handle}, fetchError(r)
 }
 
@@ -116,7 +125,13 @@ func (r *Root) Rename(src, dst string, flags int) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	C.pathrs_rename(r.root, C.CString(src), C.CString(dst), C.int(flags))
+	cSrc := C.CString(src)
+	defer C.free(unsafe.Pointer(cSrc))
+
+	cDst := C.CString(dst)
+	defer C.free(unsafe.Pointer(cDst))
+
+	C.pathrs_rename(r.root, cSrc, cDst, C.int(flags))
 	return fetchError(r)
 }
 
@@ -126,7 +141,10 @@ func (r *Root) Mkdir(path string, mode os.FileMode) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	C.pathrs_mkdir(r.root, C.CString(path), C.uint(mode))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	C.pathrs_mkdir(r.root, cPath, C.uint(mode))
 	return fetchError(r)
 }
 
@@ -137,7 +155,10 @@ func (r *Root) Mknod(path string, mode os.FileMode, dev int) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	C.pathrs_mknod(r.root, C.CString(path), C.uint(mode), C.dev_t(dev))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	C.pathrs_mknod(r.root, cPath, C.uint(mode), C.dev_t(dev))
 	return fetchError(r)
 }
 
@@ -148,7 +169,13 @@ func (r *Root) Hardlink(path, target string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	C.pathrs_hardlink(r.root, C.CString(path), C.CString(target))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	cTarget := C.CString(target)
+	defer C.free(unsafe.Pointer(cTarget))
+
+	C.pathrs_hardlink(r.root, cPath, cTarget)
 	return fetchError(r)
 }
 
@@ -158,7 +185,13 @@ func (r *Root) Symlink(path, target string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	C.pathrs_symlink(r.root, C.CString(path), C.CString(target))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	cTarget := C.CString(target)
+	defer C.free(unsafe.Pointer(cTarget))
+
+	C.pathrs_symlink(r.root, cPath, cTarget)
 	return fetchError(r)
 }
 
