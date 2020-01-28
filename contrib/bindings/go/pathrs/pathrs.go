@@ -14,39 +14,62 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pathrs provides a bindings for libpathrs, a library for safe path resolution on Linux.
+// Package pathrs provides bindings for libpathrs, a library for safe path
+// resolution on Linux.
 package pathrs
 
 // #cgo LDFLAGS: -lpathrs
 // #include <pathrs.h>
 import "C"
+
 import (
 	"crypto/rand"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
-	"syscall"
 	"unsafe"
 )
 
-// Root holds the responsibility to provide safe api to functions of pathrs root api
+// pathrsObject is implemented by all wrappers of FFI-managed objects.
+type pathrsObject interface {
+	// inner returns the (type, pointer) tuple for the underlying FFI-managed
+	// object.
+	inner() (C.pathrs_type_t, unsafe.Pointer)
+}
+
+// Ensure that all FFI-managed objects implement pathrsObject at compile-time.
+var _ pathrsObject = &Root{}
+var _ pathrsObject = &Handle{}
+
+// Root is a handle to the root of a directory tree to resolve within. The only
+// purpose of this "root handle" is to perform operations within the directory
+// tree, or to get Handles to inodes within the directory tree.
+//
+// At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
+// inside a possibly-attacker-controlled directory tree. While we do have
+// protections that should defend against it (for both drivers), it's far more
+// dangerous than just opening a directory tree which is not inside a
+// potentially-untrusted directory.
 type Root struct {
 	root *C.pathrs_root_t
 }
 
-// Open opens directory as a root directory
+// inner returns the (type, pointer) tuple for the underlying FFI-managed
+// object.
+func (r *Root) inner() (C.pathrs_type_t, unsafe.Pointer) {
+	return C.PATHRS_ROOT, unsafe.Pointer(r.root)
+}
+
+// Open creates a new Root handle to the directory at the given path.
 func Open(path string) (*Root, error) {
 	// Needed because libpathrs has per-thread errors.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	root := C.pathrs_open(C.CString(path))
-	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(root))
-	if err != nil {
-		return nil, err
-	}
-	return &Root{root: root}, nil
+	rootInner := C.pathrs_open(C.CString(path))
+	root := &Root{root: rootInner}
+	return root, fetchError(root)
 }
 
 // RootFromRaw constructs a new file-based libpathrs object of root from a file descriptor
@@ -57,12 +80,9 @@ func RootFromRaw(file *os.File) (*Root, error) {
 	defer runtime.UnlockOSThread()
 
 	fd := file.Fd()
-	root := (*C.pathrs_root_t)(C.pathrs_from_fd(C.PATHRS_ROOT, C.int(fd)))
-	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(root))
-	if err != nil {
-		return nil, err
-	}
-	return &Root{root: root}, nil
+	rootInner := (*C.pathrs_root_t)(C.pathrs_from_fd(C.PATHRS_ROOT, C.int(fd)))
+	root := &Root{root: rootInner}
+	return root, fetchError(root)
 }
 
 // Resolve resolves the given path within the given root's tree
@@ -74,8 +94,8 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 	defer runtime.UnlockOSThread()
 
 	handle := C.pathrs_resolve(r.root, C.CString(path))
-	if handle == nil {
-		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	if err := fetchError(r); err != nil {
+		return nil, err
 	}
 	return &Handle{handle: handle}, nil
 }
@@ -87,8 +107,8 @@ func (r *Root) Create(path string, mode uint) (*Handle, error) {
 	defer runtime.UnlockOSThread()
 
 	handle := C.pathrs_creat(r.root, C.CString(path), C.uint(mode))
-	if handle == nil {
-		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	if err := fetchError(r); err != nil {
+		return nil, err
 	}
 	return &Handle{handle: handle}, nil
 }
@@ -101,7 +121,7 @@ func (r *Root) Rename(src, dst string, flags int) error {
 	defer runtime.UnlockOSThread()
 
 	C.pathrs_rename(r.root, C.CString(src), C.CString(dst), C.int(flags))
-	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	return fetchError(r)
 }
 
 // Mkdir creates a directory with a such mode by path
@@ -111,7 +131,7 @@ func (r *Root) Mkdir(path string, mode uint) error {
 	defer runtime.UnlockOSThread()
 
 	C.pathrs_mkdir(r.root, C.CString(path), C.uint(mode))
-	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	return fetchError(r)
 }
 
 // Mknod creates a filesystem node named path
@@ -122,7 +142,7 @@ func (r *Root) Mknod(path string, mode uint, dev int) error {
 	defer runtime.UnlockOSThread()
 
 	C.pathrs_mknod(r.root, C.CString(path), C.uint(mode), C.dev_t(dev))
-	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	return fetchError(r)
 }
 
 // Hardlink creates a hardlink of file named target and place it to path
@@ -132,7 +152,7 @@ func (r *Root) Hardlink(path, target string) error {
 	defer runtime.UnlockOSThread()
 
 	C.pathrs_hardlink(r.root, C.CString(path), C.CString(target))
-	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	return fetchError(r)
 }
 
 // Symlink creates a symlink of file named target and place it to path
@@ -142,7 +162,7 @@ func (r *Root) Symlink(path, target string) error {
 	defer runtime.UnlockOSThread()
 
 	C.pathrs_symlink(r.root, C.CString(path), C.CString(target))
-	return handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	return fetchError(r)
 }
 
 // IntoRaw unwraps a file-based libpathrs object to obtain its underlying file
@@ -160,9 +180,9 @@ func (r *Root) IntoRaw() (*os.File, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	fd := int(C.pathrs_into_fd(C.PATHRS_ROOT, unsafe.Pointer(r.root)))
-	if fd < 0 {
-		return nil, handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+	fd := int(C.pathrs_into_fd(r.inner()))
+	if err := fetchError(r); err != nil {
+		return nil, err
 	}
 
 	name, err := randName(32)
@@ -179,9 +199,8 @@ func (r *Root) Clone() (*Root, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	newRoot := (*C.pathrs_root_t)(C.pathrs_duplicate(C.PATHRS_ROOT, unsafe.Pointer(r.root)))
-	err := handleErr(C.PATHRS_ROOT, unsafe.Pointer(r.root))
-	if err != nil {
+	newRoot := (*C.pathrs_root_t)(C.pathrs_duplicate(r.inner()))
+	if err := fetchError(r); err != nil {
 		return nil, err
 	}
 	return &Root{root: newRoot}, nil
@@ -190,13 +209,19 @@ func (r *Root) Clone() (*Root, error) {
 // Close frees underling caught resources
 func (r *Root) Close() {
 	if r != nil {
-		C.pathrs_free(C.PATHRS_ROOT, unsafe.Pointer(r.root))
+		C.pathrs_free(r.inner())
 	}
 }
 
 // Handle represents an handle pathrs api interface
 type Handle struct {
 	handle *C.pathrs_handle_t
+}
+
+// inner returns the (type, pointer) tuple for the underlying FFI-managed
+// object.
+func (h *Handle) inner() (C.pathrs_type_t, unsafe.Pointer) {
+	return C.PATHRS_HANDLE, unsafe.Pointer(h.handle)
 }
 
 // HandleFromRaw constructs a new file-based libpathrs object of handle from a file descriptor
@@ -207,12 +232,9 @@ func HandleFromRaw(file *os.File) (*Handle, error) {
 	defer runtime.UnlockOSThread()
 
 	fd := file.Fd()
-	handle := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
-	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(handle))
-	if err != nil {
-		return nil, err
-	}
-	return &Handle{handle: handle}, nil
+	handleInner := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
+	handle := &Handle{handle: handleInner}
+	return handle, fetchError(handle)
 }
 
 // Open upgrade the handle to a file representation
@@ -229,8 +251,7 @@ func (h *Handle) OpenFile(flags int) (*os.File, error) {
 	defer runtime.UnlockOSThread()
 
 	fd := C.pathrs_reopen(h.handle, C.int(flags))
-	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
-	if err != nil {
+	if err := fetchError(h); err != nil {
 		return nil, err
 	}
 
@@ -256,9 +277,9 @@ func (h *Handle) IntoRaw() (*os.File, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	fd := int(C.pathrs_into_fd(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
+	fd := int(C.pathrs_into_fd(h.inner()))
 	if fd < 0 {
-		return nil, handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
+		return nil, fetchError(h)
 	}
 
 	name, err := randName(32)
@@ -275,9 +296,8 @@ func (h *Handle) Clone() (*Handle, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	newHandle := (*C.pathrs_handle_t)(C.pathrs_duplicate(C.PATHRS_HANDLE, unsafe.Pointer(h.handle)))
-	err := handleErr(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
-	if err != nil {
+	newHandle := (*C.pathrs_handle_t)(C.pathrs_duplicate(h.inner()))
+	if err := fetchError(h); err != nil {
 		return nil, err
 	}
 	return &Handle{handle: newHandle}, nil
@@ -286,93 +306,8 @@ func (h *Handle) Clone() (*Handle, error) {
 // Close frees underling caught resources
 func (h *Handle) Close() {
 	if h != nil {
-		C.pathrs_free(C.PATHRS_HANDLE, unsafe.Pointer(h.handle))
+		C.pathrs_free(h.inner())
 	}
-}
-
-// Error representation of rust error
-// particularly useful to not frighten to lost controll of pointer which can be rewritten.
-type Error struct {
-	description string
-	errno       uint64
-	backtrace   []backtraceLine
-}
-
-type backtraceLine struct {
-	ip       uintptr
-	sAddress uintptr
-	sName    string
-	sFile    string
-	sLineno  uint32
-}
-
-func (err *Error) Error() string {
-	return err.description
-}
-
-func (e *Error) Unwrap() error {
-	if e.errno != 0 {
-		return syscall.Errno(e.errno)
-	}
-
-	return nil
-}
-
-// Backtrace flush backtrace of underlying error to string.
-//
-// Its not passed to realization of Error interface on purpose since
-// the main error should remain clear and simple
-func (err *Error) Backtrace() string {
-	buf := strings.Builder{}
-
-	for _, line := range err.backtrace {
-		if line.sName != "" {
-			buf.WriteString(fmt.Sprintf("'%s'@", line.sName))
-		}
-		buf.WriteString(fmt.Sprintf("<0x%x>+0x%x\n", line.sAddress, line.ip-line.sAddress))
-		if line.sFile != "" {
-			buf.WriteString(fmt.Sprintf("  in file '%s':%d\n", line.sFile, line.sLineno))
-		}
-	}
-
-	return buf.String()
-}
-
-func newError(e *C.pathrs_error_t) error {
-	if e == nil {
-		return nil
-	}
-
-	err := &Error{
-		errno:       uint64(e.saved_errno),
-		description: C.GoString(e.description),
-		backtrace:   nil,
-	}
-
-	if e.backtrace != nil {
-		head := uintptr(unsafe.Pointer(e.backtrace.head))
-		length := uintptr(e.backtrace.length)
-		sizeof := uintptr(C.sizeof___pathrs_backtrace_entry_t)
-		for ptr := head; ptr < head+length*sizeof; ptr += sizeof {
-			entry := (*C.__pathrs_backtrace_entry_t)(unsafe.Pointer(ptr))
-			line := backtraceLine{
-				ip:       uintptr(entry.ip),
-				sAddress: uintptr(entry.symbol_address),
-				sLineno:  uint32(entry.symbol_lineno),
-				sFile:    C.GoString(entry.symbol_file),
-				sName:    C.GoString(entry.symbol_name),
-			}
-			err.backtrace = append(err.backtrace, line)
-		}
-	}
-
-	return err
-}
-
-func handleErr(ptrType C.pathrs_type_t, ptr unsafe.Pointer) error {
-	err := C.pathrs_error(ptrType, ptr)
-	defer C.pathrs_free(C.PATHRS_ERROR, unsafe.Pointer(err))
-	return newError(err)
 }
 
 func randName(len int) (string, error) {
