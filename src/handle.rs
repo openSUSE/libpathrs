@@ -18,10 +18,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{
-    error::Error,
-    utils::{FileExt, RawFdExt},
-};
+use crate::{error::Error, utils::RawFdExt};
 
 use std::fs::File;
 

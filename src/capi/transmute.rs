@@ -19,12 +19,12 @@
 use crate::{
     capi::utils::{CHandle, CPointerType, CRoot, ErrorWrap, Leakable},
     error::{self, Error},
+    utils::RawFdExt,
     Handle, Root,
 };
 
 use std::{
-    fs::File,
-    os::unix::io::{FromRawFd, IntoRawFd, RawFd},
+    os::unix::io::{IntoRawFd, RawFd},
     ptr,
 };
 
@@ -182,9 +182,10 @@ pub extern "C" fn pathrs_into_fd(ptr_type: CPointerType, ptr: *const c_void) -> 
 /// descriptor of such an object can be thought of as the "serialised" version
 /// of the object, and this method effectively "de-serialises" it.
 ///
-/// Once the file descriptor has been passed to libpathrs, libpathrs takes
-/// control of its lifetime. This means that the file descriptor will be closed
-/// even if an error was returned.
+/// Note that libpathrs will duplicate the file descriptor passed to it (in
+/// order to avoid higher-level language runtimes from accidentally closing the
+/// file descriptor). The caller must therefore close the file descriptor passed
+/// if they no longer require it after this call.
 ///
 /// Only certain objects can be constructed from file descriptors with
 /// pathrs_from_fd():
@@ -199,8 +200,9 @@ pub extern "C" fn pathrs_into_fd(ptr_type: CPointerType, ptr: *const c_void) -> 
 /// originally came from pathrs_into_fd().
 ///
 /// If an error occurs, an object of the requested type is returned containing
-/// the error (which can be retrieved with pathrs_error). If the object type
-/// requested is not one of the permitted values above, NULL is returned.
+/// the error (which can be retrieved with pathrs_error) -- as with pathrs_open.
+/// If the object type requested is not one of the permitted values above, NULL
+/// is returned.
 #[no_mangle]
 pub extern "C" fn pathrs_from_fd(fd_type: CPointerType, fd: RawFd) -> *mut c_void {
     let mut last_error: Option<Error> = None;
@@ -213,10 +215,12 @@ pub extern "C" fn pathrs_from_fd(fd_type: CPointerType, fd: RawFd) -> *mut c_voi
             }
         );
 
-        // SAFETY: This conversion is safe because the C caller guarantees that
-        //         the provided fd is valid and the caller has ownership of it
-        //         (and is transferring it to us).
-        let file = unsafe { File::from_raw_fd(fd) };
+        // Make a copy of the file. It's entirely possible that some language
+        // runtimes (or programs) will not be able to uphold the contract that
+        // the file ownerships is now ours. So it's much less of a headache to
+        // just duplicate the handle so that the caller never sees the fd we
+        // actually end up using.
+        let file = fd.try_clone_hotfix()?;
 
         match fd_type {
             CPointerType::PATHRS_ROOT => {

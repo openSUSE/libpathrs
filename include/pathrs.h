@@ -273,7 +273,7 @@ pathrs_handle_t *pathrs_creat(pathrs_root_t *root,
  * will store the error (which can be retrieved with pathrs_error). If the
  * object type is not one of the permitted values above, the error is lost.
  */
-void *pathrs_duplicate(pathrs_type_t ptr_type, void *ptr);
+const void *pathrs_duplicate(pathrs_type_t ptr_type, const void *ptr);
 
 /**
  * Retrieve the error stored by a pathrs object.
@@ -308,9 +308,10 @@ void pathrs_free(pathrs_type_t ptr_type, void *ptr);
  * descriptor of such an object can be thought of as the "serialised" version
  * of the object, and this method effectively "de-serialises" it.
  *
- * Once the file descriptor has been passed to libpathrs, libpathrs takes
- * control of its lifetime. This means that the file descriptor will be closed
- * even if an error was returned.
+ * Note that libpathrs will duplicate the file descriptor passed to it (in
+ * order to avoid higher-level language runtimes from accidentally closing the
+ * file descriptor). The caller must therefore close the file descriptor passed
+ * if they no longer require it after this call.
  *
  * Only certain objects can be constructed from file descriptors with
  * pathrs_from_fd():
@@ -325,8 +326,9 @@ void pathrs_free(pathrs_type_t ptr_type, void *ptr);
  * originally came from pathrs_into_fd().
  *
  * If an error occurs, an object of the requested type is returned containing
- * the error (which can be retrieved with pathrs_error). If the object type
- * requested is not one of the permitted values above, NULL is returned.
+ * the error (which can be retrieved with pathrs_error) -- as with pathrs_open.
+ * If the object type requested is not one of the permitted values above, NULL
+ * is returned.
  */
 void *pathrs_from_fd(pathrs_type_t fd_type, int fd);
 
@@ -363,7 +365,7 @@ int pathrs_hardlink(pathrs_root_t *root, const char *path, const char *target);
  * store the error (which can be retrieved with pathrs_error). If the object
  * type is not one of the permitted values above, the error is lost.
  */
-int pathrs_into_fd(pathrs_type_t ptr_type, void *ptr);
+int pathrs_into_fd(pathrs_type_t ptr_type, const void *ptr);
 
 int pathrs_mkdir(pathrs_root_t *root, const char *path, unsigned int mode);
 
@@ -381,19 +383,20 @@ int pathrs_mknod(pathrs_root_t *root,
  *
  * The provided path must be an existing directory.
  *
- * NOTE: Unlike other libpathrs methods, pathrs_open will *always* return a
- *       pathrs_root_t (but in the case of an error, the returned root handle
- *       will be a "dummy" which is just used to store the error encountered
- *       during setup). Errors during pathrs_open() can only be detected by
- *       immediately calling pathrs_error() with the returned root handle --
- *       and as with valid root handles, the caller must free it with
- *       pathrs_free().
+ * # Errors
  *
- *       This unfortunate API wart is necessary because there is no obvious
- *       place to store a libpathrs error when first creating an root handle
- *       (other than using thread-local storage but that opens several other
- *       cans of worms). This approach was chosen because in principle users
- *       could call pathrs_error() after every libpathrs API call.
+ *  Unlike other libpathrs methods, pathrs_open will *always* return a
+ *  pathrs_root_t (but in the case of an error, the returned root handle will
+ *  be a "dummy" which is just used to store the error encountered during
+ *  setup). Errors during pathrs_open() can only be detected by immediately
+ *  calling pathrs_error() with the returned root handle -- and as with valid
+ *  root handles, the caller must free it with pathrs_free().
+ *
+ *  This unfortunate API wart is necessary because there is no obvious place to
+ *  store a libpathrs error when first creating an root handle (other than
+ *  using thread-local storage but that opens several other cans of worms).
+ *  This approach was chosen because in principle users could call
+ *  pathrs_error() after every libpathrs API call.
  */
 pathrs_root_t *pathrs_open(const char *path);
 
@@ -420,14 +423,14 @@ int pathrs_rename(pathrs_root_t *root,
  * want to use the path as a controlling terminal, you will have to do
  * ioctl(fd, TIOCSCTTY, 0) yourself.
  */
-int pathrs_reopen(pathrs_handle_t *handle, int flags);
+int pathrs_reopen(const pathrs_handle_t *handle, int flags);
 
 /**
  * Within the given root's tree, resolve the given path (with all symlinks
  * being scoped to the root) and return a handle to that path. The path *must
  * already exist*, otherwise an error will occur.
  */
-pathrs_handle_t *pathrs_resolve(pathrs_root_t *root, const char *path);
+pathrs_handle_t *pathrs_resolve(const pathrs_root_t *root, const char *path);
 
 int pathrs_symlink(pathrs_root_t *root, const char *path, const char *target);
 

@@ -145,13 +145,21 @@ pub(crate) trait RawFdExt {
 
     /// Get the path this RawFd is referencing.
     ///
-    ///
     /// This is done through `readlink(/proc/self/fd)` and is naturally racy
     /// (hence the name "unsafe"), so it's important to only use this with the
     /// understanding that it only provides the guarantee that "at some point
     /// during execution this was the path the fd pointed to" and
     /// no more.
     fn as_unsafe_path(&self) -> Result<PathBuf, Error>;
+
+    /// This is a fixed version of the Rust stdlib's `File::try_clone()` which
+    /// works on `O_PATH` file descriptors, added to [work around an upstream
+    /// bug][bug62314]. The [fix for this bug was merged][pr62425] and will be
+    /// available in Rust 1.37.0.
+    ///
+    /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
+    /// [pr62425]: https://github.com/rust-lang/rust/pull/62425
+    fn try_clone_hotfix(&self) -> Result<File, Error>;
 }
 
 fn proc_subpath(fd: RawFd) -> Result<String, Error> {
@@ -186,6 +194,12 @@ impl RawFdExt for RawFd {
             },
         )
     }
+
+    fn try_clone_hotfix(&self) -> Result<File, Error> {
+        syscalls::fcntl_dupfd_cloxec(*self).context(error::RawOsError {
+            operation: "clone fd",
+        })
+    }
 }
 
 // XXX: We can't use <T: AsRawFd> here, because Rust tells us that RawFd might
@@ -202,18 +216,13 @@ impl RawFdExt for File {
         // SAFETY: Caller guarantees that as_unsafe_path usage is safe.
         self.as_raw_fd().as_unsafe_path()
     }
+
+    fn try_clone_hotfix(&self) -> Result<File, Error> {
+        self.as_raw_fd().try_clone_hotfix()
+    }
 }
 
 pub(crate) trait FileExt {
-    /// This is a fixed version of the Rust stdlib's `File::try_clone()` which
-    /// works on `O_PATH` file descriptors, added to [work around an upstream
-    /// bug][bug62314]. The [fix for this bug was merged][pr62425] and will be
-    /// available in Rust 1.37.0.
-    ///
-    /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
-    /// [pr62425]: https://github.com/rust-lang/rust/pull/62425
-    fn try_clone_hotfix(&self) -> Result<File, Error>;
-
     /// Check if the File is on a "dangerous" filesystem that might contain
     /// magic-links.
     fn is_dangerous(&self) -> Result<bool, Error>;
@@ -233,12 +242,6 @@ lazy_static! {
 }
 
 impl FileExt for File {
-    fn try_clone_hotfix(&self) -> Result<File, Error> {
-        syscalls::fcntl_dupfd_cloxec(self.as_raw_fd()).context(error::RawOsError {
-            operation: "clone fd",
-        })
-    }
-
     fn is_dangerous(&self) -> Result<bool, Error> {
         // There isn't a marker on a filesystem level to indicate whether
         // nd_jump_link() is used internally. So, we just have to make an

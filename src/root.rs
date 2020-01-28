@@ -22,7 +22,7 @@ use crate::{
     error::{self, Error, ErrorExt},
     resolvers::Resolver,
     syscalls,
-    utils::FileExt,
+    utils::RawFdExt,
     Handle,
 };
 
