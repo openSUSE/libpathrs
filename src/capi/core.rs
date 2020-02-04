@@ -131,7 +131,7 @@ pub extern "C" fn pathrs_resolve(
 /// flags that are supported on the system.
 #[no_mangle]
 pub extern "C" fn pathrs_rename(
-    root: &mut CRoot,
+    root: &CRoot,
     src: *const c_char,
     dst: *const c_char,
     flags: c_int,
@@ -161,7 +161,7 @@ pub extern "C" fn pathrs_rename(
 
 #[no_mangle]
 pub extern "C" fn pathrs_creat(
-    root: &mut CRoot,
+    root: &CRoot,
     path: *const c_char,
     mode: c_uint,
 ) -> Option<&'static mut CHandle> {
@@ -186,7 +186,7 @@ pub extern "C" fn pathrs_creat(
 }
 
 #[no_mangle]
-pub extern "C" fn pathrs_mkdir(root: &mut CRoot, path: *const c_char, mode: c_uint) -> c_int {
+pub extern "C" fn pathrs_mkdir(root: &CRoot, path: *const c_char, mode: c_uint) -> c_int {
     let mode = mode & !libc::S_IFMT;
 
     pathrs_mknod(root, path, libc::S_IFDIR | mode, 0)
@@ -194,7 +194,7 @@ pub extern "C" fn pathrs_mkdir(root: &mut CRoot, path: *const c_char, mode: c_ui
 
 #[no_mangle]
 pub extern "C" fn pathrs_mknod(
-    root: &mut CRoot,
+    root: &CRoot,
     path: *const c_char,
     mode: c_uint,
     dev: dev_t,
@@ -236,7 +236,7 @@ pub extern "C" fn pathrs_mknod(
 
 #[no_mangle]
 pub extern "C" fn pathrs_symlink(
-    root: &mut CRoot,
+    root: &CRoot,
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
@@ -261,7 +261,7 @@ pub extern "C" fn pathrs_symlink(
 
 #[no_mangle]
 pub extern "C" fn pathrs_hardlink(
-    root: &mut CRoot,
+    root: &CRoot,
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {

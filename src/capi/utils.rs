@@ -506,7 +506,7 @@ impl Drop for CError {
 #[no_mangle]
 pub extern "C" fn pathrs_error(
     ptr_type: CPointerType,
-    ptr: *mut c_void,
+    ptr: *const c_void,
 ) -> Option<&'static mut CError> {
     if ptr.is_null() {
         return None;
@@ -519,12 +519,12 @@ pub extern "C" fn pathrs_error(
         CPointerType::PATHRS_ERROR => return None, // TODO: Clone the CError.
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
-            let root = unsafe { &mut *(ptr as *mut CRoot) };
+            let root = unsafe { &*(ptr as *const CRoot) };
             root.inner.lock().unwrap().take_err()
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
-            let handle = unsafe { &mut *(ptr as *mut CHandle) };
+            let handle = unsafe { &*(ptr as *const CHandle) };
             handle.inner.lock().unwrap().take_err()
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
