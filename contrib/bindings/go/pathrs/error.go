@@ -104,7 +104,9 @@ func newError(e *C.pathrs_error_t) error {
 }
 
 func fetchError(obj pathrsObject) error {
+	obj.get()
 	err := C.pathrs_error(obj.inner())
 	defer C.pathrs_free(C.PATHRS_ERROR, unsafe.Pointer(err))
+	obj.put()
 	return newError(err)
 }

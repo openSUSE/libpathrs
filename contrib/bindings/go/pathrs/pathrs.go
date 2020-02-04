@@ -29,6 +29,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -37,11 +39,20 @@ type pathrsObject interface {
 	// inner returns the (type, pointer) tuple for the underlying FFI-managed
 	// object.
 	inner() (C.pathrs_type_t, unsafe.Pointer)
+
+	// get ensures that the object will stay alive.
+	get()
+
+	// put drops a reference to the object.
+	put()
 }
 
 // Ensure that all FFI-managed objects implement pathrsObject at compile-time.
 var _ pathrsObject = &Root{}
 var _ pathrsObject = &Handle{}
+
+func getAtomic(ptr *unsafe.Pointer) unsafe.Pointer  { return atomic.LoadPointer(ptr) }
+func moveAtomic(ptr *unsafe.Pointer) unsafe.Pointer { return atomic.SwapPointer(ptr, nil) }
 
 // Root is a handle to the root of a directory tree to resolve within. The only
 // purpose of this "root handle" is to perform operations within the directory
@@ -53,14 +64,18 @@ var _ pathrsObject = &Handle{}
 // dangerous than just opening a directory tree which is not inside a
 // potentially-untrusted directory.
 type Root struct {
-	root *C.pathrs_root_t
+	lock sync.RWMutex
+	ptr  *C.pathrs_root_t
 }
 
 // inner returns the (type, pointer) tuple for the underlying FFI-managed
-// object.
+// object. Must be called with an active reference to the Root.
 func (r *Root) inner() (C.pathrs_type_t, unsafe.Pointer) {
-	return C.PATHRS_ROOT, unsafe.Pointer(r.root)
+	return C.PATHRS_ROOT, unsafe.Pointer(r.ptr)
 }
+
+func (r *Root) get() { r.lock.RLock() }
+func (r *Root) put() { r.lock.RUnlock() }
 
 // Open creates a new Root handle to the directory at the given path.
 func Open(path string) (*Root, error) {
@@ -70,8 +85,8 @@ func Open(path string) (*Root, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	rootInner := C.pathrs_open(cPath)
-	root := &Root{root: rootInner}
+	inner := C.pathrs_open(cPath)
+	root := &Root{ptr: inner}
 	return root, fetchError(root)
 }
 
@@ -86,8 +101,9 @@ func RootFromRaw(file *os.File) (*Root, error) {
 	defer runtime.UnlockOSThread()
 
 	fd := file.Fd()
-	rootInner := (*C.pathrs_root_t)(C.pathrs_from_fd(C.PATHRS_ROOT, C.int(fd)))
-	root := &Root{root: rootInner}
+
+	inner := (*C.pathrs_root_t)(C.pathrs_from_fd(C.PATHRS_ROOT, C.int(fd)))
+	root := &Root{ptr: inner}
 	return root, fetchError(root)
 }
 
@@ -101,8 +117,10 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	handle := C.pathrs_resolve(r.root, cPath)
-	return &Handle{handle: handle}, fetchError(r)
+	r.get()
+	inner := C.pathrs_resolve(r.ptr, cPath)
+	r.put()
+	return &Handle{ptr: inner}, fetchError(r)
 }
 
 // Create creates a file within the Root's directory tree at the given path,
@@ -115,8 +133,10 @@ func (r *Root) Create(path string, mode os.FileMode) (*Handle, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	handle := C.pathrs_creat(r.root, cPath, C.uint(mode))
-	return &Handle{handle: handle}, fetchError(r)
+	r.get()
+	inner := C.pathrs_creat(r.ptr, cPath, C.uint(mode))
+	r.put()
+	return &Handle{ptr: inner}, fetchError(r)
 }
 
 // Rename two paths within a Root's directory tree. The flags argument is
@@ -131,7 +151,7 @@ func (r *Root) Rename(src, dst string, flags int) error {
 	cDst := C.CString(dst)
 	defer C.free(unsafe.Pointer(cDst))
 
-	C.pathrs_rename(r.root, cSrc, cDst, C.int(flags))
+	C.pathrs_rename(r.ptr, cSrc, cDst, C.int(flags))
 	return fetchError(r)
 }
 
@@ -144,7 +164,7 @@ func (r *Root) Mkdir(path string, mode os.FileMode) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	C.pathrs_mkdir(r.root, cPath, C.uint(mode))
+	C.pathrs_mkdir(r.ptr, cPath, C.uint(mode))
 	return fetchError(r)
 }
 
@@ -158,7 +178,7 @@ func (r *Root) Mknod(path string, mode os.FileMode, dev int) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	C.pathrs_mknod(r.root, cPath, C.uint(mode), C.dev_t(dev))
+	C.pathrs_mknod(r.ptr, cPath, C.uint(mode), C.dev_t(dev))
 	return fetchError(r)
 }
 
@@ -175,7 +195,7 @@ func (r *Root) Hardlink(path, target string) error {
 	cTarget := C.CString(target)
 	defer C.free(unsafe.Pointer(cTarget))
 
-	C.pathrs_hardlink(r.root, cPath, cTarget)
+	C.pathrs_hardlink(r.ptr, cPath, cTarget)
 	return fetchError(r)
 }
 
@@ -191,7 +211,7 @@ func (r *Root) Symlink(path, target string) error {
 	cTarget := C.CString(target)
 	defer C.free(unsafe.Pointer(cTarget))
 
-	C.pathrs_symlink(r.root, cPath, cTarget)
+	C.pathrs_symlink(r.ptr, cPath, cTarget)
 	return fetchError(r)
 }
 
@@ -227,17 +247,20 @@ func (r *Root) Clone() (*Root, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	newRoot := (*C.pathrs_root_t)(C.pathrs_duplicate(r.inner()))
-	return &Root{root: newRoot}, fetchError(r)
+	newInner := (*C.pathrs_root_t)(C.pathrs_duplicate(r.inner()))
+	return &Root{ptr: newInner}, fetchError(r)
 }
 
 // Close frees all of the resources used by the Root handle. The handle must
 // not be used for any future operations.
 func (r *Root) Close() {
 	if r != nil {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+		// Free the underlying structure.
 		C.pathrs_free(r.inner())
-		// Make sure double-frees don't cause segfaults.
-		r.root = nil
+		// Make sure we don't double-free by clearing the inner pointer.
+		r.ptr = nil
 	}
 }
 
@@ -251,13 +274,17 @@ func (r *Root) Close() {
 // the security properties of libpathrs depend on users doing all relevant
 // filesystem operations through libpathrs.
 type Handle struct {
-	handle *C.pathrs_handle_t
+	lock sync.RWMutex
+	ptr  *C.pathrs_handle_t
 }
+
+func (h *Handle) get() { h.lock.RLock() }
+func (h *Handle) put() { h.lock.RUnlock() }
 
 // inner returns the (type, pointer) tuple for the underlying FFI-managed
 // object.
 func (h *Handle) inner() (C.pathrs_type_t, unsafe.Pointer) {
-	return C.PATHRS_HANDLE, unsafe.Pointer(h.handle)
+	return C.PATHRS_HANDLE, unsafe.Pointer(h.ptr)
 }
 
 // HandleFromRaw creates a new Handle from an exisitng file handle. The handle
@@ -271,8 +298,9 @@ func HandleFromRaw(file *os.File) (*Handle, error) {
 	defer runtime.UnlockOSThread()
 
 	fd := file.Fd()
-	handleInner := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
-	handle := &Handle{handle: handleInner}
+
+	inner := (*C.pathrs_handle_t)(C.pathrs_from_fd(C.PATHRS_HANDLE, C.int(fd)))
+	handle := &Handle{ptr: inner}
 	return handle, fetchError(handle)
 }
 
@@ -296,7 +324,7 @@ func (h *Handle) OpenFile(flags int) (*os.File, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	fd := C.pathrs_reopen(h.handle, C.int(flags))
+	fd := C.pathrs_reopen(h.ptr, C.int(flags))
 	if err := fetchError(h); err != nil {
 		return nil, err
 	}
@@ -340,17 +368,20 @@ func (h *Handle) Clone() (*Handle, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	newHandle := (*C.pathrs_handle_t)(C.pathrs_duplicate(h.inner()))
-	return &Handle{handle: newHandle}, fetchError(h)
+	newInner := (*C.pathrs_handle_t)(C.pathrs_duplicate(h.inner()))
+	return &Handle{ptr: newInner}, fetchError(h)
 }
 
 // Close frees all of the resources used by the Handle. The handle must not be
 // used for any future operations.
 func (h *Handle) Close() {
 	if h != nil {
+		h.lock.Lock()
+		defer h.lock.Unlock()
+		// Free the underlying structure.
 		C.pathrs_free(h.inner())
-		// Make sure double-frees don't cause segfaults.
-		h.handle = nil
+		// Make sure we don't double-free by clearing the inner pointer.
+		h.ptr = nil
 	}
 }
 
