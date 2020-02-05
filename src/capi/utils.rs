@@ -30,13 +30,13 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::Path,
     ptr,
-    sync::{Arc, Mutex},
+    sync::{Mutex, RwLock},
     thread::{self, ThreadId},
 };
 
 use backtrace::Backtrace;
 use libc::{c_char, c_void};
-use snafu::ErrorCompat;
+use snafu::{ErrorCompat, OptionExt};
 
 /// The type of object being passed to "object agnostic" libpathrs functions.
 // The values of the enum are baked into the API, you can only append to it.
@@ -123,31 +123,23 @@ macro_rules! leakable {
     };
 }
 
-#[derive(Debug)]
-pub(crate) struct CPointerInner<T> {
-    pub(crate) inner: Option<T>,
-    pub(crate) last_error: HashMap<ThreadId, Option<Error>>,
+pub(crate) trait ErrorWrap {
+    fn wrap<F, R>(&mut self, c_error: R, func: F) -> R
+    where
+        F: FnOnce() -> Result<R, Error>;
 }
 
-impl<T> CPointerInner<T> {
-    fn take_err(&mut self) -> Option<Error> {
-        self.last_error
-            .remove(&thread::current().id())
-            // .flatten() is in Rust 1.40.0.
-            .and_then(convert::identity)
-    }
-
-    pub(crate) fn get_inner(&mut self) -> (&Option<T>, &mut Option<Error>) {
-        let (inner, err) = self.get_mut_inner();
-        (inner, err)
-    }
-
-    pub(crate) fn get_mut_inner(&mut self) -> (&mut Option<T>, &mut Option<Error>) {
-        let err = self
-            .last_error
-            .entry(thread::current().id())
-            .or_insert(None);
-        (&mut self.inner, err)
+impl ErrorWrap for Option<Error> {
+    fn wrap<F, R>(&mut self, c_error: R, func: F) -> R
+    where
+        F: FnOnce() -> Result<R, Error>,
+    {
+        // Always clear the error to avoid the errno problem.
+        *self = None;
+        func().unwrap_or_else(|err| {
+            *self = Some(err);
+            c_error
+        })
     }
 }
 
@@ -160,7 +152,9 @@ impl<T> CPointerInner<T> {
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct CPointer<T> {
-    pub(crate) inner: Arc<Mutex<CPointerInner<T>>>,
+    pub(crate) inner: RwLock<Option<T>>,
+    // TODO: Switch to evmap or something with more granular locking.
+    last_error: Mutex<HashMap<ThreadId, Option<Error>>>,
 }
 
 leakable! {
@@ -170,25 +164,80 @@ leakable! {
 impl<T> CPointer<T> {
     pub(crate) fn from_err(err: Error) -> Self {
         CPointer {
-            inner: Arc::new(Mutex::new(CPointerInner {
-                inner: None,
-                last_error: {
-                    let mut map = HashMap::new();
-                    map.insert(thread::current().id(), Some(err));
-                    map
-                },
-            })),
+            inner: RwLock::new(None),
+            last_error: Mutex::new({
+                let mut map = HashMap::new();
+                map.insert(thread::current().id(), Some(err));
+                map
+            }),
         }
+    }
+
+    pub(crate) fn take_err(&self) -> Option<Error> {
+        self.last_error
+            .lock()
+            .unwrap()
+            .remove(&thread::current().id())
+            .and_then(convert::identity)
+    }
+
+    fn do_wrap_err<F, R>(&self, c_error: R, func: F) -> R
+    where
+        F: FnOnce() -> Result<R, Error>,
+    {
+        let mut last_error: Option<Error> = None;
+        let c_return = func().unwrap_or_else(|err| {
+            last_error = Some(err);
+            c_error
+        });
+
+        // Store the error.
+        self.last_error
+            .lock()
+            .unwrap()
+            .insert(thread::current().id(), last_error);
+
+        c_return
+    }
+
+    pub(crate) fn wrap_err<F, R>(&self, c_error: R, func: F) -> R
+    where
+        F: FnOnce(&T) -> Result<R, Error>,
+    {
+        // TODO: Figure out how to handle None inners here. Currently this
+        //       produces a "can't move out of dereference" error, which
+        //       resulted in a bunch of .context() checks in the C API functions
+        //       themselves.
+        self.do_wrap_err(c_error, || {
+            let inner = self.inner.read().unwrap();
+            let inner = inner.as_ref().context(error::InvalidArgument {
+                name: "ptr",
+                description: "invalid pathrs object",
+            })?;
+            func(&inner)
+        })
+    }
+
+    pub(crate) fn take_wrap_err<F, R>(&self, c_error: R, func: F) -> R
+    where
+        F: FnOnce(T) -> Result<R, Error>,
+    {
+        self.do_wrap_err(c_error, || {
+            let mut inner = self.inner.write().unwrap();
+            let inner = inner.take().context(error::InvalidArgument {
+                name: "ptr",
+                description: "invalid pathrs object",
+            })?;
+            func(inner)
+        })
     }
 }
 
 impl<T> From<T> for CPointer<T> {
     fn from(inner: T) -> Self {
         CPointer {
-            inner: Arc::new(Mutex::new(CPointerInner {
-                inner: Some(inner),
-                last_error: HashMap::new(),
-            })),
+            inner: RwLock::new(Some(inner)),
+            last_error: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -202,7 +251,6 @@ impl<T> From<T> for CPointer<T> {
 /// dangerous than just opening a directory tree which is not inside a
 /// potentially-untrusted directory.
 pub type CRoot = CPointer<Root>;
-pub(crate) type CRootInner = CPointerInner<Root>;
 
 /// A handle to a path within a given Root. This handle references an
 /// already-resolved path which can be used for only one purpose -- to "re-open"
@@ -362,45 +410,6 @@ impl From<Backtrace> for CBacktrace {
     }
 }
 
-// Private trait necessary to work around the "orphan trait" restriction.
-pub(crate) trait ErrorWrap {
-    fn wrap<F, R>(&mut self, c_err: R, func: F) -> R
-    where
-        F: FnOnce() -> Result<R, Error>;
-}
-
-impl ErrorWrap for Option<Error> {
-    /// Very helpful wrapper to use in "pub extern fn" Rust FFI functions, to
-    /// allow for error handling to be done in a much more Rust-like manner. The
-    /// idea is that the Rust error is stored in some fixed variable (hopefully
-    /// associated with the object being operated on) while the C FFI binding
-    /// returns a C-friendly error code.
-    ///
-    /// ```dead_code
-    /// #[no_mangle]
-    /// pub extern "C" fn func(msg: *const c_char) -> c_int {
-    ///     let mut last_error: Option<Error> = None;
-    ///     last_error.wrap(-1, move || {
-    ///         if msg.is_null {
-    ///             return Err(Error("msg must not be a null pointer"))
-    ///         }
-    ///         Ok(42)
-    ///     })
-    /// }
-    /// ```
-    fn wrap<F, R>(&mut self, c_err: R, func: F) -> R
-    where
-        F: FnOnce() -> Result<R, Error>,
-    {
-        // Clear the error before the operation to avoid the "errno problem".
-        *self = None;
-        func().unwrap_or_else(|err| {
-            *self = Some(err);
-            c_err
-        })
-    }
-}
-
 /// Attempts to represent a Rust Error type in C. This structure must be freed
 /// using `pathrs_free(PATHRS_ERROR)`.
 // NOTE: This API is exposed to library users in a read-only manner with memory
@@ -520,12 +529,12 @@ pub extern "C" fn pathrs_error(
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
             let root = unsafe { &*(ptr as *const CRoot) };
-            root.inner.lock().unwrap().take_err()
+            root.take_err()
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
             let handle = unsafe { &*(ptr as *const CHandle) };
-            handle.inner.lock().unwrap().take_err()
+            handle.take_err()
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
     };

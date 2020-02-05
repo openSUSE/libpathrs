@@ -20,9 +20,10 @@
 //       unlikely work for very long in the long-term.
 
 use crate::{
-    capi::utils::{CError, CPointerType, CRoot, CRootInner, ErrorWrap, Leakable},
+    capi::utils::{CError, CPointerType, CRoot, ErrorWrap, Leakable},
     error::{self, Error, ErrorExt},
     resolvers::{Resolver, ResolverBackend, ResolverFlags},
+    Root,
 };
 
 use std::{cmp, mem, ptr, sync::atomic::Ordering};
@@ -106,7 +107,7 @@ impl Default for CRootConfig {
 
 impl CConfig for CRootConfig {
     type Object = CRoot;
-    type ObjectInner = CRootInner;
+    type ObjectInner = Root;
 
     fn verify(ptr_type: CPointerType, ptr: *mut c_void) -> Result<&'static Self::Object, Error> {
         // Guaranteed by pathrs_configure.
@@ -121,28 +122,10 @@ impl CConfig for CRootConfig {
 
         // SAFETY: This cast and dereference is safe because the C caller has
         //         assured us that the type passed is correct.
-        let root = unsafe { &*(ptr as *const CRoot) };
-        {
-            // Check that it's a valid object.
-            let root = root.inner.lock().unwrap();
-            ensure!(
-                root.inner.is_some(),
-                error::InvalidArgument {
-                    name: "ptr",
-                    description: "invalid pathrs object",
-                }
-            );
-        }
-
-        Ok(root)
+        Ok(unsafe { &*(ptr as *const CRoot) })
     }
 
-    fn fetch(&mut self, ptr: &Self::ObjectInner) -> Result<(), Error> {
-        let root = ptr.inner.as_ref().context(error::InvalidArgument {
-            name: "ptr",
-            description: "invalid pathrs object",
-        })?;
-
+    fn fetch(&mut self, root: &Self::ObjectInner) -> Result<(), Error> {
         *self = Self {
             resolver: root.resolver.backend.into(),
             flags: root.resolver.flags.bits(),
@@ -150,12 +133,7 @@ impl CConfig for CRootConfig {
         Ok(())
     }
 
-    fn apply(&self, ptr: &mut Self::ObjectInner) -> Result<(), Error> {
-        let root = ptr.inner.as_mut().context(error::InvalidArgument {
-            name: "ptr",
-            description: "invalid pathrs object",
-        })?;
-
+    fn apply(&self, root: &mut Self::ObjectInner) -> Result<(), Error> {
         root.resolver = Resolver {
             backend: self.resolver.into(),
             flags: ResolverFlags::from_bits(self.flags).context(error::InvalidArgument {
@@ -341,11 +319,18 @@ pub extern "C" fn pathrs_configure(
             }
             CPointerType::PATHRS_ROOT => {
                 let obj = CRootConfig::verify(ptr_type, ptr)?;
-                let mut obj_inner = obj.inner.lock().unwrap();
+                // XXX: This is ugly -- it's the only user of CRoot which needs
+                //      to touch root.inner directly (because we return a CError
+                //      rather than setting the error inside the CRoot).
+                let mut root = obj.inner.write().unwrap();
+                let mut root = root.as_mut().context(error::InvalidArgument {
+                    name: "ptr",
+                    description: "invalid pathrs object",
+                })?;
 
                 if !old_cfg_ptr.is_null() {
                     let mut old_cfg = CRootConfig::default();
-                    old_cfg.fetch(&obj_inner)?;
+                    old_cfg.fetch(&root)?;
                     copy_struct_out(&old_cfg, old_cfg_ptr, cfg_size)
                         .wrap("copy libpathrs config to caller old_cfg_ptr")?;
                 }
@@ -353,7 +338,7 @@ pub extern "C" fn pathrs_configure(
                     let mut new_cfg = CRootConfig::default();
                     copy_struct_in(&mut new_cfg, new_cfg_ptr, cfg_size)
                         .wrap("copy caller new_cfg_ptr to libpathrs config")?;
-                    new_cfg.apply(&mut obj_inner)?;
+                    new_cfg.apply(&mut root)?;
                 }
             }
             _ => {

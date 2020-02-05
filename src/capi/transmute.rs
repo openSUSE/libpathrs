@@ -29,7 +29,6 @@ use std::{
 };
 
 use libc::c_void;
-use snafu::OptionExt;
 
 /// Duplicate a file-based libpathrs object.
 ///
@@ -59,17 +58,9 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *const c_void) -
         CPointerType::PATHRS_NONE | CPointerType::PATHRS_ERROR => ptr::null_mut(),
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
-            let mut root = unsafe { &*(ptr as *const CRoot) }.inner.lock().unwrap();
-            let (inner, last_error) = root.get_inner();
-
-            last_error.wrap(ptr::null_mut(), move || {
-                inner
-                    .as_ref()
-                    .context(error::InvalidArgument {
-                        name: "ptr",
-                        description: "invalid pathrs object",
-                    })?
-                    .try_clone()
+            let root = unsafe { &*(ptr as *const CRoot) };
+            root.wrap_err(ptr::null_mut(), |root| {
+                root.try_clone()
                     .map(CRoot::from)
                     .map(Leakable::leak)
                     .map(|p| p as *const _ as *const c_void)
@@ -77,16 +68,9 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *const c_void) -
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
-            let mut handle = unsafe { &*(ptr as *const CHandle) }.inner.lock().unwrap();
-            let (inner, last_error) = handle.get_inner();
-
-            last_error.wrap(ptr::null_mut(), move || {
-                inner
-                    .as_ref()
-                    .context(error::InvalidArgument {
-                        name: "ptr",
-                        description: "invalid pathrs object",
-                    })?
+            let handle = unsafe { &*(ptr as *const CHandle) };
+            handle.wrap_err(ptr::null_mut(), |handle| {
+                handle
                     .try_clone()
                     .map(CHandle::from)
                     .map(Leakable::leak)
@@ -140,35 +124,13 @@ pub extern "C" fn pathrs_into_fd(ptr_type: CPointerType, ptr: *const c_void) -> 
         CPointerType::PATHRS_NONE | CPointerType::PATHRS_ERROR => -1,
         CPointerType::PATHRS_ROOT => {
             // SAFETY: See above.
-            let mut root = unsafe { &*(ptr as *const CRoot) }.inner.lock().unwrap();
-            let (inner, last_error) = root.get_mut_inner();
-
-            last_error.wrap(-1, move || {
-                Ok(inner
-                    .take()
-                    .context(error::InvalidArgument {
-                        name: "ptr",
-                        description: "invalid pathrs object",
-                    })?
-                    .into_file()
-                    .into_raw_fd())
-            })
+            let root = unsafe { &*(ptr as *const CRoot) };
+            root.take_wrap_err(-1, |root| Ok(root.into_file().into_raw_fd()))
         }
         CPointerType::PATHRS_HANDLE => {
             // SAFETY: See above.
-            let mut handle = unsafe { &*(ptr as *const CHandle) }.inner.lock().unwrap();
-            let (inner, last_error) = handle.get_mut_inner();
-
-            last_error.wrap(-1, move || {
-                Ok(inner
-                    .take()
-                    .context(error::InvalidArgument {
-                        name: "ptr",
-                        description: "invalid pathrs object",
-                    })?
-                    .into_file()
-                    .into_raw_fd())
-            })
+            let handle = unsafe { &*(ptr as *const CHandle) };
+            handle.take_wrap_err(-1, |handle| Ok(handle.into_file().into_raw_fd()))
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),
     }

@@ -17,7 +17,7 @@
  */
 
 use crate::{
-    capi::utils::{self, CHandle, CRoot, ErrorWrap, Leakable},
+    capi::utils::{self, CHandle, CRoot, Leakable},
     error, syscalls, InodeType, OpenFlags, RenameFlags, Root,
 };
 
@@ -30,7 +30,7 @@ use std::{
 };
 
 use libc::{c_char, c_int, c_uint, dev_t};
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 
 /// Open a root handle.
 ///
@@ -76,19 +76,9 @@ pub extern "C" fn pathrs_open(path: *const c_char) -> &'static mut CRoot {
 /// ioctl(fd, TIOCSCTTY, 0) yourself.
 #[no_mangle]
 pub extern "C" fn pathrs_reopen(handle: &CHandle, flags: c_int) -> RawFd {
-    let mut handle = handle.inner.lock().unwrap();
-    // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let (inner, last_error) = handle.get_inner();
-
-    last_error.wrap(-1, move || {
+    handle.wrap_err(-1, |handle| {
         let flags = OpenFlags(flags);
-        let file = inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "handle",
-                description: "invalid pathrs object",
-            })?
-            .reopen(flags)?;
+        let file = handle.reopen(flags)?;
         // Rust sets O_CLOEXEC by default, without an opt-out. We need to
         // disable it if we weren't asked to do O_CLOEXEC.
         if flags.0 & libc::O_CLOEXEC == 0 {
@@ -108,18 +98,8 @@ pub extern "C" fn pathrs_resolve(
     root: &CRoot,
     path: *const c_char,
 ) -> Option<&'static mut CHandle> {
-    let mut root = root.inner.lock().unwrap();
-    // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let (inner, last_error) = root.get_inner();
-
-    last_error.wrap(None, move || {
-        inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "root",
-                description: "invalid pathrs object",
-            })?
-            .resolve(utils::parse_path(path)?)
+    root.wrap_err(None, |root| {
+        root.resolve(utils::parse_path(path)?)
             .map(CHandle::from)
             .map(Leakable::leak)
             .map(Option::from)
@@ -136,19 +116,9 @@ pub extern "C" fn pathrs_rename(
     dst: *const c_char,
     flags: c_int,
 ) -> c_int {
-    let mut root = root.inner.lock().unwrap();
-    // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let (inner, last_error) = root.get_inner();
-
-    last_error.wrap(-1, move || {
+    root.wrap_err(-1, |root| {
         let flags = RenameFlags(flags);
-        inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "root",
-                description: "invalid pathrs object",
-            })?
-            .rename(utils::parse_path(src)?, utils::parse_path(dst)?, flags)
+        root.rename(utils::parse_path(src)?, utils::parse_path(dst)?, flags)
             .and(Ok(0))
     })
 }
@@ -165,20 +135,10 @@ pub extern "C" fn pathrs_creat(
     path: *const c_char,
     mode: c_uint,
 ) -> Option<&'static mut CHandle> {
-    let mut root = root.inner.lock().unwrap();
-    // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let (inner, last_error) = root.get_inner();
-
-    last_error.wrap(None, move || {
+    root.wrap_err(None, |root| {
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
-        inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "root",
-                description: "invalid pathrs object",
-            })?
-            .create_file(utils::parse_path(path)?, &perm)
+        root.create_file(utils::parse_path(path)?, &perm)
             .map(CHandle::from)
             .map(Leakable::leak)
             .map(Option::from)
@@ -199,11 +159,7 @@ pub extern "C" fn pathrs_mknod(
     mode: c_uint,
     dev: dev_t,
 ) -> c_int {
-    let mut root = root.inner.lock().unwrap();
-    // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let (inner, last_error) = root.get_inner();
-
-    last_error.wrap(-1, move || {
+    root.wrap_err(-1, |root| {
         let fmt = mode & libc::S_IFMT;
         let perms = Permissions::from_mode(mode ^ fmt);
         let path = utils::parse_path(path)?;
@@ -223,14 +179,7 @@ pub extern "C" fn pathrs_mknod(
             }
             .fail()?,
         };
-        inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "root",
-                description: "invalid pathrs object",
-            })?
-            .create(path, &inode_type)
-            .and(Ok(0))
+        root.create(path, &inode_type).and(Ok(0))
     })
 }
 
@@ -240,22 +189,10 @@ pub extern "C" fn pathrs_symlink(
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
-    let mut root = root.inner.lock().unwrap();
-    // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let (inner, last_error) = root.get_inner();
-
-    last_error.wrap(-1, move || {
+    root.wrap_err(-1, |root| {
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
-
-        inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "root",
-                description: "invalid pathrs object",
-            })?
-            .create(path, &InodeType::Symlink(target))
-            .and(Ok(0))
+        root.create(path, &InodeType::Symlink(target)).and(Ok(0))
     })
 }
 
@@ -265,21 +202,9 @@ pub extern "C" fn pathrs_hardlink(
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
-    let mut root = root.inner.lock().unwrap();
-    // Workaround for https://github.com/rust-lang/rust/issues/53488.
-    let (inner, last_error) = root.get_inner();
-
-    last_error.wrap(-1, move || {
+    root.wrap_err(-1, |root| {
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
-
-        inner
-            .as_ref()
-            .context(error::InvalidArgument {
-                name: "root",
-                description: "invalid pathrs object",
-            })?
-            .create(path, &InodeType::Hardlink(target))
-            .and(Ok(0))
+        root.create(path, &InodeType::Hardlink(target)).and(Ok(0))
     })
 }
