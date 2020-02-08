@@ -45,7 +45,7 @@ use libc::c_void;
 /// will store the error (which can be retrieved with pathrs_error). If the
 /// object type is not one of the permitted values above, the error is lost.
 #[no_mangle]
-pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *const c_void) -> *const c_void {
+pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *const c_void) -> *mut c_void {
     if ptr.is_null() {
         return ptr::null_mut();
     }
@@ -63,7 +63,7 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *const c_void) -
                 root.try_clone()
                     .map(CRoot::from)
                     .map(Leakable::leak)
-                    .map(|p| p as *const _ as *const c_void)
+                    .map(|p| p as *mut _ as *mut c_void)
             })
         }
         CPointerType::PATHRS_HANDLE => {
@@ -74,7 +74,7 @@ pub extern "C" fn pathrs_duplicate(ptr_type: CPointerType, ptr: *const c_void) -
                     .try_clone()
                     .map(CHandle::from)
                     .map(Leakable::leak)
-                    .map(|p| p as *const _ as *const c_void)
+                    .map(|p| p as *mut _ as *mut c_void)
             })
         }
         _ => panic!("invalid ptr_type: {:?}", ptr_type),

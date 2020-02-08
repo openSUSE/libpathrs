@@ -547,7 +547,7 @@ pub extern "C" fn pathrs_error(
 /// It is critical that the correct pathrs_type_t is provided for the given
 /// pointer (otherwise memory corruption will almost certainly occur).
 #[no_mangle]
-pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *mut c_void) {
+pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *const c_void) {
     if ptr.is_null() {
         return;
     }

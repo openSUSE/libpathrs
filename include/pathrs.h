@@ -253,7 +253,7 @@ pathrs_error_t *pathrs_configure(pathrs_type_t ptr_type,
                                  const void *new_cfg_ptr,
                                  uintptr_t cfg_size);
 
-pathrs_handle_t *pathrs_creat(pathrs_root_t *root,
+pathrs_handle_t *pathrs_creat(const pathrs_root_t *root,
                               const char *path,
                               unsigned int mode);
 
@@ -273,7 +273,7 @@ pathrs_handle_t *pathrs_creat(pathrs_root_t *root,
  * will store the error (which can be retrieved with pathrs_error). If the
  * object type is not one of the permitted values above, the error is lost.
  */
-const void *pathrs_duplicate(pathrs_type_t ptr_type, const void *ptr);
+void *pathrs_duplicate(pathrs_type_t ptr_type, const void *ptr);
 
 /**
  * Retrieve the error stored by a pathrs object.
@@ -289,7 +289,7 @@ const void *pathrs_duplicate(pathrs_type_t ptr_type, const void *ptr);
  * It is critical that the correct pathrs_type_t is provided for the given
  * pointer (otherwise memory corruption will almost certainly occur).
  */
-pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, void *ptr);
+pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, const void *ptr);
 
 /**
  * Free a libpathrs object.
@@ -297,7 +297,7 @@ pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, void *ptr);
  * It is critical that the correct pathrs_type_t is provided for the given
  * pointer (otherwise memory corruption will almost certainly occur).
  */
-void pathrs_free(pathrs_type_t ptr_type, void *ptr);
+void pathrs_free(pathrs_type_t ptr_type, const void *ptr);
 
 /**
  * Construct a new file-based libpathrs object from a file descriptor.
@@ -332,7 +332,9 @@ void pathrs_free(pathrs_type_t ptr_type, void *ptr);
  */
 void *pathrs_from_fd(pathrs_type_t fd_type, int fd);
 
-int pathrs_hardlink(pathrs_root_t *root, const char *path, const char *target);
+int pathrs_hardlink(const pathrs_root_t *root,
+                    const char *path,
+                    const char *target);
 
 /**
  * Unwrap a file-based libpathrs object to obtain its underlying file
@@ -367,9 +369,11 @@ int pathrs_hardlink(pathrs_root_t *root, const char *path, const char *target);
  */
 int pathrs_into_fd(pathrs_type_t ptr_type, const void *ptr);
 
-int pathrs_mkdir(pathrs_root_t *root, const char *path, unsigned int mode);
+int pathrs_mkdir(const pathrs_root_t *root,
+                 const char *path,
+                 unsigned int mode);
 
-int pathrs_mknod(pathrs_root_t *root,
+int pathrs_mknod(const pathrs_root_t *root,
                  const char *path,
                  unsigned int mode,
                  dev_t dev);
@@ -405,7 +409,7 @@ pathrs_root_t *pathrs_open(const char *path);
  * scoped to the root). The flags argument is identical to the renameat2(2)
  * flags that are supported on the system.
  */
-int pathrs_rename(pathrs_root_t *root,
+int pathrs_rename(const pathrs_root_t *root,
                   const char *src,
                   const char *dst,
                   int flags);
@@ -432,7 +436,9 @@ int pathrs_reopen(const pathrs_handle_t *handle, int flags);
  */
 pathrs_handle_t *pathrs_resolve(const pathrs_root_t *root, const char *path);
 
-int pathrs_symlink(pathrs_root_t *root, const char *path, const char *target);
+int pathrs_symlink(const pathrs_root_t *root,
+                   const char *path,
+                   const char *target);
 
 #endif /* LIBPATHRS_H */
 
