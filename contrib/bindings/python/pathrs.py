@@ -29,14 +29,33 @@ DEFAULT_RESOLVER = {
 	"emulated": libpathrs_so.PATHRS_EMULATED_RESOLVER,
 }.get(os.environ.get("PATHRS_RESOLVER"))
 
-def cstr(pystr):
+def _cstr(pystr):
 	return ffi.new("char[]", pystr.encode("utf8"))
 
-def pystr(cstr):
+def _pystr(cstr):
 	return ffi.string(cstr).decode("utf8")
 
-def pyptr(cptr):
+def _pyptr(cptr):
 	return int(ffi.cast("uintptr_t", cptr))
+
+def _into_fd(typ, inner):
+	fd = libpathrs_so.pathrs_into_fd(typ, inner)
+	if fd < 0:
+		raise Error.fetch(typ, inner)
+	return fd
+
+def _from_fd(typ, fd):
+	inner = libpathrs_so.pathrs_from_fd(typ, fd)
+	if inner == ffi.NULL:
+		# This should never actually happen.
+		raise Error("pathrs_handle allocation failed")
+
+	# If there was an error in pathrs_from_fd, we find out now.
+	err = Error.fetch(typ, inner)
+	if err:
+		raise err
+	return inner
+
 
 class Error(Exception):
 	def __init__(self, message, *_, errno=None, backtrace=None):
@@ -63,7 +82,7 @@ class Error(Exception):
 		if err == ffi.NULL:
 			return None
 
-		description = pystr(err.description)
+		description = _pystr(err.description)
 		errno = err.saved_errno or None
 		backtrace = Backtrace(err.backtrace) or None
 
@@ -96,20 +115,21 @@ class Error(Exception):
 				print("  %s" % (entry,), file=out)
 				if entry.symbol.file is not None:
 					print("    in file '%s':%d" % (entry.symbol.file, entry.symbol.lineno), file=out)
+CLOSED_OBJECT = Error("cannot operate on closed libpathrs object")
 
 
 class BacktraceSymbol(object):
 	def __init__(self, c_entry):
-		self.address = pyptr(c_entry.symbol_address)
+		self.address = _pyptr(c_entry.symbol_address)
 
 		self.name = None
 		if c_entry.symbol_name != ffi.NULL:
-			self.name = pystr(c_entry.symbol_name)
+			self.name = _pystr(c_entry.symbol_name)
 
 		self.file = None
 		self.lineno = None
 		if c_entry.symbol_file != ffi.NULL:
-			self.file = pystr(c_entry.symbol_file)
+			self.file = _pystr(c_entry.symbol_file)
 			self.lineno = c_entry.symbol_lineno
 
 	def __str__(self):
@@ -121,7 +141,7 @@ class BacktraceSymbol(object):
 
 class BacktraceEntry(object):
 	def __init__(self, c_entry):
-		self.ip = pyptr(c_entry.ip)
+		self.ip = _pyptr(c_entry.ip)
 		self.symbol = BacktraceSymbol(c_entry)
 
 	def __str__(self):
@@ -146,8 +166,12 @@ class Handle(object):
 		self._type = libpathrs_so.PATHRS_HANDLE
 		self._inner = handle
 
+	def _error(self):
+		return Error.fetch(self._type, self._inner)
+
 	def __del__(self):
-		libpathrs_so.pathrs_free(self._type, self._inner)
+		if self._inner is not None:
+			libpathrs_so.pathrs_free(self._type, self._inner)
 
 	def __copy__(self):
 		# "Shallow copy" makes no sense since we are using FFI resources.
@@ -156,7 +180,7 @@ class Handle(object):
 	def __deepcopy__(self, memo):
 		new_inner = libpathrs_so.pathrs_duplicate(self._type, self._inner)
 		if new_inner == ffi.NULL:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 		# Construct a new Root without going through __init__.
 		cls = self.__class__
 		new = cls.__new__(cls)
@@ -164,8 +188,13 @@ class Handle(object):
 		new._inner = new_inner
 		return new
 
-	def _error(self):
-		return Error.fetch(self._type, self._inner)
+	@classmethod
+	def from_raw_fd(cls, fd):
+		inner = _from_fd(libpathrs_so.PATHRS_HANDLE, fd)
+		return cls(inner)
+
+	def into_raw_fd(self):
+		return _into_fd(self._type, self._inner)
 
 	# XXX: This is _super_ ugly but so is the one in CPython.
 	@staticmethod
@@ -209,7 +238,7 @@ class Handle(object):
 		flags = self._convert_mode(mode) | extra_flags
 		fd = libpathrs_so.pathrs_reopen(self._inner, flags)
 		if fd < 0:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 		try:
 			return os.fdopen(fd, mode)
 		except Exception as e:
@@ -218,8 +247,8 @@ class Handle(object):
 
 
 class Root(object):
-	def __init__(self, path, resolver=None):
-		path = cstr(path)
+	def __init__(self, path, resolver=DEFAULT_RESOLVER):
+		path = _cstr(path)
 		self._type = libpathrs_so.PATHRS_ROOT
 		self._inner = libpathrs_so.pathrs_open(path)
 		if self._inner == ffi.NULL:
@@ -232,13 +261,16 @@ class Root(object):
 			raise err
 
 		# Switch resolvers if requested.
-		if DEFAULT_RESOLVER is not None:
+		if resolver is not None:
 			new_config = ffi.new("pathrs_config_root_t *")
-			new_config.resolver = DEFAULT_RESOLVER
+			new_config.resolver = resolver
 
 			err = libpathrs_so.pathrs_configure(self._type, self._inner, ffi.NULL, new_config, ffi.sizeof(new_config))
 			if err:
-				raise self._error()
+				raise self._error() or CLOSED_OBJECT
+
+	def _error(self):
+		return Error.fetch(self._type, self._inner)
 
 	def __del__(self):
 		if self._inner is not None:
@@ -251,7 +283,7 @@ class Root(object):
 	def __deepcopy__(self, memo):
 		new_inner = libpathrs_so.pathrs_duplicate(self._type, self._inner)
 		if new_inner == ffi.NULL:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 		# Construct a new Root without going through __init__.
 		cls = self.__class__
 		new = cls.__new__(cls)
@@ -259,52 +291,57 @@ class Root(object):
 		new._inner = new_inner
 		return new
 
-	def _error(self):
-		return Error.fetch(self._type, self._inner)
+	@classmethod
+	def from_raw_fd(cls, fd):
+		inner = _from_fd(libpathrs_so.PATHRS_ROOT, fd)
+		return cls(inner)
+
+	def into_raw_fd(self):
+		return _into_fd(self._type, self._inner)
 
 	def resolve(self, path):
-		path = cstr(path)
+		path = _cstr(path)
 		handle = libpathrs_so.pathrs_resolve(self._inner, path)
 		if handle == ffi.NULL:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 		return Handle(handle)
 
 	def rename(self, src, dst, flags=0):
-		src = cstr(src)
-		dst = cstr(dst)
+		src = _cstr(src)
+		dst = _cstr(dst)
 		err = libpathrs_so.pathrs_rename(self._inner, src, dst, flags)
 		if err < 0:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 
 	def creat(self, path, mode):
-		path = cstr(path)
+		path = _cstr(path)
 		handle = libpathrs_so.pathrs_creat(self._inner, path, mode)
 		if handle == ffi.NULL:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 		return Handle(handle)
 
 	def mkdir(self, path, mode):
-		path = cstr(path)
+		path = _cstr(path)
 		err = libpathrs_so.pathrs_mkdir(self._inner, path, mode)
 		if err < 0:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 
 	def mknod(self, path, mode, dev):
-		path = cstr(path)
+		path = _cstr(path)
 		err = libpathrs_so.pathrs_mknod(self._inner, path, mode, dev)
 		if err < 0:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 
 	def hardlink(self, path, target):
-		path = cstr(path)
-		target = cstr(target)
+		path = _cstr(path)
+		target = _cstr(target)
 		err = libpathrs_so.pathrs_hardlink(self._inner, path, target)
 		if err < 0:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
 
 	def symlink(self, path, target):
-		path = cstr(path)
-		target = cstr(target)
+		path = _cstr(path)
+		target = _cstr(target)
 		err = libpathrs_so.pathrs_symlink(self._inner, path, target)
 		if err < 0:
-			raise self._error()
+			raise self._error() or CLOSED_OBJECT
