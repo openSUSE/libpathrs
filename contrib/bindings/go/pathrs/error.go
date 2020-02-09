@@ -104,9 +104,11 @@ func newError(e *C.pathrs_error_t) error {
 }
 
 func fetchError(obj pathrsObject) error {
-	obj.get()
-	err := C.pathrs_error(obj.inner())
-	defer C.pathrs_free(C.PATHRS_ERROR, unsafe.Pointer(err))
-	obj.put()
-	return newError(err)
+	// NOTE: This will recursively lock the object in most code-paths. But as
+	//       long as this is effectively an RW-lock we shouldn't hit deadlocks.
+	return obj.withInner(func(_ pathrsObject) error {
+		err := C.pathrs_error(obj.inner())
+		defer C.pathrs_free(C.PATHRS_ERROR, unsafe.Pointer(err))
+		return newError(err)
+	})
 }
