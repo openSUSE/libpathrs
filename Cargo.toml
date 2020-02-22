@@ -16,7 +16,7 @@
 
 [package]
 name = "pathrs"
-version = "0.0.2"
+version = "0.0.2+dev"
 license = "LGPL-3.0-or-later"
 authors = ["Aleksa Sarai <cyphar@cyphar.com>"]
 
