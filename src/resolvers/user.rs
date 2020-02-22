@@ -137,11 +137,13 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // if we hit an absolute symlink.
     let mut current = root.try_clone_hotfix().wrap("dup root as starting point")?;
 
-    // Get initial set of components from the passed path. We remove  all components
-    let mut components: VecDeque<_> = path
+    // Get initial set of components from the passed path. We remove components
+    // as we do the path walk, and update them with the contents of any symlinks
+    // we encounter. Path walking terminates when there are no components left.
+    let mut components = path
         .components()
         .map(|p| PathBuf::from(p.as_os_str()))
-        .collect();
+        .collect::<VecDeque<_>>();
 
     let mut symlink_traversals = 0;
     while let Some(part) = components.pop_front() {
