@@ -24,13 +24,13 @@ rust:
 matrix:
   include:
   - name: "rust-fmt"
-    rust: 1.41.0
+    rust: 1.44.1
     install:
       - rustup component add rustfmt-preview
     script:
       - cargo fmt -- --check
   - name: "rust-clippy"
-    rust: 1.41.0
+    rust: 1.44.1
     install:
       - rustup component add clippy-preview
     script:
