@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2020 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2020 SUSE LLC
+ * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2021 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
