@@ -214,7 +214,7 @@ pub enum Error {
         oldpath: PathBuf,
         newdirfd: FrozenFd,
         newpath: PathBuf,
-        flags: i32,
+        flags: u32,
         source: IOError,
         backtrace: Backtrace,
     },
@@ -580,7 +580,7 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
     oldpath: P,
     newdirfd: RawFd,
     newpath: P,
-    flags: i32,
+    flags: u32,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.

@@ -114,7 +114,7 @@ pub extern "C" fn pathrs_rename(
     root: &CRoot,
     src: *const c_char,
     dst: *const c_char,
-    flags: c_int,
+    flags: u32,
 ) -> c_int {
     root.wrap_err(-1, |root| {
         let flags = RenameFlags(flags);

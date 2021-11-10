@@ -32,7 +32,7 @@ use std::{
     path::Path,
 };
 
-use libc::{c_int, dev_t};
+use libc::dev_t;
 use snafu::{OptionExt, ResultExt};
 
 /// An inode type to be created with [`Root::create`].
@@ -134,7 +134,7 @@ fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
 /// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
 // TODO: Switch to bitflags!.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RenameFlags(pub c_int);
+pub struct RenameFlags(pub u32);
 
 impl RenameFlags {
     /// Is this set of RenameFlags supported by the running kernel?
