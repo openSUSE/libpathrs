@@ -580,7 +580,7 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
     oldpath: P,
     newdirfd: RawFd,
     newpath: P,
-    flags: u32,
+    flags: libc::c_uint,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
