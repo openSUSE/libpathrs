@@ -86,7 +86,7 @@ pub(crate) trait Leakable {
 /// of the Rust compiler (you cannot have default trait methods that use Self
 /// directly, because the size of Self is not known by the trait).
 ///
-/// ```
+/// ```ignore
 /// leakable!{ impl Leakable for CError; }
 /// leakable!{ impl<T> Leakable for CVec<T>; }
 /// ```
