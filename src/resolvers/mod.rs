@@ -18,7 +18,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{error::Error, syscalls::unstable, Handle};
+use crate::{error::Error, Handle};
 
 use std::{fs::File, path::Path};
 
@@ -33,7 +33,7 @@ bitflags! {
     /// [`Root`]: struct.Root.html
     #[derive(Default)]
     pub struct ResolverFlags: u64 {
-        const NO_SYMLINKS = unstable::RESOLVE_NO_SYMLINKS;
+        const NO_SYMLINKS = libc::RESOLVE_NO_SYMLINKS;
     }
 }
 

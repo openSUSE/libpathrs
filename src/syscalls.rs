@@ -121,7 +121,7 @@ pub enum Error {
     Openat2 {
         dirfd: FrozenFd,
         path: PathBuf,
-        how: unstable::OpenHow,
+        how: OpenHow,
         size: usize,
         source: IOError,
         backtrace: Backtrace,
@@ -661,95 +661,60 @@ pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Err
     }
 }
 
-/// WARNING: The ABI for this syscall is still being ironed out upstream. This
-/// will almost certainly not work on your machine, and may cause other problems
-/// depending on what syscall is using the syscall number this code will call.
-pub(crate) mod unstable {
-    use super::*;
+/// Arguments for how `openat2` should open the target path.
+// TODO: Maybe switch to libc::open_how?
+#[repr(C)]
+#[derive(Clone, Debug, Default)]
+pub struct OpenHow {
+    /// O_* flags (`-EINVAL` on unknown or incompatible flags).
+    pub flags: u64,
+    /// O_CREAT or O_TMPFILE file mode (must be zero otherwise).
+    pub mode: u64,
+    /// RESOLVE_* flags (`-EINVAL` on unknown flags).
+    pub resolve: u64,
+}
 
-    /// Arguments for how `openat2` should open the target path.
-    #[repr(C)]
-    #[derive(Clone, Debug, Default)]
-    pub struct OpenHow {
-        /// O_* flags (`-EINVAL` on unknown or incompatible flags).
-        pub flags: u64,
-        /// O_CREAT or O_TMPFILE file mode (must be zero otherwise).
-        pub mode: u64,
-        /// RESOLVE_* flags (`-EINVAL` on unknown flags).
-        pub resolve: u64,
-    }
-
-    /// `sizeof(struct open_how)` to be passed to `openat2(2)` to allow for
-    /// backwards and forwards compatbility with syscall extensions.
-    const OPEN_HOW_SIZE: usize = std::mem::size_of::<OpenHow>();
-
-    impl fmt::Display for OpenHow {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            // self.flags
-            write!(f, "{{ flags: 0x{:x}, ", self.flags)?;
-            if self.flags & (libc::O_CREAT | libc::O_TMPFILE) as u64 != 0 {
-                write!(f, "mode: 0o{:o}, ", self.mode)?;
-            }
-            // self.resolve
-            write!(f, "resolve: 0x{:x} }}", self.resolve)
+impl fmt::Display for OpenHow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // self.flags
+        write!(f, "{{ flags: 0x{:x}, ", self.flags)?;
+        if self.flags & (libc::O_CREAT | libc::O_TMPFILE) as u64 != 0 {
+            write!(f, "mode: 0o{:o}, ", self.mode)?;
         }
+        // self.resolve
+        write!(f, "resolve: 0x{:x} }}", self.resolve)
     }
+}
 
-    /// Block mount-point crossings (including bind-mounts).
-    #[allow(unused)]
-    pub const RESOLVE_NO_XDEV: u64 = 0x01;
+pub fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<File, Error> {
+    let path = path.as_ref();
 
-    /// Block traversal through procfs-style "magic links".
-    #[allow(unused)]
-    pub const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+    // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
+    // RESOLVE_IN_ROOT handles that correctly in a race-free way.
+    let mut how = how.clone();
+    how.flags |= libc::O_CLOEXEC as u64;
 
-    /// Block traversal through all symlinks (implies RESOLVE_NO_MAGICLINKS).
-    #[allow(unused)]
-    pub const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+    // SAFETY: Obviously safe-to-use Linux syscall.
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            dirfd,
+            path.to_c_string().as_ptr(),
+            &how as *const OpenHow,
+            std::mem::size_of::<OpenHow>(),
+        )
+    } as RawFd;
+    let err = IOError::last_os_error();
 
-    /// Block "lexical" trickery like "..", symlinks-to-"/", and absolute paths
-    /// which escape the dirfd.
-    #[allow(unused)]
-    pub const RESOLVE_BENEATH: u64 = 0x08;
-
-    /// Make all jumps to "/" or ".." be scoped inside the dirfd (similar to
-    /// `chroot`).
-    #[allow(unused)]
-    pub const RESOLVE_IN_ROOT: u64 = 0x10;
-
-    #[allow(non_upper_case_globals)]
-    const SYS_openat2: i64 = 437;
-
-    pub fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<File, Error> {
-        let path = path.as_ref();
-
-        // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
-        // RESOLVE_IN_ROOT handles that correctly in a race-free way.
-        let mut how = how.clone();
-        how.flags |= libc::O_CLOEXEC as u64;
-
-        // SAFETY: Obviously safe-to-use Linux syscall.
-        let fd = unsafe {
-            libc::syscall(
-                SYS_openat2,
-                dirfd,
-                path.to_c_string().as_ptr(),
-                &how as *const OpenHow,
-                OPEN_HOW_SIZE,
-            )
-        } as RawFd;
-        let err = IOError::last_os_error();
-
-        if fd >= 0 {
-            // SAFETY: We know it's a real file descriptor.
-            Ok(unsafe { File::from_raw_fd(fd) })
-        } else {
-            Err(err).context(Openat2 {
-                dirfd,
-                path,
-                how,
-                size: OPEN_HOW_SIZE,
-            })
-        }
+    if fd >= 0 {
+        // SAFETY: We know it's a real file descriptor.
+        Ok(unsafe { File::from_raw_fd(fd) })
+    } else {
+        Err(err).context(Openat2 {
+            dirfd,
+            path,
+            how,
+            size: std::mem::size_of::<OpenHow>(),
+        })
     }
 }

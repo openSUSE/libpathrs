@@ -19,8 +19,7 @@
 use crate::{
     error::{self, Error, ErrorExt},
     resolvers::{self, ResolverFlags},
-    syscalls::unstable,
-    Handle,
+    syscalls, Handle,
 };
 
 use std::{fs::File, os::unix::io::AsRawFd, path::Path};
@@ -29,7 +28,7 @@ use snafu::ResultExt;
 
 lazy_static! {
     pub(crate) static ref IS_SUPPORTED: bool =
-        unstable::openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
+        syscalls::openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
 }
 
 /// Resolve `path` within `root` through `openat2(2)`.
@@ -40,13 +39,13 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 ) -> Result<Handle, Error> {
     ensure!(*IS_SUPPORTED, error::NotSupported { feature: "openat2" });
 
-    let mut how = unstable::OpenHow::default();
+    let mut how = syscalls::OpenHow::default();
     how.flags = libc::O_PATH as u64;
     // RESOLVE_IN_ROOT does exactly what we want, but we also want to avoid
     // resolving magic-links. RESOLVE_IN_ROOT already blocks magic-link
     // crossings, but that may change in the future (if the magic-links are
     // considered "safe") but we should still explicitly avoid them entirely.
-    how.resolve = unstable::RESOLVE_IN_ROOT | unstable::RESOLVE_NO_MAGICLINKS | flags.bits;
+    how.resolve = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | flags.bits;
 
     // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
     // *anywhere on the system*. This can happen pretty frequently, so what we
@@ -54,7 +53,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // userspace emulation.
     let mut handle: Option<File> = None;
     for _ in 0..16 {
-        match unstable::openat2(root.as_raw_fd(), path.as_ref(), &how) {
+        match syscalls::openat2(root.as_raw_fd(), path.as_ref(), &how) {
             Ok(file) => {
                 handle = Some(file);
                 break;
