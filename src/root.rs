@@ -23,7 +23,7 @@ use crate::{
     resolvers::Resolver,
     syscalls,
     utils::RawFdExt,
-    Handle,
+    Handle, OpenFlags,
 };
 
 use std::{
@@ -371,6 +371,7 @@ impl Root {
     pub fn create_file<P: AsRef<Path>>(
         &self,
         path: P,
+        flags: OpenFlags,
         perm: &Permissions,
     ) -> Result<Handle, Error> {
         // Get a handle for the lexical parent of the target path. It must
@@ -385,14 +386,14 @@ impl Root {
         let dirfd = dir.as_raw_fd();
 
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
-        //      O_NOFOLLOW. We might want to expose that here, though because it
-        //      can't be done with the emulated backend that might be a bad
-        //      idea.
-        let file = syscalls::openat(dirfd, name, libc::O_CREAT | libc::O_EXCL, perm.mode())
-            .context(error::RawOsError {
+        // O_NOFOLLOW. We might want to expose that here, though because it
+        // can't be done with the emulated backend that might be a bad idea.
+        let flags = flags.0 | libc::O_CREAT;
+        let file =
+            syscalls::openat(dirfd, name, flags, perm.mode()).context(error::RawOsError {
                 operation: "pathrs create_file",
             })?;
-        // TODO: We should probably turn this to an `O_PATH`...
+
         Ok(Handle::from_file_unchecked(file))
     }
 

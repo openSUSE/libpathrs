@@ -197,11 +197,17 @@ int pathrs_rename(int root_fd,
 
 /**
  * Create a new regular file within the rootfs referenced by root_fd. This is
- * effectively an O_CREAT|O_EXCL operation, and so (unlike pathrs_resolve()),
- * this function can be used on non-existent paths.
+ * effectively an O_CREAT operation, and so (unlike pathrs_resolve()), this
+ * function can be used on non-existent paths.
+ *
+ * If you want to ensure the creation is a new file, use O_EXCL.
  *
  * If you want to create a file without opening a handle to it, you can do
  * pathrs_mknod(root_fd, path, S_IFREG|mode, 0) instead.
+ *
+ * As with pathrs_reopen(), O_NOCTTY is automatically set when opening the
+ * path. If you want to use the path as a controlling terminal, you will have
+ * to do ioctl(fd, TIOCSCTTY, 0) yourself.
  *
  * NOTE: Unlike O_CREAT, pathrs_creat() will return an error if the final
  * component is a dangling symlink. O_CREAT will create such files, and while
@@ -211,13 +217,14 @@ int pathrs_rename(int root_fd,
  * # Return Value
  *
  * On success, this function returns a file descriptor to the requested file.
+ * The open flags are based on the provided flags.
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_creat(int root_fd, const char *path, unsigned int mode);
+int pathrs_creat(int root_fd, const char *path, int flags, unsigned int mode);
 
 /**
  * Create a new directory within the rootfs referenced by root_fd.
