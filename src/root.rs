@@ -287,12 +287,6 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
-        // Use create_file if that's the inode_type. We drop the File returned
-        // (it was free to create anyway because we used openat(2)).
-        if let InodeType::File(perm) = inode_type {
-            return self.create_file(path, perm).map(|_| ());
-        }
-
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
@@ -305,7 +299,10 @@ impl Root {
         let dirfd = dir.as_raw_fd();
 
         match inode_type {
-            InodeType::File(_) => unreachable!(), /* We dealt with this above. */
+            InodeType::File(perm) => {
+                let mode = perm.mode() & !libc::S_IFMT;
+                syscalls::mknodat(dirfd, name, libc::S_IFREG | mode, 0)
+            }
             InodeType::Directory(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
                 syscalls::mkdirat(dirfd, name, mode)
