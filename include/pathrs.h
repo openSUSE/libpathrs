@@ -39,59 +39,6 @@
 #include <sys/types.h>
 
 /**
- * The type of object being passed to "object agnostic" libpathrs functions.
- */
-typedef enum {
-    __PATHRS_INVALID_TYPE = 0,
-    /**
-     * NULL.
-     */
-    PATHRS_NONE = 57343,
-    /**
-     * `pathrs_error_t`
-     */
-    PATHRS_ERROR = 57344,
-    /**
-     * `pathrs_root_t`
-     */
-    PATHRS_ROOT = 57345,
-    /**
-     * `pathrs_handle_t`
-     */
-    PATHRS_HANDLE = 57346,
-} pathrs_type_t;
-
-/**
- * The backend used for path resolution within a `pathrs_root_t` to get a
- * `pathrs_handle_t`. Can be used with `pathrs_configure()` to change the
- * resolver for a `pathrs_root_t`.
- */
-enum pathrs_resolver_t {
-    __PATHRS_INVALID_RESOLVER = 0,
-    /**
-     * Use the native openat2(2) backend (requires kernel support).
-     */
-    PATHRS_KERNEL_RESOLVER = 61440,
-    /**
-     * Use the userspace "emulated" backend.
-     */
-    PATHRS_EMULATED_RESOLVER = 61441,
-};
-typedef uint64_t pathrs_resolver_t;
-
-/**
- * This is only exported to work around a Rust compiler restriction. Consider
- * it an implementation detail and don't make use of it.
- */
-typedef struct __pathrs_handle_t __pathrs_handle_t;
-
-/**
- * This is only exported to work around a Rust compiler restriction. Consider
- * it an implementation detail and don't make use of it.
- */
-typedef struct __pathrs_root_t __pathrs_root_t;
-
-/**
  * Represents a single entry in a Rust backtrace in C. This structure is
  * owned by the relevant `pathrs_error_t`.
  */
@@ -147,7 +94,7 @@ typedef __pathrs_backtrace_t pathrs_backtrace_t;
 
 /**
  * Attempts to represent a Rust Error type in C. This structure must be freed
- * using `pathrs_free(PATHRS_ERROR)`.
+ * using pathrs_errorinfo_free().
  */
 typedef struct __CBINDGEN_ALIGNED(8) {
     /**
@@ -167,282 +114,218 @@ typedef struct __CBINDGEN_ALIGNED(8) {
 } pathrs_error_t;
 
 /**
- * A handle to a path within a given Root. This handle references an
- * already-resolved path which can be used for only one purpose -- to "re-open"
- * the handle and get an actual fs::File which can be used for ordinary
- * operations.
- *
- * It is critical for the safety of users of this library that *at no point* do
- * you use interfaces like libc::openat directly on file descriptors you get
- * from using this library (or extract the RawFd from a fs::File). You must
- * always use operations through a Root.
- */
-typedef __pathrs_handle_t pathrs_handle_t;
-
-/**
- * A handle to the root of a directory tree to resolve within. The only purpose
- * of this "root handle" is to get Handles to inodes within the directory tree.
- *
- * At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
- * inside a possibly-attacker-controlled directory tree. While we do have
- * protections that should defend against it (for both drivers), it's far more
- * dangerous than just opening a directory tree which is not inside a
- * potentially-untrusted directory.
- */
-typedef __pathrs_root_t pathrs_root_t;
-
-/**
- * Global configuration for pathrs, for use with
- *    `pathrs_configure(PATHRS_NONE, NULL)`
- */
-typedef struct __CBINDGEN_ALIGNED(8) {
-    /**
-     * Sets whether backtraces will be generated for errors. This is a global
-     * setting, and defaults to **disabled** for release builds of libpathrs
-     * (but is **enabled** for debug builds).
-     */
-    bool error_backtraces;
-    /**
-     * Extra padding fields -- must be set to zero.
-     */
-    uint8_t __padding[7];
-} pathrs_config_global_t;
-
-/**
- * Configuration for a specific `pathrs_root_t`, for use with
- *    `pathrs_configure(PATHRS_ROOT, <root>)`
- */
-typedef struct __CBINDGEN_ALIGNED(8) {
-    /**
-     * Resolver used for all resolution under this `pathrs_root_t`.
-     */
-    pathrs_resolver_t resolver;
-    /**
-     * Flags to pass to resolver. These must be valid `RESOLVE_*` flags. At
-     * time of writing, only `RESOLVE_NO_SYMLINKS` is supported.
-     */
-    uint64_t flags;
-} pathrs_config_root_t;
-
-/**
- * Configure pathrs and its objects and fetch the current configuration.
- *
- * Given a (ptr_type, ptr) combination the provided @new_ptr configuration will
- * be applied, while the previous configuration will be stored in @old_ptr.
- *
- * If @new_ptr is NULL the active configuration will be unchanged (but @old_ptr
- * will be filled with the active configuration). Similarly, if @old_ptr is
- * NULL the active configuration will be changed but the old configuration will
- * not be stored anywhere. If both are NULL, the operation is a no-op.
- *
- * Only certain objects can be configured with pathrs_configure():
- *
- *   * PATHRS_NONE (@ptr == NULL), with pathrs_config_global_t.
- *   * PATHRS_ROOT, with pathrs_config_root_t.
- *
- * The caller *must* set @cfg_size to the sizeof the configuration type being
- * passed. This is used for backwards and forward compatibility (similar to the
- * openat2(2) and similar syscalls).
- *
- * For all other types, a pathrs_error_t will be returned (and as usual, it is
- * up to the caller to pathrs_free it).
- */
-pathrs_error_t *pathrs_configure(pathrs_type_t ptr_type,
-                                 void *ptr,
-                                 void *old_cfg_ptr,
-                                 const void *new_cfg_ptr,
-                                 uintptr_t cfg_size);
-
-pathrs_handle_t *pathrs_creat(const pathrs_root_t *root,
-                              const char *path,
-                              unsigned int mode);
-
-/**
- * Duplicate a file-based libpathrs object.
- *
- * The new object will have a separate lifetime from the original, but will
- * refer to the same underlying file (and contain the same configuration, if
- * applicable).
- *
- * Only certain objects can be duplicated with pathrs_duplicate():
- *
- *   * PATHRS_ROOT, with pathrs_root_t.
- *   * PATHRS_HANDLE, with pathrs_handle_t.
- *
- * If an error occurs, NULL is returned. The object passed with this request
- * will store the error (which can be retrieved with pathrs_error). If the
- * object type is not one of the permitted values above, the error is lost.
- */
-void *pathrs_duplicate(pathrs_type_t ptr_type, const void *ptr);
-
-/**
- * Retrieve the error stored by a pathrs object.
- *
- * Whenever an error occurs during an operation on a pathrs object, the object
- * will store the error for retrieval with pathrs_error(). Note that performing
- * any subsequent operations will clear the stored error -- so the error must
- * immediately be fetched by the caller.
- *
- * If there is no error associated with the object, NULL is returned (thus you
- * can safely check for whether an error occurred with pathrs_error).
- *
- * It is critical that the correct pathrs_type_t is provided for the given
- * pointer (otherwise memory corruption will almost certainly occur).
- */
-pathrs_error_t *pathrs_error(pathrs_type_t ptr_type, const void *ptr);
-
-/**
- * Free a libpathrs object.
- *
- * It is critical that the correct pathrs_type_t is provided for the given
- * pointer (otherwise memory corruption will almost certainly occur).
- */
-void pathrs_free(pathrs_type_t ptr_type, const void *ptr);
-
-/**
- * Construct a new file-based libpathrs object from a file descriptor.
- *
- * The main purpose of this interface (combined with pathrs_into_fd) is to
- * allow for libpathrs objects to be passed to other processes through Unix
- * sockets (with SCM_RIGHTS) or other such tricks. The underlying file
- * descriptor of such an object can be thought of as the "serialised" version
- * of the object, and this method effectively "de-serialises" it.
- *
- * Note that libpathrs will duplicate the file descriptor passed to it (in
- * order to avoid higher-level language runtimes from accidentally closing the
- * file descriptor). The caller must therefore close the file descriptor passed
- * if they no longer require it after this call.
- *
- * Only certain objects can be constructed from file descriptors with
- * pathrs_from_fd():
- *
- *   * PATHRS_ROOT, producing a pathrs_root_t.
- *     (NOTE: The configuration will be the system default.)
- *   * PATHRS_HANDLE, producing a pathrs_handle_t.
- *
- * It is critical that the file descriptor provided has the same semantics as
- * file descriptors which libpathrs would generate itself. This usually means
- * that you should only ever call pathrs_from_fd() with a file descriptor that
- * originally came from pathrs_into_fd().
- *
- * If an error occurs, an object of the requested type is returned containing
- * the error (which can be retrieved with pathrs_error) -- as with pathrs_open.
- * If the object type requested is not one of the permitted values above, NULL
- * is returned.
- */
-void *pathrs_from_fd(pathrs_type_t fd_type, int fd);
-
-int pathrs_hardlink(const pathrs_root_t *root,
-                    const char *path,
-                    const char *target);
-
-/**
- * Unwrap a file-based libpathrs object to obtain its underlying file
- * descriptor.
- *
- * The main purpose of this interface (combined with pathrs_from_fd) is to
- * allow for libpathrs objects to be passed to other processes through Unix
- * sockets (with SCM_RIGHTS) or other such tricks. The underlying file
- * descriptor of such an object can be thought of as the "serialised" version
- * of the object.
- *
- * This consumes the original object, and it is the caller's responsibility to
- * close the file descriptor (with close) or otherwise handle its lifetime.
- *
- * Only certain objects can be converted into file descriptors with
- * pathrs_into_fd():
- *
- *   * PATHRS_ROOT, with pathrs_root_t.
- *   * PATHRS_HANDLE, with pathrs_handle_t.
- *
- * It is critical that you do not operate on this file descriptor yourself,
- * because the security properties of libpathrs depend on users doing all
- * relevant filesystem operations through libpathrs.
- *
- * If an error occurs, -1 is returned. You may retrieve the error by calling
- * pathrs_error on the passed object (as long as the object is one of the
- * permitted ones listed above).
- *
- * If an error occurs, -1 is returned. The object passed with this request will
- * store the error (which can be retrieved with pathrs_error). If the object
- * type is not one of the permitted values above, the error is lost.
- */
-int pathrs_into_fd(pathrs_type_t ptr_type, const void *ptr);
-
-int pathrs_mkdir(const pathrs_root_t *root,
-                 const char *path,
-                 unsigned int mode);
-
-int pathrs_mknod(const pathrs_root_t *root,
-                 const char *path,
-                 unsigned int mode,
-                 dev_t dev);
-
-/**
  * Open a root handle.
- *
- * The default resolver is automatically chosen based on the running kernel.
- * You can switch the resolver used with pathrs_configure() -- though this
- * is not strictly recommended unless you have a good reason to do it.
  *
  * The provided path must be an existing directory.
  *
- * # Errors
+ * Note that root handles are not special -- this function is effectively
+ * equivalent to
  *
- *  Unlike other libpathrs methods, pathrs_open will *always* return a
- *  pathrs_root_t (but in the case of an error, the returned root handle will
- *  be a "dummy" which is just used to store the error encountered during
- *  setup). Errors during pathrs_open() can only be detected by immediately
- *  calling pathrs_error() with the returned root handle -- and as with valid
- *  root handles, the caller must free it with pathrs_free().
+ * ```c
+ * fd = open(path, O_PATH|O_DIRECTORY);
+ * ```
  *
- *  This unfortunate API wart is necessary because there is no obvious place to
- *  store a libpathrs error when first creating an root handle (other than
- *  using thread-local storage but that opens several other cans of worms).
- *  This approach was chosen because in principle users could call
- *  pathrs_error() after every libpathrs API call.
+ * # Return Value
+ *
+ * On success, this function returns a file descriptor that can be used as a
+ * root handle in subsequent pathrs_* operations.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
  */
-pathrs_root_t *pathrs_open(const char *path);
+int pathrs_root_open(const char *path);
 
 /**
- * Within the given root's tree, perform the rename (with all symlinks being
- * scoped to the root). The flags argument is identical to the renameat2(2)
- * flags that are supported on the system.
- */
-int pathrs_rename(const pathrs_root_t *root,
-                  const char *src,
-                  const char *dst,
-                  int flags);
-
-/**
- * "Upgrade" the handle to a usable fd, suitable for reading and writing. This
- * does not consume the original handle (allowing for it to be used many
- * times).
+ * "Upgrade" an O_PATH file descriptor to a usable fd, suitable for reading and
+ * writing. This does not consume the original file descriptor. (This can be
+ * used with non-O_PATH file descriptors as well.)
  *
  * It should be noted that the use of O_CREAT *is not* supported (and will
  * result in an error). Handles only refer to *existing* files. Instead you
- * need to use creat().
+ * need to use pathrs_creat().
  *
  * In addition, O_NOCTTY is automatically set when opening the path. If you
  * want to use the path as a controlling terminal, you will have to do
  * ioctl(fd, TIOCSCTTY, 0) yourself.
+ *
+ * # Return Value
+ *
+ * On success, this function returns a file descriptor.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
  */
-int pathrs_reopen(const pathrs_handle_t *handle, int flags);
+int pathrs_reopen(int fd, int flags);
 
 /**
- * Within the given root's tree, resolve the given path (with all symlinks
- * being scoped to the root) and return a handle to that path. The path *must
- * already exist*, otherwise an error will occur.
+ * Resolve the given path within the rootfs referenced by root_fd. The path
+ * *must already exist*, otherwise an error will occur.
+ *
+ * # Return Value
+ *
+ * On success, this function returns an O_PATH file descriptor referencing the
+ * resolved path.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
  */
-pathrs_handle_t *pathrs_resolve(const pathrs_root_t *root, const char *path);
+int pathrs_resolve(int root_fd, const char *path);
 
-int pathrs_symlink(const pathrs_root_t *root,
-                   const char *path,
-                   const char *target);
+/**
+ * Rename a path within the rootfs referenced by root_fd. The flags argument is
+ * identical to the renameat2(2) flags that are supported on the system.
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_rename(int root_fd,
+                  const char *src,
+                  const char *dst,
+                  uint32_t flags);
+
+/**
+ * Create a new regular file within the rootfs referenced by root_fd. This is
+ * effectively an O_CREAT|O_EXCL operation, and so (unlike pathrs_resolve()),
+ * this function can be used on non-existent paths.
+ *
+ * If you want to create a file without opening a handle to it, you can do
+ * pathrs_mknod(root_fd, path, S_IFREG|mode, 0) instead.
+ *
+ * NOTE: Unlike O_CREAT, pathrs_creat() will return an error if the final
+ * component is a dangling symlink. O_CREAT will create such files, and while
+ * openat2 does support this it would be difficult to implement this in the
+ * emulated resolver.
+ *
+ * # Return Value
+ *
+ * On success, this function returns a file descriptor to the requested file.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_creat(int root_fd, const char *path, unsigned int mode);
+
+/**
+ * Create a new directory within the rootfs referenced by root_fd.
+ *
+ * This is shorthand for pathrs_mknod(root_fd, path, S_IFDIR|mode, 0).
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_mkdir(int root_fd, const char *path, unsigned int mode);
+
+/**
+ * Create a inode within the rootfs referenced by root_fd. The type of inode to
+ * be created is configured using the S_IFMT bits in mode (a-la mknod(2)).
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_mknod(int root_fd, const char *path, unsigned int mode, dev_t dev);
+
+/**
+ * Create a symlink within the rootfs referenced by root_fd. Note that the
+ * symlink target string is not modified when creating the symlink.
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_symlink(int root_fd, const char *path, const char *target);
+
+/**
+ * Create a hardlink within the rootfs referenced by root_fd. Both the hardlink
+ * path and target are resolved within the rootfs.
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_hardlink(int root_fd, const char *path, const char *target);
+
+/**
+ * Retrieve error information about an error id returned by a pathrs operation.
+ *
+ * Whenever an error occurs with libpathrs, a negative number describing that
+ * error (the error id) is returned. pathrs_errorinfo() is used to retrieve
+ * that information:
+ *
+ * ```c
+ * fd = pathrs_resolve(root, "/foo/bar");
+ * if (fd < 0) {
+ *     // fd is an error id
+ *     pathrs_error_t *error = pathrs_errorinfo(fd);
+ *     // ... print the error information ...
+ *     pathrs_errorinfo_free(error);
+ * }
+ * ```
+ *
+ * Once pathrs_errorinfo() is called for a particular error id, that error id
+ * is no longer valid and should not be used for subsequent pathrs_errorinfo()
+ * calls.
+ *
+ * Error ids are only unique from one another until pathrs_errorinfo() is
+ * called, at which point the id can be re-used for subsequent errors. The
+ * precise format of error ids is completely opaque and they should never be
+ * compared directly or used for anything other than with pathrs_errorinfo().
+ *
+ * Error ids are not thread-specific and thus pathrs_errorinfo() can be called
+ * on a different thread to the thread where the operation failed (this is of
+ * particular note to green-thread language bindings like Go, where this is
+ * important).
+ *
+ * # Return Value
+ *
+ * If there was a saved error with the provided id, a pathrs_error_t is
+ * returned describing the error. Use pathrs_errorinfo_free() to free the
+ * associated memory once you are done with the error.
+ */
+pathrs_error_t *pathrs_errorinfo(int err_id);
+
+/**
+ * Free the pathrs_error_t object returned by pathrs_errorinfo().
+ */
+void pathrs_errorinfo_free(pathrs_error_t *ptr);
 
 #endif /* LIBPATHRS_H */
 
 #ifdef __CBINDGEN_ALIGNED
 #undef __CBINDGEN_ALIGNED
 #endif
-

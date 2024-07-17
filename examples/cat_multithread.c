@@ -64,60 +64,29 @@ void print_error(pathrs_error_t *error)
 
 struct args {
 	pthread_barrier_t *barrier;
-	pathrs_root_t *root;
+	int rootfd;
 	const char *path;
 };
 
 void *worker(void *_arg) {
 	struct args *arg = _arg;
 
-	int root_fd = -1, handle_fd = -1, fd = -1;
-	pathrs_root_t *new_root = NULL;
-	pathrs_handle_t *handle = NULL;
-	pathrs_error_t *error = NULL;
+	int liberr = 0;
+	int handlefd = -EBADF, fd = -EBADF;
 
 	pthread_barrier_wait(arg->barrier);
 
-	new_root = pathrs_duplicate(PATHRS_ROOT, arg->root);
-	error = pathrs_error(PATHRS_ROOT, arg->root);
-	if (!new_root || error)
+	handlefd = pathrs_resolve(arg->rootfd, arg->path);
+	if (handlefd < 0) {
+		liberr = handlefd;
 		goto err;
+	}
 
-	root_fd = pathrs_into_fd(PATHRS_ROOT, new_root);
-	error = pathrs_error(PATHRS_ROOT, new_root);
-	if (root_fd < 0 || error)
+	fd = pathrs_reopen(handlefd, O_RDONLY);
+	if (fd < 0) {
+		liberr = fd;
 		goto err;
-
-	pathrs_free(PATHRS_ROOT, new_root);
-	new_root = NULL;
-
-	new_root = pathrs_from_fd(PATHRS_ROOT, root_fd);
-	error = pathrs_error(PATHRS_ROOT, new_root);
-	if (!new_root || error)
-		goto err;
-
-	handle = pathrs_resolve(new_root, arg->path);
-	error = pathrs_error(PATHRS_ROOT, new_root);
-	if (!handle || error)
-		goto err;
-
-	handle_fd = pathrs_into_fd(PATHRS_HANDLE, handle);
-	error = pathrs_error(PATHRS_HANDLE, handle);
-	if (handle_fd < 0 || error)
-		goto err;
-
-	pathrs_free(PATHRS_HANDLE, handle);
-	handle = NULL;
-
-	handle = pathrs_from_fd(PATHRS_HANDLE, handle_fd);
-	error = pathrs_error(PATHRS_HANDLE, handle);
-	if (!handle || error)
-		goto err;
-
-	fd = pathrs_reopen(handle, O_RDONLY);
-	error = pathrs_error(PATHRS_HANDLE, handle);
-	if (fd < 0 || error)
-		goto err;
+	}
 
 	/* Pipe the contents to stdout. */
 	for (;;) {
@@ -138,18 +107,13 @@ void *worker(void *_arg) {
 	}
 
 err:
-	if (error)
+	if (liberr < 0) {
+		pathrs_error_t *error = pathrs_errorinfo(liberr);
 		print_error(error);
-out:
-	if (fd >= 0)
-		close(fd);
-	if (root_fd >= 0)
-		close(root_fd);
-	if (handle_fd >= 0)
-		close(handle_fd);
-	pathrs_free(PATHRS_ROOT, new_root);
-	pathrs_free(PATHRS_HANDLE, handle);
-	pathrs_free(PATHRS_ERROR, error);
+		pathrs_errorinfo_free(error);
+	}
+	close(fd);
+	close(handlefd);
 	return NULL;
 }
 
@@ -167,8 +131,8 @@ int main(int argc, char **argv)
 	pthread_t threads[NUM_THREADS] = {};
 	struct args thread_args[NUM_THREADS] = {};
 
-	pathrs_root_t *root = NULL;
-	pathrs_error_t *error = NULL;
+	int liberr = 0;
+	int rootfd = -EBADF;
 
 	if (argc != 3)
 		usage();
@@ -176,10 +140,11 @@ int main(int argc, char **argv)
 	root_path = argv[1];
 	path = argv[2];
 
-	root = pathrs_open(root_path);
-	error = pathrs_error(PATHRS_ROOT, root);
-	if (!root || error)
+	rootfd = pathrs_root_open(root_path);
+	if (rootfd < 0) {
+		liberr = rootfd;
 		goto err;
+	}
 
 	pthread_barrier_init(&barrier, NULL, NUM_THREADS);
 	for (size_t i = 0; i < NUM_THREADS; i++) {
@@ -188,7 +153,7 @@ int main(int argc, char **argv)
 
 		*arg = (struct args) {
 			.path = path,
-			.root = root,
+			.rootfd = rootfd,
 			.barrier = &barrier,
 		};
 		pthread_create(thread, NULL, worker, arg);
@@ -198,10 +163,12 @@ int main(int argc, char **argv)
 		pthread_join(threads[i], NULL);
 
 err:
-	if (error)
+	if (liberr < 0) {
+		pathrs_error_t *error = pathrs_errorinfo(liberr);
 		print_error(error);
+		pathrs_errorinfo_free(error);
+	}
 
-	pathrs_free(PATHRS_ROOT, root);
-	pathrs_free(PATHRS_ERROR, error);
+	close(rootfd);
 	return 0;
 }

@@ -76,32 +76,37 @@
 //!     const char *root_path = "/path/to/root";
 //!     const char *unsafe_path = "/etc/passwd";
 //!
-//!     int fd = -1;
-//!     pathrs_root_t *root = NULL;
-//!     pathrs_handle_t *handle = NULL;
-//!     pathrs_error_t *error = NULL;
+//!     int liberr = 0;
+//!     int root = -EBADF,
+//!         handle = -EBADF,
+//!         fd = -EBADF;
 //!
-//!     root = pathrs_open(root_path);
-//!     error = pathrs_error(PATHRS_ROOT, root);
-//!     if (error)
+//!     root = pathrs_root_open(root_path);
+//!     if (root < 0) {
+//!         liberr = root;
 //!         goto err;
+//!     }
 //!
 //!     handle = pathrs_resolve(root, unsafe_path);
-//!     error = pathrs_error(PATHRS_ROOT, root);
-//!     if (error) /* or (!handle) */
+//!     if (handle < 0) {
+//!         liberr = handle;
 //!         goto err;
+//!     }
 //!
 //!     fd = pathrs_reopen(handle, O_RDONLY);
-//!     error = pathrs_error(PATHRS_HANDLE, handle);
-//!     if (error) /* or (fd < 0) */
+//!     if (fd < 0) {
+//!         liberr = fd;
 //!         goto err;
+//!     }
 //!
 //! err:
-//!     if (error)
+//!     if (liberr < 0) {
+//!         pathrs_error_t *error = pathrs_errorinfo(liberr);
 //!         fprintf(stderr, "Uh-oh: %s (errno=%d)\n", error->description, error->saved_errno);
-//!     pathrs_free(PATHRS_ROOT, root);
-//!     pathrs_free(PATHRS_HANDLE, handle);
-//!     pathrs_free(PATHRS_ERROR, error);
+//!         pathrs_errorinfo_free(error);
+//!     }
+//!     close(root);
+//!     close(handle);
 //!     return fd;
 //! }
 //! ```

@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -20,11 +20,10 @@
 // thus need to interact with C callers.
 #![allow(unsafe_code)]
 
-// pathrs_configure() and associated types.
-pub mod config;
-// Core pathrs function wrappers.
+/// Core pathrs function wrappers.
 pub mod core;
-// Convert between pathrs wrapped objects and the underlying fds.
-pub mod transmute;
-// Miscellaneous helper functions.
-pub mod utils;
+
+/// Helpers for converting Result<...> into C-style int returns.
+pub mod ret;
+
+mod utils;

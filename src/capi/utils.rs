@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -16,58 +16,15 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    error::{self, Error},
-    Handle, Root,
-};
+use crate::error::Error;
 
 use std::{
-    collections::HashMap,
-    convert::{self, TryInto},
-    ffi::{CStr, CString, OsStr},
-    io::Error as IOError,
-    mem,
-    os::unix::ffi::OsStrExt,
-    path::Path,
-    ptr,
-    sync::{Mutex, RwLock},
-    thread::{self, ThreadId},
+    convert::TryInto, ffi::CString, io::Error as IOError, mem, os::unix::ffi::OsStrExt, ptr,
 };
 
 use backtrace::Backtrace;
 use libc::{c_char, c_void};
-use snafu::{ErrorCompat, OptionExt};
-
-/// The type of object being passed to "object agnostic" libpathrs functions.
-// The values of the enum are baked into the API, you can only append to it.
-// TODO: #[non_exhaustive]
-#[repr(C)]
-#[allow(non_camel_case_types, dead_code)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum CPointerType {
-    __PATHRS_INVALID_TYPE = 0,
-    /// NULL.
-    PATHRS_NONE = 0xDFFF,
-    /// `pathrs_error_t`
-    PATHRS_ERROR = 0xE000,
-    /// `pathrs_root_t`
-    PATHRS_ROOT = 0xE001,
-    /// `pathrs_handle_t`
-    PATHRS_HANDLE = 0xE002,
-}
-
-pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
-    ensure!(
-        !path.is_null(),
-        error::InvalidArgument {
-            name: "path",
-            description: "cannot be NULL",
-        }
-    );
-    // SAFETY: C caller guarantees that the path is a valid C-style string.
-    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
-    Ok(OsStr::from_bytes(bytes).as_ref())
-}
+use snafu::ErrorCompat;
 
 pub(crate) trait Leakable {
     /// Leak a structure such that it can be passed through C-FFI.
@@ -122,146 +79,6 @@ macro_rules! leakable {
         }
     };
 }
-
-pub(crate) trait ErrorWrap {
-    fn wrap<F, R>(&mut self, c_error: R, func: F) -> R
-    where
-        F: FnOnce() -> Result<R, Error>;
-}
-
-impl ErrorWrap for Option<Error> {
-    fn wrap<F, R>(&mut self, c_error: R, func: F) -> R
-    where
-        F: FnOnce() -> Result<R, Error>,
-    {
-        // Always clear the error to avoid the errno problem.
-        *self = None;
-        func().unwrap_or_else(|err| {
-            *self = Some(err);
-            c_error
-        })
-    }
-}
-
-/// This is only exported to work around a Rust compiler restriction. Consider
-/// it an implementation detail and don't make use of it.
-// Wrapping struct which we can given C a pointer to. &T isn't an option,
-// because DSTs (fat pointers) like dyn T (and thus &dyn T) have no FFI-safe
-// representation. So we need to hide it within an FFI-safe pointer (such as a
-// trivial struct).
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct CPointer<T> {
-    pub(crate) inner: RwLock<Option<T>>,
-    // TODO: Switch to evmap or something with more granular locking.
-    last_error: Mutex<HashMap<ThreadId, Option<Error>>>,
-}
-
-leakable! {
-    impl<T> Leakable for CPointer<T>;
-}
-
-impl<T> CPointer<T> {
-    pub(crate) fn from_err(err: Error) -> Self {
-        CPointer {
-            inner: RwLock::new(None),
-            last_error: Mutex::new({
-                let mut map = HashMap::new();
-                map.insert(thread::current().id(), Some(err));
-                map
-            }),
-        }
-    }
-
-    pub(crate) fn take_err(&self) -> Option<Error> {
-        self.last_error
-            .lock()
-            .unwrap()
-            .remove(&thread::current().id())
-            .and_then(convert::identity)
-    }
-
-    fn do_wrap_err<F, R>(&self, c_error: R, func: F) -> R
-    where
-        F: FnOnce() -> Result<R, Error>,
-    {
-        let mut last_error: Option<Error> = None;
-        let c_return = func().unwrap_or_else(|err| {
-            last_error = Some(err);
-            c_error
-        });
-
-        // Store the error.
-        self.last_error
-            .lock()
-            .unwrap()
-            .insert(thread::current().id(), last_error);
-
-        c_return
-    }
-
-    pub(crate) fn wrap_err<F, R>(&self, c_error: R, func: F) -> R
-    where
-        F: FnOnce(&T) -> Result<R, Error>,
-    {
-        // TODO: Figure out how to handle None inners here. Currently this
-        //       produces a "can't move out of dereference" error, which
-        //       resulted in a bunch of .context() checks in the C API functions
-        //       themselves.
-        self.do_wrap_err(c_error, || {
-            let inner = self.inner.read().unwrap();
-            let inner = inner.as_ref().context(error::InvalidArgument {
-                name: "ptr",
-                description: "invalid pathrs object",
-            })?;
-            func(&inner)
-        })
-    }
-
-    pub(crate) fn take_wrap_err<F, R>(&self, c_error: R, func: F) -> R
-    where
-        F: FnOnce(T) -> Result<R, Error>,
-    {
-        self.do_wrap_err(c_error, || {
-            let mut inner = self.inner.write().unwrap();
-            let inner = inner.take().context(error::InvalidArgument {
-                name: "ptr",
-                description: "invalid pathrs object",
-            })?;
-            func(inner)
-        })
-    }
-}
-
-impl<T> From<T> for CPointer<T> {
-    fn from(inner: T) -> Self {
-        CPointer {
-            inner: RwLock::new(Some(inner)),
-            last_error: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-/// A handle to the root of a directory tree to resolve within. The only purpose
-/// of this "root handle" is to get Handles to inodes within the directory tree.
-///
-/// At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
-/// inside a possibly-attacker-controlled directory tree. While we do have
-/// protections that should defend against it (for both drivers), it's far more
-/// dangerous than just opening a directory tree which is not inside a
-/// potentially-untrusted directory.
-pub type CRoot = CPointer<Root>;
-
-/// A handle to a path within a given Root. This handle references an
-/// already-resolved path which can be used for only one purpose -- to "re-open"
-/// the handle and get an actual fs::File which can be used for ordinary
-/// operations.
-///
-/// It is critical for the safety of users of this library that *at no point* do
-/// you use interfaces like libc::openat directly on file descriptors you get
-/// from using this library (or extract the RawFd from a fs::File). You must
-/// always use operations through a Root.
-pub type CHandle = CPointer<Handle>;
 
 /// Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
 /// the FFI user does not modify *any* of these fields.
@@ -411,7 +228,7 @@ impl From<Backtrace> for CBacktrace {
 }
 
 /// Attempts to represent a Rust Error type in C. This structure must be freed
-/// using `pathrs_free(PATHRS_ERROR)`.
+/// using pathrs_errorinfo_free().
 // NOTE: This API is exposed to library users in a read-only manner with memory
 //       management done by libpathrs -- so you may only ever append to it.
 #[repr(align(8), C)]
@@ -497,71 +314,5 @@ impl Drop for CError {
             //         because we are in Drop.
             unsafe { &mut *backtrace }.free();
         }
-    }
-}
-
-/// Retrieve the error stored by a pathrs object.
-///
-/// Whenever an error occurs during an operation on a pathrs object, the object
-/// will store the error for retrieval with pathrs_error(). Note that performing
-/// any subsequent operations will clear the stored error -- so the error must
-/// immediately be fetched by the caller.
-///
-/// If there is no error associated with the object, NULL is returned (thus you
-/// can safely check for whether an error occurred with pathrs_error).
-///
-/// It is critical that the correct pathrs_type_t is provided for the given
-/// pointer (otherwise memory corruption will almost certainly occur).
-#[no_mangle]
-pub extern "C" fn pathrs_error(
-    ptr_type: CPointerType,
-    ptr: *const c_void,
-) -> Option<&'static mut CError> {
-    if ptr.is_null() {
-        return None;
-    }
-
-    // SAFETY: All of these casts and dereferences are safe because the C caller
-    //         has assured us that the type passed is correct.
-    let err = match ptr_type {
-        CPointerType::PATHRS_NONE => return None,
-        CPointerType::PATHRS_ERROR => return None, // TODO: Clone the CError.
-        CPointerType::PATHRS_ROOT => {
-            // SAFETY: See above.
-            let root = unsafe { &*(ptr as *const CRoot) };
-            root.take_err()
-        }
-        CPointerType::PATHRS_HANDLE => {
-            // SAFETY: See above.
-            let handle = unsafe { &*(ptr as *const CHandle) };
-            handle.take_err()
-        }
-        _ => panic!("invalid ptr_type: {:?}", ptr_type),
-    };
-
-    err.as_ref().map(CError::from).map(Leakable::leak)
-}
-
-/// Free a libpathrs object.
-///
-/// It is critical that the correct pathrs_type_t is provided for the given
-/// pointer (otherwise memory corruption will almost certainly occur).
-#[no_mangle]
-pub extern "C" fn pathrs_free(ptr_type: CPointerType, ptr: *const c_void) {
-    if ptr.is_null() {
-        return;
-    }
-
-    // SAFETY: All of these casts and dereferences are safe because the C caller
-    //         has assured us that the type passed is correct.
-    match ptr_type {
-        CPointerType::PATHRS_NONE => (),
-        // SAFETY: See above.
-        CPointerType::PATHRS_ERROR => unsafe { &mut *(ptr as *mut CError) }.free(),
-        // SAFETY: See above.
-        CPointerType::PATHRS_ROOT => unsafe { &mut *(ptr as *mut CRoot) }.free(),
-        // SAFETY: See above.
-        CPointerType::PATHRS_HANDLE => unsafe { &mut *(ptr as *mut CHandle) }.free(),
-        _ => panic!("invalid ptr_type: {:?}", ptr_type),
     }
 }
