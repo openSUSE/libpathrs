@@ -1,6 +1,8 @@
-// Copyright (C) 2019-2020 Aleksa Sarai <cyphar@cyphar.com>
-// Copyright (C) 2020 Maxim Zhiburt <zhiburt@gmail.com>
-// Copyright (C) 2019-2020 SUSE LLC
+//go:build linux
+
+// libpathrs: safe path resolution on Linux
+// Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+// Copyright (C) 2019-2024 SUSE LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +18,10 @@
 
 package pathrs
 
-// #cgo LDFLAGS: -lpathrs
-// #include <pathrs.h>
-import "C"
-
 import (
 	"fmt"
 	"strings"
 	"syscall"
-	"unsafe"
 )
 
 // Error represents an underlying libpathrs error.
@@ -71,44 +68,4 @@ func (err *Error) Backtrace() string {
 		}
 	}
 	return buf.String()
-}
-
-func newError(e *C.pathrs_error_t) error {
-	if e == nil {
-		return nil
-	}
-
-	err := &Error{
-		errno:       syscall.Errno(e.saved_errno),
-		description: C.GoString(e.description),
-	}
-
-	if e.backtrace != nil {
-		head := uintptr(unsafe.Pointer(e.backtrace.head))
-		length := uintptr(e.backtrace.length)
-		sizeof := uintptr(C.sizeof___pathrs_backtrace_entry_t)
-		for ptr := head; ptr < head+length*sizeof; ptr += sizeof {
-			entry := (*C.__pathrs_backtrace_entry_t)(unsafe.Pointer(ptr))
-			line := backtraceLine{
-				ip:       uintptr(entry.ip),
-				sAddress: uintptr(entry.symbol_address),
-				sLineno:  uint32(entry.symbol_lineno),
-				sFile:    C.GoString(entry.symbol_file),
-				sName:    C.GoString(entry.symbol_name),
-			}
-			err.backtrace = append(err.backtrace, line)
-		}
-	}
-
-	return err
-}
-
-func fetchError(obj pathrsObject) error {
-	// NOTE: This will recursively lock the object in most code-paths. But as
-	//       long as this is effectively an RW-lock we shouldn't hit deadlocks.
-	return obj.withInner(func(_ pathrsObject) error {
-		err := C.pathrs_error(obj.inner())
-		defer C.pathrs_free(C.PATHRS_ERROR, unsafe.Pointer(err))
-		return newError(err)
-	})
 }

@@ -41,7 +41,7 @@ func main() {
 	rootPath := os.Args[1]
 	path := os.Args[2]
 
-	root, err := pathrs.Open(rootPath)
+	root, err := pathrs.OpenRoot(rootPath)
 	if err != nil {
 		printPathError(err)
 	}
