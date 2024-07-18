@@ -184,5 +184,5 @@ pub extern "C" fn pathrs_errorinfo_free(ptr: *mut CError) {
 
     // SAFETY: The C caller guarantees that the pointer is of the correct type
     // and that this isn't a double-free.
-    unsafe { &mut *ptr }.free()
+    unsafe { (&mut *ptr).free() }
 }

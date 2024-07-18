@@ -26,13 +26,16 @@ pub(crate) trait Leakable {
     /// Leak a structure such that it can be passed through C-FFI.
     fn leak(self) -> &'static mut Self;
 
-    /// Given a structure leaked through Leakable::leak, un-leak it. Callers
-    /// must be sure to only ever call this once on a given pointer (otherwise
-    /// memory corruption will occur).
-    fn unleak(&'static mut self) -> Self;
+    /// Given a structure leaked through Leakable::leak, un-leak it.
+    ///
+    /// SAFETY: Callers must be sure to only ever call this once on a given
+    /// pointer (otherwise memory corruption will occur).
+    unsafe fn unleak(&'static mut self) -> Self;
 
     /// Shorthand for `std::mem::drop(self.unleak())`.
-    fn free(&'static mut self);
+    ///
+    /// SAFETY: Same unsafety issue as `self.unleak()`.
+    unsafe fn free(&'static mut self);
 }
 
 /// A macro to implement the trivial methods of Leakable -- due to a restriction
@@ -50,15 +53,16 @@ macro_rules! leakable {
             Box::leak(Box::new(self))
         }
 
-        fn unleak(&'static mut self) -> Self {
-            // SAFETY: Box::from_raw is safe because the C caller guarantees
-            //         that the pointer we get is the same one we gave them, and
-            //         it will only ever be called once with the same pointer.
+        unsafe fn unleak(&'static mut self) -> Self {
+            // SAFETY: Box::from_raw is safe because the caller guarantees that
+            // the pointer we get is the same one we gave them, and it will only
+            // ever be called once with the same pointer.
             *unsafe { Box::from_raw(self as *mut Self) }
         }
 
-        fn free(&'static mut self) {
-            let _ = self.unleak();
+        unsafe fn free(&'static mut self) {
+            // SAFETY: Caller guarantees this is safe to do.
+            let _ = unsafe { self.unleak() };
             // drop Self
         }
     };
@@ -69,7 +73,7 @@ macro_rules! leakable {
         }
     };
 
-    (impl <$($generics:tt),+> Leakable for $type:ty ;) => {
+    (impl<$($generics:tt),+> Leakable for $type:ty ;) => {
         impl<$($generics),+> Leakable for $type {
             leakable!(...);
         }
