@@ -41,7 +41,7 @@ use snafu::ResultExt;
 fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     ensure!(
         !path.is_null(),
-        error::InvalidArgument {
+        error::InvalidArgumentSnafu {
             name: "path",
             description: "cannot be NULL",
         }
@@ -105,7 +105,7 @@ pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
             // Rust sets O_CLOEXEC by default, without an opt-out. We need to
             // disable it if we weren't asked to do O_CLOEXEC.
             if flags.0 & libc::O_CLOEXEC == 0 {
-                syscalls::fcntl_unset_cloexec(file.as_raw_fd()).context(error::RawOsError {
+                syscalls::fcntl_unset_cloexec(file.as_raw_fd()).context(error::RawOsSnafu {
                     operation: "clear O_CLOEXEC on fd",
                 })?;
             }
@@ -248,11 +248,11 @@ pub extern "C" fn pathrs_mknod(
             libc::S_IFBLK => InodeType::BlockDevice(&perms, dev),
             libc::S_IFCHR => InodeType::CharacterDevice(&perms, dev),
             libc::S_IFIFO => InodeType::Fifo(&perms),
-            libc::S_IFSOCK => error::NotImplemented {
+            libc::S_IFSOCK => error::NotImplementedSnafu {
                 feature: "mknod(S_IFSOCK)",
             }
             .fail()?,
-            _ => error::InvalidArgument {
+            _ => error::InvalidArgumentSnafu {
                 name: "mode",
                 description: "invalid S_IFMT mask",
             }

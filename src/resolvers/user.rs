@@ -96,7 +96,7 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     // The paths should be identical.
     ensure!(
         current_path == full_path,
-        error::SafetyViolation {
+        error::SafetyViolationSnafu {
             description: "fd doesn't match expected path"
         }
     );
@@ -111,7 +111,7 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
         .wrap("get root path to double-check it hasn't moved")?;
     ensure!(
         root_path == new_root_path,
-        error::SafetyViolation {
+        error::SafetyViolationSnafu {
             description: "root moved during lookup"
         }
     );
@@ -168,7 +168,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                 // ever happen, but it's better to be safe.
                 ensure!(
                     !part.as_bytes().contains(&b'/'),
-                    error::SafetyViolation {
+                    error::SafetyViolationSnafu {
                         description: "component of path resolution contains '/'",
                     }
                 );
@@ -187,7 +187,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 
         // Get our next element.
         let next = syscalls::openat(current.as_raw_fd(), part, libc::O_PATH, 0).context(
-            error::RawOsError {
+            error::RawOsSnafu {
                 operation: "open next component of resolution",
             },
         )?;
@@ -211,7 +211,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // NOTE: File::metadata definitely does an fstat(2) here.
         let next_type = next
             .metadata()
-            .context(error::OsError {
+            .context(error::OsSnafu {
                 operation: "fstat of next component",
             })?
             .file_type();
@@ -225,7 +225,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 
         // Don't continue walking if user asked for no symlinks.
         if flags.contains(ResolverFlags::NO_SYMLINKS) {
-            return error::SafetyViolation {
+            return error::SafetyViolationSnafu {
                 description: "next is a symlink and symlink resolution disabled",
             }
             .fail();
@@ -238,7 +238,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             .is_dangerous()
             .wrap("check if next is on a dangerous filesystem")?
         {
-            return error::SafetyViolation {
+            return error::SafetyViolationSnafu {
                 description: "next is a symlink on a dangerous filesystem",
             }
             .fail();
@@ -248,7 +248,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // hitting filesystem loops and DoSing.
         symlink_traversals += 1;
         if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
-            return Err(IOError::from_raw_os_error(libc::ELOOP)).context(error::OsError {
+            return Err(IOError::from_raw_os_error(libc::ELOOP)).context(error::OsSnafu {
                 operation: "emulated symlink resolution",
             })?;
         }
@@ -258,7 +258,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         //      path to the symlink. However, since readlink(2) doesn't follow
         //      symlink components we can just do it manually safely.
         let contents =
-            syscalls::readlinkat(current.as_raw_fd(), part).context(error::RawOsError {
+            syscalls::readlinkat(current.as_raw_fd(), part).context(error::RawOsSnafu {
                 operation: "readlink next symlink component",
             })?;
 

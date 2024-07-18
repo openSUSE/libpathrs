@@ -119,7 +119,6 @@
 // libpathrs only supports Linux at the moment.
 #![cfg(target_os = "linux")]
 
-extern crate backtrace;
 #[macro_use]
 extern crate bitflags;
 #[macro_use]

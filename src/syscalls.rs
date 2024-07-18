@@ -19,12 +19,10 @@
 // We need to permit unsafe code because we are interacting with libc APIs.
 #![allow(unsafe_code)]
 
-use crate::{
-    error::Backtrace,
-    utils::{RawFdExt, ToCString},
-};
+use crate::utils::{RawFdExt, ToCString};
 
 use std::{
+    backtrace::Backtrace,
     ffi::OsStr,
     fmt,
     fs::File,
@@ -89,14 +87,14 @@ pub enum Error {
     FcntlDup {
         fd: FrozenFd,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("fcntl({}, F_GETFD)", fd))]
     FcntlGetFlags {
         fd: FrozenFd,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("fcntl({}, F_SETFD, 0x{:x})", fd, flags))]
@@ -104,7 +102,7 @@ pub enum Error {
         fd: FrozenFd,
         flags: i32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("openat({}, {:?}, 0x{:x}, 0o{:o})", dirfd, path, flags, mode))]
@@ -114,7 +112,7 @@ pub enum Error {
         flags: i32,
         mode: u32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("openat2({}, {:?}, {}, {})", dirfd, path, how, size))]
@@ -124,7 +122,7 @@ pub enum Error {
         how: OpenHow,
         size: usize,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("readlinkat({}, {:?})", dirfd, path))]
@@ -132,7 +130,7 @@ pub enum Error {
         dirfd: FrozenFd,
         path: PathBuf,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("mkdirat({}, {:?}, 0o{:o})", dirfd, path, mode))]
@@ -141,7 +139,7 @@ pub enum Error {
         path: PathBuf,
         mode: u32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("mknodat({}, {:?}, 0o{:o}, {}:{})", dirfd, path, mode, major, minor))]
@@ -152,7 +150,7 @@ pub enum Error {
         major: u32,
         minor: u32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("unlinkat({}, {:?}, 0x{:x})", dirfd, path, flags))]
@@ -161,7 +159,7 @@ pub enum Error {
         path: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display(
@@ -179,7 +177,7 @@ pub enum Error {
         newpath: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("symlinkat({:?}, {}, {:?})", target, dirfd, path))]
@@ -188,7 +186,7 @@ pub enum Error {
         path: PathBuf,
         target: PathBuf,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("renameat({}, {:?}, {}, {:?})", olddirfd, oldpath, newdirfd, newpath))]
@@ -198,7 +196,7 @@ pub enum Error {
         newdirfd: FrozenFd,
         newpath: PathBuf,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display(
@@ -216,14 +214,14 @@ pub enum Error {
         newpath: PathBuf,
         flags: u32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("fstatfs({})", fd))]
     Fstatfs {
         fd: FrozenFd,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("fstatat({}, {:?}, 0x{:x})", dirfd, path, flags))]
@@ -232,7 +230,7 @@ pub enum Error {
         path: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 }
 
@@ -280,7 +278,7 @@ pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, Error> {
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(newfd) })
     } else {
-        Err(err).context(FcntlDup { fd })
+        Err(err).context(FcntlDupSnafu { fd })
     }
 }
 
@@ -296,7 +294,7 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     let err = IOError::last_os_error();
 
     if old < 0 {
-        return Err(err).context(FcntlGetFlags { fd });
+        return Err(err).context(FcntlGetFlagsSnafu { fd });
     }
 
     let new = old & !libc::FD_CLOEXEC;
@@ -311,7 +309,7 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(FcntlSetFlags { fd, flags: new })
+        Err(err).context(FcntlSetFlagsSnafu { fd, flags: new })
     }
 }
 
@@ -336,7 +334,7 @@ pub(crate) fn openat_follow<P: AsRef<Path>>(
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(err).context(Openat {
+        Err(err).context(OpenatSnafu {
             dirfd,
             path,
             flags,
@@ -385,7 +383,7 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
         if maybe_truncated {
             err = IOError::from_raw_os_error(libc::ENAMETOOLONG);
         }
-        Err(err).context(Readlinkat { dirfd, path })
+        Err(err).context(ReadlinkatSnafu { dirfd, path })
     } else {
         let content = OsStr::from_bytes(&buffer[..(len as usize)]);
         Ok(PathBuf::from(content))
@@ -405,7 +403,7 @@ pub(crate) fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Re
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(Mkdirat { dirfd, path, mode })
+        Err(err).context(MkdiratSnafu { dirfd, path, mode })
     }
 }
 
@@ -427,7 +425,7 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(Mknodat {
+        Err(err).context(MknodatSnafu {
             dirfd,
             path,
             mode,
@@ -452,7 +450,7 @@ pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> R
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(Unlinkat { dirfd, path, flags })
+        Err(err).context(UnlinkatSnafu { dirfd, path, flags })
     }
 }
 
@@ -483,7 +481,7 @@ pub(crate) fn linkat<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(Linkat {
+        Err(err).context(LinkatSnafu {
             olddirfd,
             oldpath,
             newdirfd,
@@ -513,7 +511,7 @@ pub(crate) fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Res
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(Symlinkat {
+        Err(err).context(SymlinkatSnafu {
             dirfd,
             path,
             target,
@@ -546,7 +544,7 @@ pub(crate) fn renameat<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(Renameat {
+        Err(err).context(RenameatSnafu {
             olddirfd,
             oldpath,
             newdirfd,
@@ -604,7 +602,7 @@ pub(crate) fn renameat2<P: AsRef<Path>>(
             // Fall back to renameat(2) if possible.
             return renameat(olddirfd, oldpath, newdirfd, newpath);
         }
-        Err(err).context(Renameat2 {
+        Err(err).context(Renameat2Snafu {
             olddirfd,
             oldpath,
             newdirfd,
@@ -628,7 +626,7 @@ pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
     if ret >= 0 {
         Ok(buf)
     } else {
-        Err(err).context(Fstatfs { fd })
+        Err(err).context(FstatfsSnafu { fd })
     }
 }
 
@@ -657,7 +655,7 @@ pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Err
     if ret >= 0 {
         Ok(buf)
     } else {
-        Err(err).context(Fstatat { dirfd, path, flags })
+        Err(err).context(FstatatSnafu { dirfd, path, flags })
     }
 }
 
@@ -710,7 +708,7 @@ pub fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<F
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(err).context(Openat2 {
+        Err(err).context(Openat2Snafu {
             dirfd,
             path,
             how,

@@ -37,7 +37,10 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     path: P,
     flags: ResolverFlags,
 ) -> Result<Handle, Error> {
-    ensure!(*IS_SUPPORTED, error::NotSupported { feature: "openat2" });
+    ensure!(
+        *IS_SUPPORTED,
+        error::NotSupportedSnafu { feature: "openat2" }
+    );
 
     let mut how = syscalls::OpenHow::default();
     how.flags = libc::O_PATH as u64;
@@ -64,7 +67,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                 // TODO: Add wrapper for known-bad openat2 return codes.
                 //Some(libc::EXDEV) | Some(libc::ELOOP) => { ... }
                 _ => {
-                    return Err(err).context(error::RawOsError {
+                    return Err(err).context(error::RawOsSnafu {
                         operation: "openat2 subpath",
                     })?
                 }

@@ -103,7 +103,7 @@ fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
     let parent = path.parent().unwrap_or_else(|| "/".as_ref());
 
     // Now construct the trailing portion of the target.
-    let name = path.file_name().context(error::InvalidArgument {
+    let name = path.file_name().context(error::InvalidArgumentSnafu {
         name: "path",
         description: "no trailing component",
     })?;
@@ -112,7 +112,7 @@ fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
     // If there are any other path components we must bail.
     ensure!(
         !name.as_bytes().contains(&b'/'),
-        error::SafetyViolation {
+        error::SafetyViolationSnafu {
             description: "trailing component of split pathname contains '/'",
         }
     );
@@ -201,7 +201,7 @@ impl Root {
     /// [`Resolver`]: struct.Resolver.html
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
-            .context(error::RawOsError {
+            .context(error::RawOsSnafu {
                 operation: "open root handle",
             })?;
         Ok(Root::from_file_unchecked(file))
@@ -336,7 +336,7 @@ impl Root {
                 syscalls::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev)
             }
         }
-        .context(error::RawOsError {
+        .context(error::RawOsSnafu {
             operation: "pathrs create",
         })
     }
@@ -390,7 +390,7 @@ impl Root {
         // can't be done with the emulated backend that might be a bad idea.
         let flags = flags.0 | libc::O_CREAT;
         let file =
-            syscalls::openat(dirfd, name, flags, perm.mode()).context(error::RawOsError {
+            syscalls::openat(dirfd, name, flags, perm.mode()).context(error::RawOsSnafu {
                 operation: "pathrs create_file",
             })?;
 
@@ -458,7 +458,7 @@ impl Root {
 
         // If we ever are here, then last_error must be Some.
         Err(last_error.expect("unlinkat loop failed so last_error must exist")).context(
-            error::RawOsError {
+            error::RawOsSnafu {
                 operation: "pathrs remove",
             },
         )
@@ -497,7 +497,7 @@ impl Root {
         let dst_dirfd = dst_dir.as_raw_fd();
 
         syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0).context(
-            error::RawOsError {
+            error::RawOsSnafu {
                 operation: "pathrs rename",
             },
         )

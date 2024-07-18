@@ -168,7 +168,7 @@ fn proc_subpath(fd: RawFd) -> Result<String, Error> {
     } else if fd.is_positive() {
         Ok(format!("self/fd/{}", fd))
     } else {
-        error::InvalidArgument {
+        error::InvalidArgumentSnafu {
             name: "fd",
             description: "must be positive or AT_FDCWD",
         }
@@ -182,21 +182,21 @@ impl RawFdExt for RawFd {
         //       avoid the /proc dependency -- though then again, as_unsafe_path
         //       necessarily requires /proc.
         syscalls::openat_follow(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?, flags.0, 0)
-            .context(error::RawOsError {
+            .context(error::RawOsSnafu {
                 operation: "reopen fd through procfs",
             })
     }
 
     fn as_unsafe_path(&self) -> Result<PathBuf, Error> {
         syscalls::readlinkat(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?).context(
-            error::RawOsError {
+            error::RawOsSnafu {
                 operation: "get fd's path through procfs",
             },
         )
     }
 
     fn try_clone_hotfix(&self) -> Result<File, Error> {
-        syscalls::fcntl_dupfd_cloxec(*self).context(error::RawOsError {
+        syscalls::fcntl_dupfd_cloxec(*self).context(error::RawOsSnafu {
             operation: "clone fd",
         })
     }
@@ -247,7 +247,7 @@ impl FileExt for File {
         // nd_jump_link() is used internally. So, we just have to make an
         // educated guess based on which mainline filesystems expose
         // magic-links.
-        let stat = syscalls::fstatfs(self.as_raw_fd()).context(error::RawOsError {
+        let stat = syscalls::fstatfs(self.as_raw_fd()).context(error::RawOsSnafu {
             operation: "check fstype of fd",
         })?;
         Ok(DANGEROUS_FILESYSTEMS.contains(&stat.f_type))
