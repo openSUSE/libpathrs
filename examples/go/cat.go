@@ -25,7 +25,7 @@ import (
 	"io"
 	"os"
 
-	"../../contrib/bindings/go/pathrs"
+	"github.com/openSUSE/libpathrs/go-pathrs"
 )
 
 func usage() {
