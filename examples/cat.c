@@ -44,53 +44,42 @@ void print_error(pathrs_error_t *error)
 	else
 		printf("ERROR: %s\n", error->description);
 
-	if (error->backtrace) {
-		printf("Rust Backtrace:\n");
-		/* We have to iterate over a Rust vector, so this is a bit unwieldy. */
-		for (int i = 0; i < error->backtrace->length; i++) {
-			const __pathrs_backtrace_entry_t *entry = &error->backtrace->head[i];
-
-			if (entry->symbol_name)
-				printf("'%s'@", entry->symbol_name);
-			printf("<0x%x>+0x%x\n", entry->symbol_address, entry->ip - entry->symbol_address);
-			if (entry->symbol_file)
-				printf("  in file '%s':%d\n", entry->symbol_file, entry->symbol_lineno);
-		}
-	}
-
 	errno = saved_errno;
 }
 
 int open_in_root(const char *root_path, const char *unsafe_path)
 {
-	int fd = -1;
-	pathrs_root_t *root = NULL;
-	pathrs_handle_t *handle = NULL;
-	pathrs_error_t *error = NULL;
+	int liberr = 0;
+	int rootfd = -EBADF, handlefd = -EBADF;
+	int fd = -EBADF;
 
-	root = pathrs_open(root_path);
-	error = pathrs_error(PATHRS_ROOT, root);
-	if (error)
+	rootfd = pathrs_root_open(root_path);
+	if (rootfd < 0) {
+		liberr = rootfd;
 		goto err;
+	}
 
-	handle = pathrs_resolve(root, unsafe_path);
-	error = pathrs_error(PATHRS_ROOT, root);
-	if (error) /* or (!handle) */
+	handlefd = pathrs_resolve(rootfd, unsafe_path);
+	if (handlefd < 0) {
+		liberr = handlefd;
 		goto err;
+	}
 
-	fd = pathrs_reopen(handle, O_RDONLY);
-	error = pathrs_error(PATHRS_HANDLE, handle);
-	if (error) /* or (fd < 0) */
+	fd = pathrs_reopen(handlefd, O_RDONLY);
+	if (fd < 0) {
+		liberr = fd;
 		goto err;
+	}
 
 err:
-	if (error)
-		print_error(error);
+	close(rootfd);
+	close(handlefd);
 
-out:
-	pathrs_free(PATHRS_ROOT, root);
-	pathrs_free(PATHRS_HANDLE, handle);
-	pathrs_free(PATHRS_ERROR, error);
+	if (liberr < 0) {
+		pathrs_error_t *error = pathrs_errorinfo(liberr);
+		print_error(error);
+		pathrs_errorinfo_free(error);
+	}
 	return fd;
 }
 

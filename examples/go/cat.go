@@ -25,7 +25,7 @@ import (
 	"io"
 	"os"
 
-	"../../contrib/bindings/go/pathrs"
+	"github.com/openSUSE/libpathrs/go-pathrs"
 )
 
 func usage() {
@@ -41,7 +41,7 @@ func main() {
 	rootPath := os.Args[1]
 	path := os.Args[2]
 
-	root, err := pathrs.Open(rootPath)
+	root, err := pathrs.OpenRoot(rootPath)
 	if err != nil {
 		printPathError(err)
 	}
@@ -69,10 +69,5 @@ func main() {
 func printPathError(err error) {
 	fmt.Println("Error", err)
 	fmt.Println("Unwrapped error", errors.Unwrap(err))
-	fmt.Println("Backtrace:")
-	if pathrsErr, ok := err.(*pathrs.Error); ok {
-		fmt.Println(pathrsErr.Backtrace())
-	}
-
 	os.Exit(1)
 }
