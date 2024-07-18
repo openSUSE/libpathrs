@@ -73,3 +73,5 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: rustup component add clippy
       - run: cargo clippy --all-features
+
+# TODO: Add tests to check bindings.
