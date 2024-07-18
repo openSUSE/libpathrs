@@ -45,7 +45,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // resolving magic-links. RESOLVE_IN_ROOT already blocks magic-link
     // crossings, but that may change in the future (if the magic-links are
     // considered "safe") but we should still explicitly avoid them entirely.
-    how.resolve = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | flags.bits;
+    how.resolve = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | flags.bits();
 
     // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
     // *anywhere on the system*. This can happen pretty frequently, so what we
