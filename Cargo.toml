@@ -48,4 +48,4 @@ bitflags = "^2"
 lazy_static = "^1"
 libc = "^0.2"
 rand = "^0.8"
-snafu = { version = "^0.6", features = ["backtraces-impl-backtrace-crate"] }
+snafu = { version = "^0.8", features = ["backtraces-impl-backtrace-crate"] }
