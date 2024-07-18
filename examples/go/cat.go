@@ -69,10 +69,5 @@ func main() {
 func printPathError(err error) {
 	fmt.Println("Error", err)
 	fmt.Println("Unwrapped error", errors.Unwrap(err))
-	fmt.Println("Backtrace:")
-	if pathrsErr, ok := err.(*pathrs.Error); ok {
-		fmt.Println(pathrsErr.Backtrace())
-	}
-
 	os.Exit(1)
 }

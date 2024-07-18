@@ -19,8 +19,6 @@
 package pathrs
 
 import (
-	"fmt"
-	"strings"
 	"syscall"
 )
 
@@ -28,15 +26,6 @@ import (
 type Error struct {
 	description string
 	errno       syscall.Errno
-	backtrace   []backtraceLine
-}
-
-type backtraceLine struct {
-	ip       uintptr
-	sAddress uintptr
-	sName    string
-	sFile    string
-	sLineno  uint32
 }
 
 // Error returns a textual description of the error.
@@ -51,21 +40,4 @@ func (err *Error) Unwrap() error {
 		return err.errno
 	}
 	return nil
-}
-
-// Backtrace returns a textual backtrace of the the call-stack when the error
-// was triggered within libpathrs. Depending on the (build and runtime)
-// configuration of libpathrs, this may return differing levels of information.
-func (err *Error) Backtrace() string {
-	buf := strings.Builder{}
-	for _, line := range err.backtrace {
-		if line.sName != "" {
-			buf.WriteString(fmt.Sprintf("'%s'@", line.sName))
-		}
-		buf.WriteString(fmt.Sprintf("<0x%x>+0x%x\n", line.sAddress, line.ip-line.sAddress))
-		if line.sFile != "" {
-			buf.WriteString(fmt.Sprintf("  in file '%s':%d\n", line.sFile, line.sLineno))
-		}
-	}
-	return buf.String()
 }

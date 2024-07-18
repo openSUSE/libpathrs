@@ -44,20 +44,6 @@ void print_error(pathrs_error_t *error)
 	else
 		printf("ERROR: %s\n", error->description);
 
-	if (error->backtrace) {
-		printf("Rust Backtrace:\n");
-		/* We have to iterate over a Rust vector, so this is a bit unwieldy. */
-		for (int i = 0; i < error->backtrace->length; i++) {
-			const __pathrs_backtrace_entry_t *entry = &error->backtrace->head[i];
-
-			if (entry->symbol_name)
-				printf("'%s'@", entry->symbol_name);
-			printf("<0x%x>+0x%x\n", entry->symbol_address, entry->ip - entry->symbol_address);
-			if (entry->symbol_file)
-				printf("  in file '%s':%d\n", entry->symbol_file, entry->symbol_lineno);
-		}
-	}
-
 	errno = saved_errno;
 }
 

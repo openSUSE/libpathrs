@@ -30,43 +30,21 @@ import (
 // #include <pathrs.h>
 import "C"
 
-func newError(e *C.pathrs_error_t) error {
-	if e == nil {
-		return nil
-	}
-
-	err := &Error{
-		errno:       syscall.Errno(e.saved_errno),
-		description: C.GoString(e.description),
-	}
-
-	if e.backtrace != nil {
-		head := uintptr(unsafe.Pointer(e.backtrace.head))
-		length := uintptr(e.backtrace.length)
-		sizeof := uintptr(C.sizeof___pathrs_backtrace_entry_t)
-		for ptr := head; ptr < head+length*sizeof; ptr += sizeof {
-			entry := (*C.__pathrs_backtrace_entry_t)(unsafe.Pointer(ptr))
-			line := backtraceLine{
-				ip:       uintptr(entry.ip),
-				sAddress: uintptr(entry.symbol_address),
-				sLineno:  uint32(entry.symbol_lineno),
-				sFile:    C.GoString(entry.symbol_file),
-				sName:    C.GoString(entry.symbol_name),
-			}
-			err.backtrace = append(err.backtrace, line)
-		}
-	}
-
-	return err
-}
-
 func fetchError(errId C.int) error {
 	if errId >= 0 {
 		return nil
 	}
-	err := C.pathrs_errorinfo(errId)
-	defer C.pathrs_errorinfo_free(err)
-	return newError(err)
+	cErr := C.pathrs_errorinfo(errId)
+	defer C.pathrs_errorinfo_free(cErr)
+
+	var err error
+	if cErr != nil {
+		err = &Error{
+			errno:       syscall.Errno(cErr.saved_errno),
+			description: C.GoString(cErr.description),
+		}
+	}
+	return err
 }
 
 func pathrsOpen(path string) (uintptr, error) {

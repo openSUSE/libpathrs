@@ -39,60 +39,6 @@
 #include <sys/types.h>
 
 /**
- * Represents a single entry in a Rust backtrace in C. This structure is
- * owned by the relevant `pathrs_error_t`.
- */
-typedef struct __CBINDGEN_ALIGNED(8) {
-    /**
-     * Instruction pointer at time of backtrace.
-     */
-    const void *ip;
-    /**
-     * Address of the enclosing symbol at time of backtrace.
-     */
-    const void *symbol_address;
-    /**
-     * Symbol name for @symbol_address (or NULL if none could be resolved).
-     */
-    const char *symbol_name;
-    /**
-     * Filename in which the symbol is defined (or NULL if none could be
-     * resolved -- usually due to lack of debugging symbols).
-     */
-    const char *symbol_file;
-    /**
-     * Line within @symbol_file on which the symbol is defined (will only make
-     * sense if @symbol_file is non-NULL).
-     */
-    uint32_t symbol_lineno;
-} __pathrs_backtrace_entry_t;
-
-/**
- * Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
- * the FFI user does not modify *any* of these fields.
- */
-typedef struct __CBINDGEN_ALIGNED(8) {
-    /**
-     * Pointer to the head of the vector (probably shouldn't be modified).
-     */
-    const __pathrs_backtrace_entry_t *head;
-    /**
-     * Number of elements in the vector (must not be modified).
-     */
-    uintptr_t length;
-    /**
-     * Capacity of the vector (must not be modified).
-     */
-    uintptr_t __capacity;
-} __pathrs_backtrace_t;
-
-/**
- * This is only exported to work around a Rust compiler restriction. Consider
- * it an implementation detail and don't make use of it.
- */
-typedef __pathrs_backtrace_t pathrs_backtrace_t;
-
-/**
  * Attempts to represent a Rust Error type in C. This structure must be freed
  * using pathrs_errorinfo_free().
  */
@@ -106,11 +52,6 @@ typedef struct __CBINDGEN_ALIGNED(8) {
      * Textual description of the error.
      */
     const char *description;
-    /**
-     * Backtrace captured at the error site (or NULL if backtraces have been
-     * disabled at libpathrs build-time or through an environment variable).
-     */
-    pathrs_backtrace_t *backtrace;
 } pathrs_error_t;
 
 /**

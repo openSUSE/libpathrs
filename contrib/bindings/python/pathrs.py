@@ -37,14 +37,13 @@ def _pyptr(cptr):
 
 
 class Error(Exception):
-	def __init__(self, message, *_, errno=None, backtrace=None):
+	def __init__(self, message, *_, errno=None):
 		# Construct Exception.
 		super().__init__(message)
 
 		# Basic arguments.
 		self.message = message
 		self.errno = errno
-		self.backtrace = backtrace
 
 		# Pre-format the errno.
 		self.strerror = None
@@ -65,12 +64,11 @@ class Error(Exception):
 
 		description = _pystr(err.description)
 		errno = err.saved_errno or None
-		backtrace = Backtrace(err.backtrace) or None
 
 		libpathrs_so.pathrs_errorinfo_free(err)
 		del err
 
-		return cls(description, backtrace=backtrace, errno=errno)
+		return cls(description, errno=errno)
 
 	def __str__(self):
 		if self.errno is None:
@@ -89,58 +87,8 @@ class Error(Exception):
 			print("pathrs error [%s]:" % (self.strerror,), file=out)
 		print("  %s" % (self.message,), file=out)
 
-		# Backtrace if available.
-		if self.backtrace:
-			print("rust backtrace:", file=out)
-			for entry in self.backtrace:
-				print("  %s" % (entry,), file=out)
-				if entry.symbol.file is not None:
-					print("    in file '%s':%d" % (entry.symbol.file, entry.symbol.lineno), file=out)
-
 
 INTERNAL_ERROR = Error("tried to fetch libpathrs error but no error found")
-
-
-class BacktraceSymbol(object):
-	def __init__(self, c_entry):
-		self.address = _pyptr(c_entry.symbol_address)
-
-		self.name = None
-		if c_entry.symbol_name != ffi.NULL:
-			self.name = _pystr(c_entry.symbol_name)
-
-		self.file = None
-		self.lineno = None
-		if c_entry.symbol_file != ffi.NULL:
-			self.file = _pystr(c_entry.symbol_file)
-			self.lineno = c_entry.symbol_lineno
-
-	def __str__(self):
-		string = "<0x%x>" % (self.address,)
-		if self.name is not None:
-			string = "'%s'@%s" % (self.name, string)
-		return string
-
-
-class BacktraceEntry(object):
-	def __init__(self, c_entry):
-		self.ip = _pyptr(c_entry.ip)
-		self.symbol = BacktraceSymbol(c_entry)
-
-	def __str__(self):
-		return "%s+0x%x" % (self.symbol, self.ip - self.symbol.address)
-
-
-class Backtrace(list):
-	def __init__(self, c_backtrace):
-		super().__init__()
-
-		if c_backtrace == ffi.NULL:
-			return
-
-		for idx in range(c_backtrace.length):
-			c_entry = c_backtrace.head[idx]
-			self.append(BacktraceEntry(c_entry))
 
 
 def fileno(file):

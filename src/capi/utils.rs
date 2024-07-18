@@ -18,13 +18,9 @@
 
 use crate::error::Error;
 
-use std::{
-    convert::TryInto, ffi::CString, io::Error as IOError, mem, os::unix::ffi::OsStrExt, ptr,
-};
+use std::{convert::TryInto, ffi::CString, io::Error as IOError, ptr};
 
-use backtrace::Backtrace;
-use libc::{c_char, c_void};
-use snafu::ErrorCompat;
+use libc::c_char;
 
 pub(crate) trait Leakable {
     /// Leak a structure such that it can be passed through C-FFI.
@@ -80,153 +76,6 @@ macro_rules! leakable {
     };
 }
 
-/// Represents a Rust Vec<T> in an FFI-safe way. It is absolutely critical that
-/// the FFI user does not modify *any* of these fields.
-#[repr(align(8), C)]
-#[derive(Debug)]
-pub struct CVec<T> {
-    /// Pointer to the head of the vector (probably shouldn't be modified).
-    pub head: *const T,
-    /// Number of elements in the vector (must not be modified).
-    pub length: usize,
-    /// Capacity of the vector (must not be modified).
-    pub __capacity: usize,
-}
-
-leakable! {
-    impl<T> Leakable for CVec<T>;
-}
-
-impl<T> From<Vec<T>> for CVec<T> {
-    fn from(vec: Vec<T>) -> Self {
-        let head = vec.as_ptr();
-        let length = vec.len();
-        let capacity = vec.capacity();
-
-        // We now in charge of Vec's memory.
-        mem::forget(vec);
-
-        CVec {
-            head,
-            length,
-            __capacity: capacity,
-        }
-    }
-}
-
-impl<T> Drop for CVec<T> {
-    fn drop(&mut self) {
-        if self.head.is_null() {
-            let head = self.head as *mut T;
-            // Clear the pointer to avoid double-frees.
-            self.head = ptr::null_mut();
-            // SAFETY: Vec::from_raw_parts is safe because the C caller
-            //         guarantees that the (pointer, length, capacity) tuple is
-            //         unchanged from when we created the CVec.
-            let _ = unsafe { Vec::from_raw_parts(head, self.length, self.__capacity) };
-            // drop the Vec and all its contents
-        }
-    }
-}
-
-/// Represents a single entry in a Rust backtrace in C. This structure is
-/// owned by the relevant `pathrs_error_t`.
-#[repr(align(8), C)]
-#[derive(Debug)]
-pub struct CBacktraceEntry {
-    /// Instruction pointer at time of backtrace.
-    pub ip: *const c_void,
-
-    /// Address of the enclosing symbol at time of backtrace.
-    pub symbol_address: *const c_void,
-
-    /// Symbol name for @symbol_address (or NULL if none could be resolved).
-    pub symbol_name: *const c_char,
-
-    /// Filename in which the symbol is defined (or NULL if none could be
-    /// resolved -- usually due to lack of debugging symbols).
-    pub symbol_file: *const c_char,
-
-    /// Line within @symbol_file on which the symbol is defined (will only make
-    /// sense if @symbol_file is non-NULL).
-    pub symbol_lineno: u32,
-}
-
-impl Drop for CBacktraceEntry {
-    fn drop(&mut self) {
-        if !self.symbol_name.is_null() {
-            let symbol_name = self.symbol_name as *mut c_char;
-            // Clear the pointer to avoid double-frees.
-            self.symbol_name = ptr::null_mut();
-            // SAFETY: CString::from_raw is safe because the C caller guarantees
-            //         that the pointer we get is the same one we gave them.
-            let _ = unsafe { CString::from_raw(symbol_name) };
-            // drop the CString
-        }
-        if !self.symbol_file.is_null() {
-            let symbol_file = self.symbol_file as *mut c_char;
-            // Clear the pointer to avoid double-frees.
-            self.symbol_file = ptr::null_mut();
-            // SAFETY: CString::from_raw is safe because the C caller guarantees
-            //         that the pointer we get is the same one we gave them.
-            let _ = unsafe { CString::from_raw(symbol_file as *mut c_char) };
-            // drop the CString
-        }
-    }
-}
-
-/// This is only exported to work around a Rust compiler restriction. Consider
-/// it an implementation detail and don't make use of it.
-pub type CBacktrace = CVec<CBacktraceEntry>;
-
-impl From<Backtrace> for CBacktrace {
-    fn from(mut backtrace: Backtrace) -> Self {
-        // Make sure we've resolved as many symbols as possible.
-        backtrace.resolve();
-
-        // Construct a CVec<CBacktraceEntry> for leaking.
-        backtrace
-            .frames()
-            .iter()
-            .map(|frame| {
-                let symbol = frame.symbols().last();
-
-                // XXX: Option::flatten is in Rust 1.40.0 stable.
-
-                let (name, file, lineno) = match symbol {
-                    Some(symbol) => {
-                        let name = symbol.name().map(|name| {
-                            CString::new(name.to_string()).expect(
-                                "CString::new(symbol_name) failed in CBacktraceEntry generation",
-                            )
-                        });
-
-                        let file = symbol.filename().map(|file| {
-                            CString::new(file.as_os_str().as_bytes()).expect(
-                                "CString::new(symbol_file) failed in CBacktraceEntry generation",
-                            )
-                        });
-
-                        (name, file, symbol.lineno())
-                    }
-                    None => (None, None, None),
-                };
-
-                CBacktraceEntry {
-                    ip: frame.ip(),
-                    symbol_address: frame.symbol_address(),
-                    symbol_name: name.map(CString::into_raw).unwrap_or(ptr::null_mut())
-                        as *const c_char,
-                    symbol_file: file.map(CString::into_raw).unwrap_or(ptr::null_mut())
-                        as *const c_char,
-                    symbol_lineno: lineno.unwrap_or(0),
-                }
-            })
-            .collect::<Vec<_>>()
-            .into()
-    }
-}
-
 /// Attempts to represent a Rust Error type in C. This structure must be freed
 /// using pathrs_errorinfo_free().
 // NOTE: This API is exposed to library users in a read-only manner with memory
@@ -242,10 +91,6 @@ pub struct CError {
 
     /// Textual description of the error.
     pub description: *const c_char,
-
-    /// Backtrace captured at the error site (or NULL if backtraces have been
-    /// disabled at libpathrs build-time or through an environment variable).
-    pub backtrace: Option<&'static mut CBacktrace>,
 }
 
 leakable! {
@@ -278,10 +123,6 @@ impl From<&Error> for CError {
         CError {
             saved_errno: errno.try_into().unwrap_or(0),
             description: desc.into_raw(),
-            backtrace: ErrorCompat::backtrace(err)
-                .cloned()
-                .map(CBacktrace::from)
-                .map(Leakable::leak),
         }
     }
 }
@@ -296,23 +137,6 @@ impl Drop for CError {
             //         that the pointer we get is the same one we gave them.
             let _ = unsafe { CString::from_raw(description) };
             // drop the CString
-        }
-
-        if let Some(ref mut backtrace) = self.backtrace {
-            // The following is an exceptionally dirty hack to deal with the
-            // fact that we cannot move a &'static mut in this context. However,
-            // this is all okay because the &'static mut is being used as a
-            // pointer to a leaked CBacktrace.
-            let backtrace = *backtrace as *mut CBacktrace;
-            // Remove self.backtrace reference before we do free it. We don't
-            // want something to dereference it.
-            self.backtrace = None;
-            // And finally, free the backtrace.
-            // SAFETY: While this is a &'static mut, we are the effective owner
-            //         of this pointer because the C caller guarantees they
-            //         won't use this pointer. And no Rust code will use it
-            //         because we are in Drop.
-            unsafe { &mut *backtrace }.free();
         }
     }
 }
