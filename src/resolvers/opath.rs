@@ -16,11 +16,11 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! libpathrs::user implements an emulated version of the openat(2) patchset's
-//! features. The primary method by which this is done is through shameless
-//! abuse of procfs and O_PATH magic-links. The basic idea is that we need to
-//! perform all of the path resolution steps (walking down the set of
-//! components, handling the effect of symlinks on the resolution, etc).
+//! libpathrs::opath implements an emulated version of openat2(RESOLVE_IN_ROOT).
+//! The primary method by which this is done is through shameless abuse of
+//! procfs and O_PATH magic-links. The basic idea is that we need to perform all
+//! of the path resolution steps (walking down the set of components, handling
+//! the effect of symlinks on the resolution, etc).
 //!
 //! In order to do this safely we need to verify after the walk is done whether
 //! the path of the final file descriptor is what we expected (most importantly,

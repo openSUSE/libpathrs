@@ -22,10 +22,10 @@ use crate::{error::Error, Handle};
 
 use std::{fs::File, path::Path};
 
-/// `openat2(2)`-based in-kernel resolver.
-pub mod kernel;
 /// `O_PATH`-based userspace resolver.
-pub mod user;
+pub mod opath;
+/// `openat2(2)`-based in-kernel resolver.
+pub mod openat2;
 
 bitflags! {
     /// Optional flags to modify the resolution of paths inside a [`Root`].
@@ -48,19 +48,19 @@ bitflags! {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ResolverBackend {
     /// Use the native `openat2(2)` backend (requires kernel support).
-    Kernel,
+    KernelOpenat2,
     /// Use the userspace "emulated" backend.
-    Emulated,
+    EmulatedOpath,
     // TODO: Implement a HardcoreEmulated which does pivot_root(2) and all the
     //       rest of it. It'd be useful to compare against and for some
     //       hyper-concerned users.
 }
 
 lazy_static! {
-    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *kernel::IS_SUPPORTED {
-        ResolverBackend::Kernel
+    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *openat2::IS_SUPPORTED {
+        ResolverBackend::KernelOpenat2
     } else {
-        ResolverBackend::Emulated
+        ResolverBackend::EmulatedOpath
     };
 }
 
@@ -74,8 +74,8 @@ impl ResolverBackend {
     /// Checks if the resolver is supported on the current platform.
     pub fn supported(self) -> bool {
         match self {
-            ResolverBackend::Kernel => *kernel::IS_SUPPORTED,
-            ResolverBackend::Emulated => true,
+            ResolverBackend::KernelOpenat2 => *openat2::IS_SUPPORTED,
+            ResolverBackend::EmulatedOpath => true,
         }
     }
 }
@@ -101,8 +101,8 @@ impl Resolver {
     #[inline]
     pub(crate) fn resolve<P: AsRef<Path>>(&self, root: &File, path: P) -> Result<Handle, Error> {
         match self.backend {
-            ResolverBackend::Kernel => kernel::resolve(root, path, self.flags),
-            ResolverBackend::Emulated => user::resolve(root, path, self.flags),
+            ResolverBackend::KernelOpenat2 => openat2::resolve(root, path, self.flags),
+            ResolverBackend::EmulatedOpath => opath::resolve(root, path, self.flags),
         }
     }
 }
