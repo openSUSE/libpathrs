@@ -17,7 +17,7 @@
  */
 
 /*
- * File: examples/cat_mulithread.c
+ * File: examples/cat_multithread.c
  *
  * An example program which opens a file inside a root and outputs its contents
  * using libpathrs.
