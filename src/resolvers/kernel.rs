@@ -17,8 +17,8 @@
  */
 
 use crate::{
-    error::{self, Error, ErrorExt},
-    resolvers::{self, ResolverFlags},
+    error::{self, Error},
+    resolvers::ResolverFlags,
     syscalls, Handle,
 };
 
@@ -52,17 +52,15 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 
     // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
     // *anywhere on the system*. This can happen pretty frequently, so what we
-    // do is attempt the openat2(2) a couple of times, and then fall-back to
-    // userspace emulation.
-    let mut handle: Option<File> = None;
+    // do is attempt the openat2(2) a couple of times. If it still fails, just
+    // error out.
     for _ in 0..16 {
         match syscalls::openat2(root.as_raw_fd(), path.as_ref(), &how) {
-            Ok(file) => {
-                handle = Some(file);
-                break;
-            }
+            Ok(file) => return Ok(Handle::from_file_unchecked(file)),
             Err(err) => match err.root_cause().raw_os_error() {
-                Some(libc::ENOSYS) => break, // shouldn't happen
+                Some(libc::ENOSYS) => {
+                    return error::NotSupportedSnafu { feature: "openat2" }.fail()
+                } // shouldn't happen
                 Some(libc::EAGAIN) => continue,
                 // TODO: Add wrapper for known-bad openat2 return codes.
                 //Some(libc::EXDEV) | Some(libc::ELOOP) => { ... }
@@ -75,11 +73,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         }
     }
 
-    handle.map_or_else(
-        || {
-            resolvers::user::resolve(root, path, flags)
-                .wrap("fallback user-space resolution for RESOLVE_IN_ROOT")
-        },
-        |file| Ok(Handle::from_file_unchecked(file)),
-    )
+    return error::SafetyViolationSnafu {
+        description: "racing filesystem changes caused openat2 to abort",
+    }
+    .fail();
 }
