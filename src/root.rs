@@ -222,10 +222,29 @@ impl Root {
 
     /// Unwrap a [`Root`] to reveal the underlying [`File`].
     ///
+    /// **Note**: This method is primarily intended to allow for file descriptor
+    /// passing or otherwise transmitting file descriptor information. It is not
+    /// safe to use this [`File`] directly to do filesystem operations. Please
+    /// use the provided [`Root`] methods.
+    ///
     /// [`Root`]: struct.Root.html
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     pub fn into_file(self) -> File {
         self.inner
+    }
+
+    /// Access the underlying [`File`] for a [`Root`].
+    ///
+    /// **Note**: This method is primarily intended to allow for tests and other
+    /// code to check the status of the underlying [`File`] without having to
+    /// use [`Root::into_file`]. It is not safe to use this [`File`] directly
+    /// to do filesystem operations. Please use the provided [`Root`] methods.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Root::into_file`]: struct.Root.html#method.into_file
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    pub fn as_file(&self) -> &File {
+        &self.inner
     }
 
     /// Wrap a [`File`] into a [`Root`].

@@ -128,10 +128,31 @@ impl Handle {
 
     /// Unwrap a [`Handle`] to reveal the underlying [`File`].
     ///
+    /// **Note**: This method is primarily intended to allow for file descriptor
+    /// passing or otherwise transmitting file descriptor information. If you
+    /// want to get a [`File`] handle for general use, please use
+    /// [`Handle::reopen`] instead.
+    ///
     /// [`Handle`]: struct.Handle.html
+    /// [`Handle::reopen`]: struct.Handle.html#method.reopen
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     pub fn into_file(self) -> File {
         self.inner
+    }
+
+    /// Access the underlying [`File`] for a [`Handle`].
+    ///
+    /// **Note**: This method is primarily intended to allow for tests and other
+    /// code to check the status of the underlying [`File`] without having to
+    /// use [`Handle::into_file`]. If you want to get a [`File`] handle for
+    /// general use, please use [`Handle::reopen`] instead.
+    ///
+    /// [`Handle`]: struct.Handle.html
+    /// [`Handle::into_file`]: struct.Handle.html#method.into_file
+    /// [`Handle::reopen`]: struct.Handle.html#method.reopen
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    pub fn as_file(&self) -> &File {
+        &self.inner
     }
 
     /// Wrap a [`File`] into a [`Handle`].
