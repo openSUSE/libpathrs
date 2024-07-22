@@ -96,7 +96,7 @@ pub enum Error {
     /// [`IOError`]: https://doc.rust-lang.org/std/io/struct.Error.html
     /// [`RawOsError`]: enum.Error.html#variant.RawOsError
     // TODO: Remove the OsError and RawOsError distinction.
-    #[snafu(display("{} failed", operation))]
+    #[snafu(display("{} failed: {}", operation, source))]
     OsError {
         /// Operation which was being attempted.
         operation: String,
@@ -114,7 +114,7 @@ pub enum Error {
     /// [`IOError`]: https://doc.rust-lang.org/std/io/struct.Error.html
     /// [`OsError`]: enum.Error.html#variant.OsError
     // TODO: Remove the OsError and RawOsError distinction.
-    #[snafu(display("{} failed", operation))]
+    #[snafu(display("{} failed: {}", operation, source))]
     RawOsError {
         /// Operation which was being attempted.
         operation: String,
@@ -128,7 +128,7 @@ pub enum Error {
     /// added at call-sites.
     // XXX: Arguably this is super ugly and we should have a separate
     //      context selector for each callsite but that's just ridiculous.
-    #[snafu(display("{}", context))]
+    #[snafu(display("{}: {}", context, source))]
     Wrapped {
         /// Additional context information about the contained error.
         context: String,

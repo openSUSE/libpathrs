@@ -83,21 +83,21 @@ impl fmt::Display for FrozenFd {
 /// [`Error`]: enum.Error.html
 #[derive(Debug, Snafu)]
 pub enum Error {
-    #[snafu(display("fcntl({}, F_DUPFD_CLOEXEC, 0)", fd))]
+    #[snafu(display("fcntl({}, F_DUPFD_CLOEXEC, 0): {}", fd, source))]
     FcntlDup {
         fd: FrozenFd,
         source: IOError,
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fcntl({}, F_GETFD)", fd))]
+    #[snafu(display("fcntl({}, F_GETFD): {}", fd, source))]
     FcntlGetFlags {
         fd: FrozenFd,
         source: IOError,
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fcntl({}, F_SETFD, 0x{:x})", fd, flags))]
+    #[snafu(display("fcntl({}, F_SETFD, 0x{:x}): {}", fd, flags, source))]
     FcntlSetFlags {
         fd: FrozenFd,
         flags: i32,
@@ -105,7 +105,14 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("openat({}, {:?}, 0x{:x}, 0o{:o})", dirfd, path, flags, mode))]
+    #[snafu(display(
+        "openat({}, {:?}, 0x{:x}, 0o{:o}): {}",
+        dirfd,
+        path,
+        flags,
+        mode,
+        source
+    ))]
     Openat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -115,7 +122,7 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("openat2({}, {:?}, {}, {})", dirfd, path, how, size))]
+    #[snafu(display("openat2({}, {:?}, {}, {}): {}", dirfd, path, how, size, source))]
     Openat2 {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -125,7 +132,7 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("readlinkat({}, {:?})", dirfd, path))]
+    #[snafu(display("readlinkat({}, {:?}): {}", dirfd, path, source))]
     Readlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -133,7 +140,7 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("mkdirat({}, {:?}, 0o{:o})", dirfd, path, mode))]
+    #[snafu(display("mkdirat({}, {:?}, 0o{:o}): {}", dirfd, path, mode, source))]
     Mkdirat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -142,7 +149,15 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("mknodat({}, {:?}, 0o{:o}, {}:{})", dirfd, path, mode, major, minor))]
+    #[snafu(display(
+        "mknodat({}, {:?}, 0o{:o}, {}:{}): {}",
+        dirfd,
+        path,
+        mode,
+        major,
+        minor,
+        source
+    ))]
     Mknodat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -153,7 +168,7 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("unlinkat({}, {:?}, 0x{:x})", dirfd, path, flags))]
+    #[snafu(display("unlinkat({}, {:?}, 0x{:x}): {}", dirfd, path, flags, source))]
     Unlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -163,12 +178,13 @@ pub enum Error {
     },
 
     #[snafu(display(
-        "linkat({}, {:?}, {}, {:?}, 0x{:x})",
+        "linkat({}, {:?}, {}, {:?}, 0x{:x}): {}",
         olddirfd,
         oldpath,
         newdirfd,
         newpath,
-        flags
+        flags,
+        source
     ))]
     Linkat {
         olddirfd: FrozenFd,
@@ -180,7 +196,7 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("symlinkat({:?}, {}, {:?})", target, dirfd, path))]
+    #[snafu(display("symlinkat({:?}, {}, {:?}): {}", target, dirfd, path, source))]
     Symlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -189,7 +205,14 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("renameat({}, {:?}, {}, {:?})", olddirfd, oldpath, newdirfd, newpath))]
+    #[snafu(display(
+        "renameat({}, {:?}, {}, {:?}): {}",
+        olddirfd,
+        oldpath,
+        newdirfd,
+        newpath,
+        source
+    ))]
     Renameat {
         olddirfd: FrozenFd,
         oldpath: PathBuf,
@@ -200,12 +223,13 @@ pub enum Error {
     },
 
     #[snafu(display(
-        "renameat2({}, {:?}, {}, {:?}, 0x{:x})",
+        "renameat2({}, {:?}, {}, {:?}, 0x{:x}): {}",
         olddirfd,
         oldpath,
         newdirfd,
         newpath,
-        flags
+        flags,
+        source
     ))]
     Renameat2 {
         olddirfd: FrozenFd,
@@ -217,14 +241,14 @@ pub enum Error {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fstatfs({})", fd))]
+    #[snafu(display("fstatfs({}): {}", fd, source))]
     Fstatfs {
         fd: FrozenFd,
         source: IOError,
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fstatat({}, {:?}, 0x{:x})", dirfd, path, flags))]
+    #[snafu(display("fstatat({}, {:?}, 0x{:x}): {}", dirfd, path, flags, source))]
     Fstatat {
         dirfd: FrozenFd,
         path: PathBuf,
