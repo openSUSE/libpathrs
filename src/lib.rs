@@ -151,3 +151,7 @@ mod capi;
 // Internally used helpers.
 mod syscalls;
 mod utils;
+
+// Library tetss.
+#[cfg(test)]
+mod tests;
