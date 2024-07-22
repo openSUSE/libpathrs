@@ -130,7 +130,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // What is the final path we expect to get after we do the final open? This
     // allows us to track any attacker moving path components around and we can
     // sanity-check at the very end. This does not include rootpath.
-    let mut expected_path = PathBuf::from(Component::RootDir.as_os_str());
+    let mut expected_path = PathBuf::from("/");
 
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
@@ -279,6 +279,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         expected_path.pop();
         if contents.is_absolute() {
             current = root.try_clone_hotfix().wrap("dup root as next current")?;
+            expected_path = PathBuf::from("/");
         }
     }
 
