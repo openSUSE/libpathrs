@@ -45,13 +45,82 @@ use crate::{
 
 use std::{
     collections::VecDeque,
+    ffi::OsStr,
     fs::File,
     io::Error as IOError,
     os::unix::{ffi::OsStrExt, io::AsRawFd},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use snafu::ResultExt;
+
+/// RawComponents is like [`std::path::Components`] execpt that no normalisation
+/// is done for any path components ([`std::path::Components`] normalises "/./"
+/// components), and all of the components are simply [`std::ffi::OsStr`].
+///
+/// [`std::path::Components`]: https://doc.rust-lang.org/std/path/struct.Components.html
+/// [`std::ffi::OsStr`]: https://doc.rust-lang.org/std/ffi/struct.OsStr.html
+struct RawComponents<'a> {
+    inner: &'a OsStr,
+}
+
+impl<'a> Iterator for RawComponents<'a> {
+    type Item = &'a OsStr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.inner.is_empty() {
+            None
+        } else {
+            let inner = self.inner.as_bytes();
+            match memchr::memchr(b'/', inner) {
+                None => {
+                    let remaining = self.inner;
+                    self.inner = OsStrExt::from_bytes(&b""[..]);
+                    Some(remaining)
+                }
+                Some(idx) => {
+                    let (head, tail) = inner.split_at(idx);
+                    self.inner = OsStrExt::from_bytes(&tail[1..]);
+                    Some(OsStrExt::from_bytes(head))
+                }
+            }
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for RawComponents<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.inner.is_empty() {
+            None
+        } else {
+            let inner = self.inner.as_bytes();
+            match memchr::memrchr(b'/', inner) {
+                None => {
+                    let remaining = self.inner;
+                    self.inner = OsStrExt::from_bytes(&b""[..]);
+                    Some(remaining)
+                }
+                Some(idx) => {
+                    let (head, tail) = inner.split_at(idx);
+                    self.inner = OsStrExt::from_bytes(head);
+                    Some(OsStrExt::from_bytes(&tail[1..]))
+                }
+            }
+        }
+    }
+}
+
+trait RawComponentsIter {
+    fn raw_components(&self) -> RawComponents<'_>;
+}
+
+impl<P: AsRef<Path>> RawComponentsIter for P {
+    fn raw_components(&self) -> RawComponents<'_> {
+        RawComponents {
+            inner: self.as_ref().as_ref(),
+        }
+    }
+}
 
 /// Maximum number of symlink traversals we will accept.
 const MAX_SYMLINK_TRAVERSALS: usize = 128;
@@ -71,14 +140,11 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     let full_path: PathBuf = root_path.join(
         expected
             .as_ref()
-            .components()
+            .raw_components()
             // At this point, expected_path should only have Normal components.
             // If there are any other components we can just ignore them because
             // this expected_path check will probably fail.
-            .filter(|c| match c {
-                Component::Normal(_) => true,
-                _ => false,
-            })
+            // NOTE: PathBuf::push() does not normalise components.
             .collect::<PathBuf>(),
     );
 
@@ -141,26 +207,30 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // as we do the path walk, and update them with the contents of any symlinks
     // we encounter. Path walking terminates when there are no components left.
     let mut components = path
-        .components()
-        .map(|p| PathBuf::from(p.as_os_str()))
+        .raw_components()
+        .map(|p| p.to_os_string())
         .collect::<VecDeque<_>>();
 
     let mut symlink_traversals = 0;
     while let Some(part) = components.pop_front() {
-        // XXX: Thanks to borrowck, we can't seem to just store Component in our
-        //      VecDeque. So we need to do a dirty conversion back to Component.
-        //      But we are definitely sure there is at only one component.
-        let part = part
-            .components()
-            .next()
-            .expect("components should have one entry");
-
         // Ensure that we only got the components we wanted, and generate a
         // tentative expected_path.
-        match part {
-            Component::Normal(part) => {
+        match part.as_bytes() {
+            b"." | b"" => {
+                // We don't need to update expected_path.
+            }
+            b".." => {
+                // All of expected_path is non-symlinks, so we can treat ".."
+                // lexically. If pop() fails, then we are at the root and we
+                // must ignore this ".." component.
+                if !expected_path.pop() {
+                    current = root.try_clone_hotfix().wrap("dup root")?;
+                    continue;
+                }
+            }
+            _ => {
                 // This part might be a symlink, but we clean that up later.
-                expected_path.push(part);
+                expected_path.push(&part);
 
                 // Ensure that part doesn't contain any "/"s. It's critical we
                 // are only touching the final component in the path. If there
@@ -173,24 +243,18 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                     }
                 );
             }
-            Component::ParentDir => {
-                // All of expected_path is non-symlinks, so we can treat ".."
-                // lexically. If pop() fails, then we are at the root and we
-                // must ignore this ".." component.
-                if !expected_path.pop() {
-                    continue;
-                }
-            }
-            // Just skip any other components.
-            _ => continue,
         };
 
         // Get our next element.
-        let next = syscalls::openat(current.as_raw_fd(), part, libc::O_PATH, 0).context(
-            error::RawOsSnafu {
-                operation: "open next component of resolution",
-            },
-        )?;
+        let next = syscalls::openat(
+            current.as_raw_fd(),
+            &part,
+            libc::O_PATH | libc::O_NOFOLLOW,
+            0,
+        )
+        .context(error::RawOsSnafu {
+            operation: "open next component of resolution",
+        })?;
 
         // Make sure that the path is what we expect. If not, there was a racing
         // rename and we should bail out here -- otherwise we might be tricked
@@ -202,7 +266,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // by-definition). However, unlike the in-kernel version we don't have
         // the luxury of only doing this check when there was a racing rename --
         // we have to do it every time.
-        if part == Component::ParentDir {
+        if part.as_bytes() == b".." {
             check_current(&next, root, &expected_path)
                 .wrap("check next '..' component didn't escape")?;
         }
@@ -231,9 +295,9 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             .fail();
         }
 
-        // Check if it's safe for us to touch. In principle this should never be
-        // an actual security issue (since we readlink(2) the symlink) but it's
-        // much better to be safe than sorry here.
+        // Check if it's safe for us to touch. In principle this should
+        // never be an actual security issue (since we readlink(2) the
+        // symlink) but it's much better to be safe than sorry here.
         if next
             .is_dangerous()
             .wrap("check if next is on a dangerous filesystem")?
@@ -244,8 +308,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             .fail();
         }
 
-        // We need a limit on the number of symlinks we traverse to avoid
-        // hitting filesystem loops and DoSing.
+        // We need a limit on the number of symlinks we traverse to
+        // avoid hitting filesystem loops and DoSing.
         symlink_traversals += 1;
         if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
             return Err(IOError::from_raw_os_error(libc::ELOOP)).context(error::OsSnafu {
@@ -253,29 +317,24 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             })?;
         }
 
-        // XXX: There is currently no way for us to use next to get the
-        //      contents of the symlink. /proc/self/fd will just give us the
-        //      path to the symlink. However, since readlink(2) doesn't follow
-        //      symlink components we can just do it manually safely.
-        let contents =
-            syscalls::readlinkat(current.as_raw_fd(), part).context(error::RawOsSnafu {
-                operation: "readlink next symlink component",
-            })?;
+        let contents = syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
+            operation: "readlink next symlink component",
+        })?;
 
         // Add contents of the symlink to the set of components we are looping
         // over. The
         contents
-            .components()
-            .map(|p| PathBuf::from(p.as_os_str()))
-            // VecDeque doesn't have an amortized way of prepending a Vec, so we
-            // need to do this manually. We need to rev() the iterator since
-            // we're pushing to the front each time.
+            .raw_components()
+            .map(|p| p.to_os_string())
+            // VecDeque doesn't have an amortized way of prepending a
+            // Vec, so we need to do this manually. We need to rev() the
+            // iterator since we're pushing to the front each time.
             .rev()
             .for_each(|p| components.push_front(p));
 
-        // Remove our tentative expected_path contents. They will be filled on
-        // later iterations. If the path is absolute we need to reset our
-        // current back to the root.
+        // Remove our tentative expected_path contents. They will be
+        // filled on later iterations. If the path is absolute we need
+        // to reset our current back to the root.
         expected_path.pop();
         if contents.is_absolute() {
             current = root.try_clone_hotfix().wrap("dup root as next current")?;
