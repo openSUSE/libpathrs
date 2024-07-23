@@ -50,6 +50,7 @@ use std::{
     fs::File,
     io::Error as IOError,
     iter,
+    ops::Deref,
     os::unix::{ffi::OsStrExt, io::AsRawFd},
     path::{Path, PathBuf},
     rc::Rc,
@@ -122,6 +123,43 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     Ok(())
 }
 
+/// A minimal wrapper around `Rc<File>` that lets you opt out of reference
+/// counting in the cases where it's not necessary.
+enum RcFile {
+    Original(File),
+    Ref(Rc<File>),
+}
+
+impl RcFile {
+    fn from_rc(rc: &Rc<File>) -> Self {
+        Self::Ref(Rc::clone(rc))
+    }
+
+    fn into_inner(self) -> Option<File> {
+        match self {
+            Self::Original(f) => Some(f),
+            Self::Ref(rc) => Rc::into_inner(rc),
+        }
+    }
+}
+
+impl From<File> for RcFile {
+    fn from(f: File) -> Self {
+        Self::Original(f)
+    }
+}
+
+impl Deref for RcFile {
+    type Target = File;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Original(f) => f,
+            Self::Ref(rc) => rc,
+        }
+    }
+}
+
 /// Resolve `path` within `root` through user-space emulation.
 pub(crate) fn resolve<P: AsRef<Path>>(
     root: &File,
@@ -139,7 +177,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
     let root = Rc::new(root.try_clone_hotfix().wrap("dup root as starting point")?);
-    let mut current = Rc::clone(&root);
+    let mut current = RcFile::from_rc(&root);
 
     // Get initial set of components from the passed path. We remove components
     // as we do the path walk, and update them with the contents of any symlinks
@@ -170,7 +208,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                 // lexically. If pop() fails, then we are at the root and we
                 // must ignore this ".." component.
                 if !expected_path.pop() {
-                    current = Rc::clone(&root);
+                    current = RcFile::from_rc(&root);
                     continue;
                 }
             }
@@ -213,7 +251,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // the luxury of only doing this check when there was a racing rename --
         // we have to do it every time.
         if part.as_bytes() == b".." {
-            check_current(&next, root.as_ref(), &expected_path)
+            check_current(&next, &root, &expected_path)
                 .wrap("check next '..' component didn't escape")?;
         }
 
@@ -229,8 +267,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             .file_type()
             .is_symlink()
         {
-            // TODO: Use an enum to avoid making a needless Rc for this case.
-            current = Rc::new(next);
+            current = next.into();
             continue;
         }
 
@@ -238,8 +275,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // trailing symlink, just return the link we have.
         // TODO: Is this behaviour correct for "foo/" cases?
         if remaining_components.is_empty() && flags.contains(ResolverFlags::NO_FOLLOW_TRAILING) {
-            // TODO: Use an enum to avoid making a needless Rc for this case.
-            current = Rc::new(next);
+            current = next.into();
             break;
         }
 
@@ -308,9 +344,9 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             .raw_components()
             .prepend(&mut remaining_components);
 
-        // Absolute symlinks reset our current state.
+        // Absolute symlinks reset our current state back to /.
         if link_target.is_absolute() {
-            current = Rc::clone(&root);
+            current = RcFile::from_rc(&root);
             expected_path = PathBuf::from("/");
         }
     }
@@ -323,7 +359,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // We are now sure that there is only a single reference to whatever current
     // points to. There is nowhere else we could've stashed a reference, and we
     // only do Rc::clone for root (which we've dropped).
-    let current = Rc::into_inner(current)
+    let current = current
+        .into_inner()
         .expect("current handle in lookup should only have a single Rc reference");
 
     // Everything is Kosher here -- convert to a handle.
