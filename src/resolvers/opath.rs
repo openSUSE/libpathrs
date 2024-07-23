@@ -61,28 +61,26 @@ use snafu::ResultExt;
 /// [`std::path::Components`]: https://doc.rust-lang.org/std/path/struct.Components.html
 /// [`std::ffi::OsStr`]: https://doc.rust-lang.org/std/ffi/struct.OsStr.html
 struct RawComponents<'a> {
-    inner: &'a OsStr,
+    inner: Option<&'a OsStr>,
 }
 
 impl<'a> Iterator for RawComponents<'a> {
     type Item = &'a OsStr;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.inner.is_empty() {
-            None
-        } else {
-            let inner = self.inner.as_bytes();
-            match memchr::memchr(b'/', inner) {
-                None => {
-                    let remaining = self.inner;
-                    self.inner = OsStrExt::from_bytes(&b""[..]);
-                    Some(remaining)
-                }
-                Some(idx) => {
-                    let (head, tail) = inner.split_at(idx);
-                    self.inner = OsStrExt::from_bytes(&tail[1..]);
-                    Some(OsStrExt::from_bytes(head))
-                }
+        match self.inner {
+            None => None,
+            Some(inner) => {
+                let (next, remaining) = match memchr::memchr(b'/', inner.as_bytes()) {
+                    None => (inner, None),
+                    Some(idx) => {
+                        let (head, mut tail) = inner.as_bytes().split_at(idx);
+                        tail = &tail[1..]; // strip slash
+                        (OsStrExt::from_bytes(head), Some(OsStrExt::from_bytes(tail)))
+                    }
+                };
+                self.inner = remaining;
+                Some(next)
             }
         }
     }
@@ -90,21 +88,19 @@ impl<'a> Iterator for RawComponents<'a> {
 
 impl<'a> DoubleEndedIterator for RawComponents<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.inner.is_empty() {
-            None
-        } else {
-            let inner = self.inner.as_bytes();
-            match memchr::memrchr(b'/', inner) {
-                None => {
-                    let remaining = self.inner;
-                    self.inner = OsStrExt::from_bytes(&b""[..]);
-                    Some(remaining)
-                }
-                Some(idx) => {
-                    let (head, tail) = inner.split_at(idx);
-                    self.inner = OsStrExt::from_bytes(head);
-                    Some(OsStrExt::from_bytes(&tail[1..]))
-                }
+        match self.inner {
+            None => None,
+            Some(inner) => {
+                let (next, remaining) = match memchr::memrchr(b'/', inner.as_bytes()) {
+                    None => (inner, None),
+                    Some(idx) => {
+                        let (head, mut tail) = inner.as_bytes().split_at(idx);
+                        tail = &tail[1..]; // strip slash
+                        (OsStrExt::from_bytes(tail), Some(OsStrExt::from_bytes(head)))
+                    }
+                };
+                self.inner = remaining;
+                Some(next)
             }
         }
     }
@@ -117,7 +113,7 @@ trait RawComponentsIter {
 impl<P: AsRef<Path>> RawComponentsIter for P {
     fn raw_components(&self) -> RawComponents<'_> {
         RawComponents {
-            inner: self.as_ref().as_ref(),
+            inner: Some(self.as_ref().as_ref()),
         }
     }
 }
@@ -212,13 +208,21 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         .collect::<VecDeque<_>>();
 
     let mut symlink_traversals = 0;
-    while let Some(part) = components.pop_front() {
+    while let Some(part) = components
+        .pop_front()
+        // If we hit an empty component, we need to treat it as though it is
+        // "." so that trailing "/" and "//" components on a non-directory
+        // correctly return the right error code.
+        .map(|part| if part.is_empty() { ".".into() } else { part })
+    {
         // Ensure that we only got the components we wanted, and generate a
         // tentative expected_path.
         match part.as_bytes() {
-            b"." | b"" => {
-                // We don't need to update expected_path.
-            }
+            b"" => unreachable!(),
+            // For "." component we don't touch expected_path, but we do try to
+            // do the open (to return the correct openat2-compliant error if the
+            // current path is a not directory).
+            b"." => {}
             b".." => {
                 // All of expected_path is non-symlinks, so we can treat ".."
                 // lexically. If pop() fails, then we are at the root and we
