@@ -390,7 +390,7 @@ impl Root {
     pub fn create_file<P: AsRef<Path>>(
         &self,
         path: P,
-        flags: OpenFlags,
+        mut flags: OpenFlags,
         perm: &Permissions,
     ) -> Result<Handle, Error> {
         // Get a handle for the lexical parent of the target path. It must
@@ -407,11 +407,12 @@ impl Root {
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
         // O_NOFOLLOW. We might want to expose that here, though because it
         // can't be done with the emulated backend that might be a bad idea.
-        let flags = flags.0 | libc::O_CREAT;
-        let file =
-            syscalls::openat(dirfd, name, flags, perm.mode()).context(error::RawOsSnafu {
+        flags.insert(OpenFlags::O_CREAT);
+        let file = syscalls::openat(dirfd, name, flags.bits(), perm.mode()).context(
+            error::RawOsSnafu {
                 operation: "pathrs create_file",
-            })?;
+            },
+        )?;
 
         Ok(Handle::from_file_unchecked(file))
     }

@@ -18,11 +18,9 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{error::Error, utils::RawFdExt};
+use crate::{error::Error, flags::OpenFlags, utils::RawFdExt};
 
 use std::fs::File;
-
-use libc::c_int;
 
 /// A handle to an existing inode within a [`Root`].
 ///
@@ -45,52 +43,6 @@ use libc::c_int;
 #[derive(Debug)]
 pub struct Handle {
     inner: File,
-}
-
-/// Wrapper for the underlying `libc`'s `O_*` flags.
-///
-/// The flag values and their meaning is identical to the description in the
-/// `open(2)` man page.
-///
-/// # Caveats
-///
-/// For historical reasons, the first three bits of `open(2)`'s flags are for
-/// the access mode and are actually treated as a 2-bit number. So, it is
-/// incorrect to attempt to do any checks on the access mode without masking it
-/// correctly. So some helpers were added to make usage more ergonomic.
-// TODO: Should probably be a u64, and use a constructor...
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct OpenFlags(pub c_int);
-
-impl From<c_int> for OpenFlags {
-    fn from(flags: c_int) -> Self {
-        Self(flags)
-    }
-}
-
-impl OpenFlags {
-    /// Grab the access mode bits from the flags.
-    #[inline]
-    pub fn access_mode(self) -> c_int {
-        self.0 & libc::O_ACCMODE
-    }
-
-    /// Does the access mode imply read access?
-    #[inline]
-    pub fn wants_read(self) -> bool {
-        let acc = self.access_mode();
-        acc == libc::O_RDONLY || acc == libc::O_RDWR
-    }
-
-    /// Does the access mode imply write access? Note that there are several
-    /// other bits (such as `O_TRUNC`) which imply write access but are not part
-    /// of the access mode, and thus a `false` value from `.wants_write()` does
-    /// not guarantee that the kernel will not do a `MAY_WRITE` check.
-    #[inline]
-    pub fn wants_write(self) -> bool {
-        let acc = self.access_mode();
-        acc == libc::O_WRONLY || acc == libc::O_RDWR
-    }
 }
 
 impl Handle {

@@ -98,13 +98,13 @@ pub extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
-    let flags = OpenFlags(flags);
+    let flags = OpenFlags::from_bits_retain(flags);
 
     fd.reopen(flags)
         .and_then(|file| {
             // Rust sets O_CLOEXEC by default, without an opt-out. We need to
             // disable it if we weren't asked to do O_CLOEXEC.
-            if flags.0 & libc::O_CLOEXEC == 0 {
+            if !flags.contains(OpenFlags::O_CLOEXEC) {
                 syscalls::fcntl_unset_cloexec(file.as_raw_fd()).context(error::RawOsSnafu {
                     operation: "clear O_CLOEXEC on fd",
                 })?;
@@ -198,7 +198,7 @@ pub extern "C" fn pathrs_creat(
     ret::with_fd(root_fd, |root: &mut Root| {
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
-        root.create_file(parse_path(path)?, OpenFlags(flags), &perm)
+        root.create_file(parse_path(path)?, OpenFlags::from_bits_retain(flags), &perm)
     })
 }
 

@@ -57,11 +57,11 @@
 //! // Resolve the path.
 //! let handle = root.resolve(unsafe_path)?;
 //! // Upgrade the handle to a full std::fs::File.
-//! let file = handle.reopen(libc::O_RDONLY)?;
+//! let file = handle.reopen(OpenFlags::O_RDONLY)?;
 //!
 //! // Or, in one line:
 //! let file = root.resolve(unsafe_path)?
-//!                .reopen(libc::O_RDONLY)?;
+//!                .reopen(OpenFlags::O_RDONLY)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -126,6 +126,11 @@ extern crate lazy_static;
 extern crate libc;
 #[macro_use]
 extern crate snafu;
+
+// `OpenFlags`
+pub mod flags;
+#[doc(inline)]
+pub use flags::OpenFlags;
 
 // `Handle` implementation.
 mod handle;

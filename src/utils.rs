@@ -181,10 +181,15 @@ impl RawFdExt for RawFd {
         // TODO: We should look into using O_EMPTYPATH if it's available to
         //       avoid the /proc dependency -- though then again, as_unsafe_path
         //       necessarily requires /proc.
-        syscalls::openat_follow(PROCFS_HANDLE.as_raw_fd(), proc_subpath(*self)?, flags.0, 0)
-            .context(error::RawOsSnafu {
-                operation: "reopen fd through procfs",
-            })
+        syscalls::openat_follow(
+            PROCFS_HANDLE.as_raw_fd(),
+            proc_subpath(*self)?,
+            flags.bits(),
+            0,
+        )
+        .context(error::RawOsSnafu {
+            operation: "reopen fd through procfs",
+        })
     }
 
     fn as_unsafe_path(&self) -> Result<PathBuf, Error> {

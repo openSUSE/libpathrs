@@ -281,9 +281,9 @@ mod utils {
         format!("{:?} ({})", err, Errno(err))
     }
 
-    pub(super) fn check_reopen<F: Into<OpenFlags>>(
+    pub(super) fn check_reopen(
         handle: &Handle,
-        flags: F,
+        flags: OpenFlags,
         expected_error: Option<RawOsError>,
     ) -> Result<(), Error> {
         let file = match (handle.reopen(flags), expected_error) {
@@ -390,18 +390,18 @@ mod utils {
 
         match real_file_type {
             libc::S_IFDIR => {
-                check_reopen(&handle, libc::O_RDONLY, None)?;
-                check_reopen(&handle, libc::O_DIRECTORY, None)?;
+                check_reopen(&handle, OpenFlags::O_RDONLY, None)?;
+                check_reopen(&handle, OpenFlags::O_DIRECTORY, None)?;
             }
             libc::S_IFREG => {
-                check_reopen(&handle, libc::O_RDWR, None)?;
-                check_reopen(&handle, libc::O_DIRECTORY, Some(libc::ENOTDIR))?;
+                check_reopen(&handle, OpenFlags::O_RDWR, None)?;
+                check_reopen(&handle, OpenFlags::O_DIRECTORY, Some(libc::ENOTDIR))?;
             }
             _ => {
-                check_reopen(&handle, libc::O_PATH, None)?;
+                check_reopen(&handle, OpenFlags::O_PATH, None)?;
                 check_reopen(
                     &handle,
-                    libc::O_PATH | libc::O_DIRECTORY,
+                    OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
                     Some(libc::ENOTDIR),
                 )?;
             }
