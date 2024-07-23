@@ -44,7 +44,7 @@ use libc::c_int;
 /// [`libc::openat`]: https://docs.rs/libc/latest/libc/fn.openat.html
 #[derive(Debug)]
 pub struct Handle {
-    pub(crate) inner: File,
+    inner: File,
 }
 
 /// Wrapper for the underlying `libc`'s `O_*` flags.

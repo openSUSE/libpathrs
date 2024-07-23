@@ -171,7 +171,7 @@ impl RenameFlags {
 #[derive(Debug)]
 pub struct Root {
     /// The underlying `O_PATH` `File` for this root handle.
-    pub(crate) inner: File,
+    inner: File,
 
     /// The underlying [`Resolver`] to use for all operations underneath this
     /// root. This affects not just [`Root::resolve`] but also all other methods
@@ -314,7 +314,7 @@ impl Root {
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
-            .inner;
+            .into_file();
         let dirfd = dir.as_raw_fd();
 
         match inode_type {
@@ -338,7 +338,7 @@ impl Root {
                 let olddir = self
                     .resolve(oldparent)
                     .wrap("resolve hardlink source parent for hardlink")?
-                    .inner;
+                    .into_file();
                 let olddirfd = olddir.as_raw_fd();
                 syscalls::linkat(olddirfd, oldname, dirfd, name, 0)
             }
@@ -401,7 +401,7 @@ impl Root {
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
-            .inner;
+            .into_file();
         let dirfd = dir.as_raw_fd();
 
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
@@ -440,7 +440,7 @@ impl Root {
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
-            .inner;
+            .into_file();
         let dirfd = dir.as_raw_fd();
 
         // There is no kernel API to "just remove this inode please". You need
@@ -507,12 +507,12 @@ impl Root {
         let src_dir = self
             .resolve(src_parent)
             .wrap("resolve source path for rename")?
-            .inner;
+            .into_file();
         let src_dirfd = src_dir.as_raw_fd();
         let dst_dir = self
             .resolve(dst_parent)
             .wrap("resolve target path for rename")?
-            .inner;
+            .into_file();
         let dst_dirfd = dst_dir.as_raw_fd();
 
         syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0).context(
