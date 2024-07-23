@@ -134,6 +134,11 @@ macro_rules! resolve_tests {
 
 resolve_tests! {
     // Complete lookups.
+    complete_root1("/") => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+    complete_root2("/../../../../../..") => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+    complete_root_link1("root-link1") => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+    complete_root_link2("root-link2") => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+    complete_root_link3("root-link3") => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
     complete_dir1("a") => ExpectedResult::Ok { real_path: "/a", file_type: libc::S_IFDIR };
     complete_dir2("b/c/d/e/f") => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };
     complete_dir3("b///././c////.//d/./././///e////.//./f//././././") => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };

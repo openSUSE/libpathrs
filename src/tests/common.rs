@@ -103,6 +103,9 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         "b/c/file" => (file);
         "e" => (symlink -> "/b/c/d/e");
         "b-file" => (symlink -> "b/c/file");
+        "root-link1" => (symlink -> "/");
+        "root-link2" => (symlink -> "/..");
+        "root-link3" => (symlink -> "/../../../../..");
         // Some "bad" inodes that non-privileged users can create.
         "b/fifo" => (fifo);
         "b/sock" => (sock);

@@ -50,6 +50,7 @@ use std::{
     io::Error as IOError,
     os::unix::{ffi::OsStrExt, io::AsRawFd},
     path::{Path, PathBuf},
+    rc::Rc,
 };
 
 use snafu::ResultExt;
@@ -197,7 +198,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let mut current = root.try_clone_hotfix().wrap("dup root as starting point")?;
+    let root = Rc::new(root.try_clone_hotfix().wrap("dup root as starting point")?);
+    let mut current = Rc::clone(&root);
 
     // Get initial set of components from the passed path. We remove components
     // as we do the path walk, and update them with the contents of any symlinks
@@ -228,7 +230,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                 // lexically. If pop() fails, then we are at the root and we
                 // must ignore this ".." component.
                 if !expected_path.pop() {
-                    current = root.try_clone_hotfix().wrap("dup root")?;
+                    current = Rc::clone(&root);
                     continue;
                 }
             }
@@ -271,7 +273,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // the luxury of only doing this check when there was a racing rename --
         // we have to do it every time.
         if part.as_bytes() == b".." {
-            check_current(&next, root, &expected_path)
+            check_current(&next, root.as_ref(), &expected_path)
                 .wrap("check next '..' component didn't escape")?;
         }
 
@@ -287,7 +289,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // If we're an ordinary dirent, we just update current and move on
         // to the next component. Nothing special here.
         if !next_type.is_symlink() {
-            current = next;
+            // TODO: Use an enum to avoid making a needless Rc for this case.
+            current = Rc::new(next);
             continue;
         }
 
@@ -341,13 +344,21 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // to reset our current back to the root.
         expected_path.pop();
         if contents.is_absolute() {
-            current = root.try_clone_hotfix().wrap("dup root as next current")?;
+            current = Rc::clone(&root);
             expected_path = PathBuf::from("/");
         }
     }
 
     // Make sure that the path is what we expect...
-    check_current(&current, root, &expected_path).wrap("check final handle didn't escape")?;
+    check_current(&current, &*root, &expected_path).wrap("check final handle didn't escape")?;
+
+    // Drop root in case current is a reference to it.
+    std::mem::drop(root);
+    // We are now sure that there is only a single reference to whatever current
+    // points to. There is nowhere else we could've stashed a reference, and we
+    // only do Rc::clone for root (which we've dropped).
+    let current = Rc::into_inner(current)
+        .expect("current handle in lookup should only have a single Rc reference");
 
     // Everything is Kosher here -- convert to a handle.
     Ok(Handle::from_file_unchecked(current))
