@@ -20,6 +20,7 @@
 
 use crate::{
     error::{self, Error},
+    resolvers::{procfs::ProcfsResolver, ResolverFlags},
     syscalls, utils, OpenFlags,
 };
 
@@ -128,9 +129,8 @@ impl ProcfsBase {
 pub(crate) struct ProcfsHandle {
     inner: File,
     mnt_id: Option<u64>,
+    pub(crate) resolver: ProcfsResolver,
 }
-
-// TODO: Use a restricted resolver for doing subpath lookups.
 
 impl ProcfsHandle {
     // This is part of Linux's ABI.
@@ -183,19 +183,13 @@ impl ProcfsHandle {
     }
 
     fn open_base(&self, base: ProcfsBase) -> Result<File, Error> {
-        // TODO: Switch this with a proper resolver.
-        let file = syscalls::openat_follow(
-            self.inner.as_raw_fd(),
+        let file = self.resolver.resolve(
+            &self.inner,
             base.into_path(Some(&self.inner)),
-            libc::O_PATH | libc::O_DIRECTORY,
-            0,
-        )
-        .context(error::RawOsSnafu {
-            operation: "open procfs base path",
-        })?;
+            OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
+            ResolverFlags::empty(),
+        )?;
         // Detect if the file we landed is in a bind-mount.
-        // NOTE: This is not safe against magic-link bind-mount attacks. We need
-        // to have a proper restricted resolver to solve that issue.
         self.check_mnt_id(&file, "")?;
         // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
         // do is check the fs_type to avoid mounts non-procfs filesystems.
@@ -228,6 +222,10 @@ impl ProcfsHandle {
         // components (to reduce the amount of work on non-openat2 systems), but
         // that would be more work for openat2 systems so let's give preference
         // to openat2.
+        //
+        // NOTE: There is technically a race here, but it relies the target path
+        //       being a magic-link and then another thing being mounted on top.
+        //       This is the same race as below.
         if self.readlink(base, subpath).is_err() {
             return self.open(base, subpath, flags);
         }
@@ -243,9 +241,6 @@ impl ProcfsHandle {
 
         // Detect if the magic-link we are about to open is actually a
         // bind-mount.
-        // NOTE: This is not properly safe against magic-link bind-mount attacks
-        // for path components we walked through before this. We need to have a
-        // proper restricted resolver to solve that issue.
         // NOTE: This check is only safe if there are no racing mounts. When we
         // add fsopen(2) and open_tree(2) support this will be safer.
         self.check_mnt_id(&parent, trailing)?;
@@ -261,34 +256,30 @@ impl ProcfsHandle {
         &self,
         base: ProcfsBase,
         subpath: P,
-        flags: OpenFlags,
+        mut flags: OpenFlags,
     ) -> Result<File, Error> {
-        let base = self.open_base(base)?;
+        // Force-set O_NOFOLLOW, though NO_FOLLOW_TRAILING should be sufficient.
+        flags.insert(OpenFlags::O_NOFOLLOW);
 
-        // TODO: Switch this with a proper resolver.
-        let file = syscalls::openat(
-            base.as_raw_fd(),
-            subpath,
-            flags.bits() | libc::O_PATH | libc::O_NOFOLLOW,
-            0,
-        )
-        .context(error::RawOsSnafu {
-            operation: "open procfs path",
-        })?;
+        // Do a basic lookup.
+        let base = self.open_base(base)?;
+        let file =
+            self.resolver
+                .resolve(&base, subpath, flags, ResolverFlags::NO_FOLLOW_TRAILING)?;
+
         // Detect if the file we landed is in a bind-mount.
-        // NOTE: This is not safe against magic-link bind-mount attacks. We need
-        // to have a proper restricted resolver to solve that issue.
         self.check_mnt_id(&file, "")?;
         // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
         // do is check the fs_type to avoid mounts non-procfs filesystems.
         // Unfortunately, attackers can bind-mount procfs files and still
         // cause damage so this protection is marginal at best.
         Self::check_is_procfs(&file)?;
+
         Ok(file)
     }
 
     pub fn readlink<P: AsRef<Path>>(&self, base: ProcfsBase, subpath: P) -> Result<PathBuf, Error> {
-        let link = self.open(base, subpath, OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW)?;
+        let link = self.open(base, subpath, OpenFlags::O_PATH)?;
         syscalls::readlinkat(link.as_raw_fd(), "").context(error::RawOsSnafu {
             operation: "read procfs magiclink",
         })
@@ -318,8 +309,13 @@ impl TryFrom<File> for ProcfsHandle {
         );
 
         let mnt_id = utils::fetch_mnt_id(&inner, "")?;
+        let resolver = ProcfsResolver::default();
 
-        Ok(Self { inner, mnt_id })
+        Ok(Self {
+            inner,
+            mnt_id,
+            resolver,
+        })
     }
 }
 

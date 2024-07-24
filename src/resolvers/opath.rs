@@ -37,8 +37,8 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
-    resolvers::ResolverFlags,
     procfs::PROCFS_HANDLE,
+    resolvers::{ResolverFlags, MAX_SYMLINK_TRAVERSALS},
     syscalls,
     utils::{FileExt, RawComponentsIter, RawFdExt},
     Handle,
@@ -56,9 +56,6 @@ use std::{
 };
 
 use snafu::ResultExt;
-
-/// Maximum number of symlink traversals we will accept.
-const MAX_SYMLINK_TRAVERSALS: usize = 128;
 
 /// Ensure that the expected path within the root matches the current fd.
 fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Result<(), Error> {

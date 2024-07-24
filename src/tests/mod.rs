@@ -16,6 +16,6 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod common;
+pub(crate) mod common;
 
 mod test_resolve;

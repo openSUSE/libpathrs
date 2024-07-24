@@ -17,4 +17,4 @@
  */
 
 mod root;
-pub(in crate::tests) use root::*;
+pub(crate) use root::*;

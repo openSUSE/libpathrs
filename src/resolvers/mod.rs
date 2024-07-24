@@ -26,6 +26,11 @@ use std::{fs::File, path::Path};
 pub mod opath;
 /// `openat2(2)`-based in-kernel resolver.
 pub mod openat2;
+/// A limited resolver only used for `/proc` lookups in `ProcfsHandle`.
+pub(crate) mod procfs;
+
+/// Maximum number of symlink traversals we will accept.
+const MAX_SYMLINK_TRAVERSALS: usize = 128;
 
 bitflags! {
     /// Optional flags to modify the resolution of paths inside a [`Root`].
