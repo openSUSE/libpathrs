@@ -45,8 +45,10 @@ use crate::{
 
 use std::{
     collections::VecDeque,
+    ffi::OsStr,
     fs::File,
     io::Error as IOError,
+    iter,
     os::unix::{ffi::OsStrExt, io::AsRawFd},
     path::{Path, PathBuf},
     rc::Rc,
@@ -70,12 +72,13 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     // Combine the root path and our expected_path to get the full path to
     // compare current against.
     let full_path: PathBuf = root_path.join(
-        expected
-            .as_ref()
-            .raw_components()
-            // At this point, expected_path should only have Normal components.
-            // If there are any other components we can just ignore them because
-            // this expected_path check will probably fail.
+        // Path::join() has the unfortunate behaviour that a leading "/" will
+        // result in the prefix path being removed. In practice we don't ever
+        // hit this case (probably because RawComponents doesn't explicitly have
+        // an equivalent of Components::RootDir), but just to be sure prepend a
+        // "." component anyway.
+        iter::once(OsStr::from_bytes(b"."))
+            .chain(expected.as_ref().raw_components())
             // NOTE: PathBuf::push() does not normalise components.
             .collect::<PathBuf>(),
     );
@@ -95,7 +98,11 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     ensure!(
         current_path == full_path,
         error::SafetyViolationSnafu {
-            description: "fd doesn't match expected path"
+            description: format!(
+                "fd doesn't match expected path ({} != {})",
+                current_path.display(),
+                full_path.display()
+            )
         }
     );
 

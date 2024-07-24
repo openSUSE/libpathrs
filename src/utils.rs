@@ -286,6 +286,11 @@ impl<'a> Iterator for RawComponents<'a> {
                     }
                 };
                 self.inner = remaining;
+                assert!(
+                    !next.as_bytes().contains(&b'/'),
+                    "individual path component {:?} contains '/'",
+                    next
+                );
                 Some(next)
             }
         }
@@ -306,6 +311,11 @@ impl<'a> DoubleEndedIterator for RawComponents<'a> {
                     }
                 };
                 self.inner = remaining;
+                assert!(
+                    !next.as_bytes().contains(&b'/'),
+                    "individual path component {:?} contains '/'",
+                    next
+                );
                 Some(next)
             }
         }
