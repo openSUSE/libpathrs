@@ -1,6 +1,6 @@
 # libpathrs: safe path resolution on Linux
-# Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
-# Copyright (C) 2019-2021 SUSE LLC
+# Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+# Copyright (C) 2019-2024 SUSE LLC
 #
 # This program is free software: you can redistribute it and/or modify it under
 # the terms of the GNU Lesser General Public License as published by the Free
@@ -19,8 +19,8 @@ language = "C"
 header = """
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -70,48 +70,19 @@ aligned_n = "__CBINDGEN_ALIGNED"
 
 [export]
 exclude = [
-	# Useless for C users.
-	"PATH_SEPARATOR",
 	# Don't export the RESOLVE_* definitions.
 	"RESOLVE_NO_XDEV",
 	"RESOLVE_NO_MAGICLINKS",
 	"RESOLVE_NO_SYMLINKS",
 	"RESOLVE_BENEATH",
 	"RESOLVE_IN_ROOT",
-	# Nor the UPGRADE_* definitions.
-	"UPGRADE_NOWRITE",
-	"UPGRADE_NOREAD",
-]
-
-# These types have no obvious usage within the FFI wrappers (they are always
-# passed as void *), so we need to force cbindgen to include them.
-include = [
-	"CGlobalConfig",
-	"CRootConfig",
 ]
 
 # Clean up the naming of structs.
 [export.rename]
-"CResolver" = "pathrs_resolver_t"
-"CPointerType" = "pathrs_type_t"
 
-# libc
-"RawFd" = "int"
-
-# C*Conifg
-"CGlobalConfig" = "pathrs_config_global_t"
-"CRootConfig" = "pathrs_config_root_t"
-
-# CPointer<Root>
-"CRoot" = "pathrs_root_t"
-"CPointer_Root" = "__pathrs_root_t"
-
-# CPointer<Handle>
-"CHandle" = "pathrs_handle_t"
-"CPointer_Handle" = "__pathrs_handle_t"
-
-# CError and family.
-"CBacktraceEntry" = "__pathrs_backtrace_entry_t"
-"CVec_CBacktraceEntry" = "__pathrs_backtrace_t"
-"CBacktrace" = "pathrs_backtrace_t"
+# Error API.
 "CError" = "pathrs_error_t"
+
+# The bare return values used for "kernel-like" APIs.
+"RawFd" = "int"
