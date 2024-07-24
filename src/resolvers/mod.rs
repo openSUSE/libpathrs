@@ -33,6 +33,8 @@ bitflags! {
     /// [`Root`]: struct.Root.html
     #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
     pub struct ResolverFlags: u64 {
+        // TODO: We should probably have our own bits...
+        const NO_FOLLOW_TRAILING = libc::O_NOFOLLOW as u64;
         const NO_SYMLINKS = libc::RESOLVE_NO_SYMLINKS;
     }
 }

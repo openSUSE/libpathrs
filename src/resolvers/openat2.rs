@@ -44,11 +44,18 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 
     let mut how = syscalls::OpenHow::default();
     how.flags = libc::O_PATH as u64;
+    if flags.contains(ResolverFlags::NO_FOLLOW_TRAILING) {
+        how.flags |= libc::O_NOFOLLOW as u64;
+    }
+
     // RESOLVE_IN_ROOT does exactly what we want, but we also want to avoid
     // resolving magic-links. RESOLVE_IN_ROOT already blocks magic-link
     // crossings, but that may change in the future (if the magic-links are
     // considered "safe") but we should still explicitly avoid them entirely.
-    how.resolve = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | flags.bits();
+    how.resolve = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS;
+    if flags.contains(ResolverFlags::NO_SYMLINKS) {
+        how.resolve |= libc::RESOLVE_NO_SYMLINKS;
+    }
 
     // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
     // *anywhere on the system*. This can happen pretty frequently, so what we
@@ -59,8 +66,9 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             Ok(file) => return Ok(Handle::from_file_unchecked(file)),
             Err(err) => match err.root_cause().raw_os_error() {
                 Some(libc::ENOSYS) => {
-                    return error::NotSupportedSnafu { feature: "openat2" }.fail()
-                } // shouldn't happen
+                    // shouldn't happen
+                    return error::NotSupportedSnafu { feature: "openat2" }.fail();
+                }
                 Some(libc::EAGAIN) => continue,
                 // TODO: Add wrapper for known-bad openat2 return codes.
                 //Some(libc::EXDEV) | Some(libc::ELOOP) => { ... }

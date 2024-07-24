@@ -219,21 +219,30 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                 .wrap("check next '..' component didn't escape")?;
         }
 
-        // Is the next dirfd a symlink or an ordinary path?
+        // Is the next dirfd a symlink or an ordinary path? If we're an ordinary
+        // dirent, we just update current and move on to the next component.
+        // Nothing special here.
         // NOTE: File::metadata definitely does an fstat(2) here.
-        let next_type = next
+        if !next
             .metadata()
             .context(error::OsSnafu {
                 operation: "fstat of next component",
             })?
-            .file_type();
-
-        // If we're an ordinary dirent, we just update current and move on
-        // to the next component. Nothing special here.
-        if !next_type.is_symlink() {
+            .file_type()
+            .is_symlink()
+        {
             // TODO: Use an enum to avoid making a needless Rc for this case.
             current = Rc::new(next);
             continue;
+        }
+
+        // If we hit the last component and we were told to not follow the
+        // trailing symlink, just return the link we have.
+        // TODO: Is this behaviour correct for "foo/" cases?
+        if remaining_components.is_empty() && flags.contains(ResolverFlags::NO_FOLLOW_TRAILING) {
+            // TODO: Use an enum to avoid making a needless Rc for this case.
+            current = Rc::new(next);
+            break;
         }
 
         // Don't continue walking if user asked for no symlinks.
