@@ -33,24 +33,24 @@ use std::{
 use libc::c_int;
 use rand::{self, Rng};
 
+type CReturn = c_int;
+
 pub(super) trait IntoCReturn {
-    fn into_c_return(self) -> c_int;
+    fn into_c_return(self) -> CReturn;
 }
 
 // TODO: Switch this to using a slab or similar structure, possibly using a less heavy-weight lock?
 lazy_static! {
-    static ref ERROR_MAP: Mutex<HashMap<c_int, Error>> = Mutex::new(HashMap::new());
+    static ref ERROR_MAP: Mutex<HashMap<CReturn, Error>> = Mutex::new(HashMap::new());
 }
 
-type CReturn = c_int;
-
-fn store_error(err: Error) -> c_int {
+fn store_error(err: Error) -> CReturn {
     let mut err_map = ERROR_MAP.lock().unwrap();
 
     // Try to find a negative error value we can use.
     let mut g = rand::thread_rng();
     loop {
-        let idx: c_int = g.gen_range(c_int::MIN..=-1);
+        let idx = g.gen_range(CReturn::MIN..=-1);
         match err_map.entry(idx) {
             HashMapEntry::Occupied(_) => continue,
             HashMapEntry::Vacant(slot) => {
@@ -64,6 +64,12 @@ fn store_error(err: Error) -> c_int {
 impl IntoCReturn for () {
     fn into_c_return(self) -> CReturn {
         0
+    }
+}
+
+impl IntoCReturn for CReturn {
+    fn into_c_return(self) -> CReturn {
+        self
     }
 }
 
