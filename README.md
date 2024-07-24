@@ -1,6 +1,6 @@
 ## `libpathrs` ##
 
-[![build status](https://travis-ci.org/openSUSE/libpathrs.svg?branch=master)](https://travis-ci.org/openSUSE/libpathrs)
+[![build status](https://github.com/openSUSE/libpathrs/actions/workflows/ci.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/ci.yml)
 [![docs](https://docs.rs/pathrs/badge.svg)](https://docs.rs/pathrs/)
 [![dependency status](https://deps.rs/repo/github/openSUSE/libpathrs/status.svg)](https://deps.rs/repo/github/openSUSE/libpathrs)
 
