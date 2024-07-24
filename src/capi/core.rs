@@ -17,39 +17,25 @@
  */
 
 use crate::{
-    capi::ret::{self, IntoCReturn},
-    error::{self, Error},
-    syscalls,
+    capi::{
+        ret::{self, IntoCReturn},
+        utils,
+    },
+    error, syscalls,
     utils::RawFdExt,
     InodeType, OpenFlags, RenameFlags, Root,
 };
 
 use std::{
-    ffi::{CStr, OsStr},
     fs::Permissions,
-    os::unix::ffi::OsStrExt,
     os::unix::{
         fs::PermissionsExt,
         io::{AsRawFd, RawFd},
     },
-    path::Path,
 };
 
 use libc::{c_char, c_int, c_uint, dev_t};
 use snafu::ResultExt;
-
-fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
-    ensure!(
-        !path.is_null(),
-        error::InvalidArgumentSnafu {
-            name: "path",
-            description: "cannot be NULL",
-        }
-    );
-    // SAFETY: C caller guarantees that the path is a valid C-style string.
-    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
-    Ok(OsStr::from_bytes(bytes).as_ref())
-}
 
 /// Open a root handle.
 ///
@@ -73,7 +59,7 @@ fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
-    parse_path(path).and_then(Root::open).into_c_return()
+    utils::parse_path(path).and_then(Root::open).into_c_return()
 }
 
 /// "Upgrade" an O_PATH file descriptor to a usable fd, suitable for reading and
@@ -128,7 +114,9 @@ pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_resolve(root_fd: RawFd, path: *const c_char) -> RawFd {
-    ret::with_fd(root_fd, |root: &mut Root| root.resolve(parse_path(path)?))
+    ret::with_fd(root_fd, |root: &mut Root| {
+        root.resolve(utils::parse_path(path)?)
+    })
 }
 
 /// Rename a path within the rootfs referenced by root_fd. The flags argument is
@@ -151,7 +139,7 @@ pub extern "C" fn pathrs_rename(
 ) -> c_int {
     ret::with_fd(root_fd, |root: &mut Root| {
         let flags = RenameFlags(flags);
-        root.rename(parse_path(src)?, parse_path(dst)?, flags)
+        root.rename(utils::parse_path(src)?, utils::parse_path(dst)?, flags)
     })
 }
 
@@ -198,7 +186,11 @@ pub extern "C" fn pathrs_creat(
     ret::with_fd(root_fd, |root: &mut Root| {
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
-        root.create_file(parse_path(path)?, OpenFlags::from_bits_retain(flags), &perm)
+        root.create_file(
+            utils::parse_path(path)?,
+            OpenFlags::from_bits_retain(flags),
+            &perm,
+        )
     })
 }
 
@@ -241,7 +233,7 @@ pub extern "C" fn pathrs_mknod(
     ret::with_fd(root_fd, |root: &mut Root| {
         let fmt = mode & libc::S_IFMT;
         let perms = Permissions::from_mode(mode ^ fmt);
-        let path = parse_path(path)?;
+        let path = utils::parse_path(path)?;
         let inode_type = match fmt {
             libc::S_IFREG => InodeType::File(&perms),
             libc::S_IFDIR => InodeType::Directory(&perms),
@@ -280,8 +272,8 @@ pub extern "C" fn pathrs_symlink(
     target: *const c_char,
 ) -> c_int {
     ret::with_fd(root_fd, |root: &mut Root| {
-        let path = parse_path(path)?;
-        let target = parse_path(target)?;
+        let path = utils::parse_path(path)?;
+        let target = utils::parse_path(target)?;
         root.create(path, &InodeType::Symlink(target))
     })
 }
@@ -304,8 +296,8 @@ pub extern "C" fn pathrs_hardlink(
     target: *const c_char,
 ) -> c_int {
     ret::with_fd(root_fd, |root: &mut Root| {
-        let path = parse_path(path)?;
-        let target = parse_path(target)?;
+        let path = utils::parse_path(path)?;
+        let target = utils::parse_path(target)?;
         root.create(path, &InodeType::Hardlink(target))
     })
 }

@@ -16,11 +16,31 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::Error;
+use crate::error::{self, Error};
 
-use std::{convert::TryInto, ffi::CString, io::Error as IOError, ptr};
+use std::{
+    convert::TryInto,
+    ffi::{CStr, CString, OsStr},
+    io::Error as IOError,
+    os::unix::ffi::OsStrExt,
+    path::Path,
+    ptr,
+};
 
 use libc::c_char;
+
+pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
+    ensure!(
+        !path.is_null(),
+        error::InvalidArgumentSnafu {
+            name: "path",
+            description: "cannot be NULL",
+        }
+    );
+    // SAFETY: C caller guarantees that the path is a valid C-style string.
+    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
+    Ok(OsStr::from_bytes(bytes).as_ref())
+}
 
 pub(crate) trait Leakable {
     /// Leak a structure such that it can be passed through C-FFI.
