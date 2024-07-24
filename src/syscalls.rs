@@ -811,3 +811,8 @@ pub fn getpid() -> libc::pid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::getpid() }
 }
+
+pub fn gettid() -> libc::pid_t {
+    // SAFETY: Obviously safe libc function.
+    unsafe { libc::gettid() }
+}

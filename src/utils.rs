@@ -201,7 +201,7 @@ impl RawFdExt for RawFd {
     fn as_unsafe_path_unchecked(&self) -> Result<PathBuf, Error> {
         // "/proc/thread-self/fd/$n"
         let fd_path = PathBuf::from("/proc")
-            .join(ProcfsBase::ProcThreadSelf.into_path())
+            .join(ProcfsBase::ProcThreadSelf.into_path(None))
             .join(proc_subpath(*self)?);
 
         // Because this code is used within syscalls, we can't even check the

@@ -58,11 +58,30 @@ pub(crate) enum ProcfsBase {
 }
 
 impl ProcfsBase {
-    pub(crate) fn into_path(self) -> PathBuf {
+    pub(crate) fn into_path(self, proc_root: Option<&File>) -> PathBuf {
         match self {
             Self::ProcSelf => PathBuf::from("self"),
-            // TODO: Add fallback handling for pre-3.17 kernels.
-            Self::ProcThreadSelf => PathBuf::from("thread-self"),
+            Self::ProcThreadSelf => vec![
+                // /proc/thread-self was added in Linux 3.17.
+                "thread-self".into(),
+                // For pre-3.17 kernels we use the fully-expanded version.
+                format!("self/task/{}", syscalls::gettid()).into(),
+                // However, if the proc root is not using our pid namespace, the
+                // tid in /proc/self/task/... will be wrong and we need to fall
+                // back to /proc/self. This is technically incorrect but we have
+                // no other choice.
+                "self".into(),
+            ]
+            .into_iter()
+            // Return the first option that exists in proc_root.
+            .find(|base| {
+                match proc_root {
+                    Some(root) => syscalls::fstatat(root.as_raw_fd(), base),
+                    None => syscalls::fstatat(libc::AT_FDCWD, PathBuf::from("/proc").join(base)),
+                }
+                .is_ok()
+            })
+            .expect("at least one candidate /proc/thread-self path should work"),
         }
     }
     // TODO: Add into_raw_path() that doesn't use symlinks?
@@ -167,7 +186,7 @@ impl ProcfsHandle {
         // TODO: Switch this with a proper resolver.
         let file = syscalls::openat_follow(
             self.inner.as_raw_fd(),
-            base.into_path(),
+            base.into_path(Some(&self.inner)),
             libc::O_PATH | libc::O_DIRECTORY,
             0,
         )
