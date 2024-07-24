@@ -24,7 +24,8 @@ use crate::{
 };
 
 use std::{
-    ffi::{CString, OsStr},
+    collections::VecDeque,
+    ffi::{CString, OsStr, OsString},
     fs::File,
     os::unix::{
         ffi::OsStrExt,
@@ -256,5 +257,80 @@ impl FileExt for File {
             operation: "check fstype of fd",
         })?;
         Ok(DANGEROUS_FILESYSTEMS.contains(&stat.f_type))
+    }
+}
+
+/// RawComponents is like [`std::path::Components`] execpt that no normalisation
+/// is done for any path components ([`std::path::Components`] normalises "/./"
+/// components), and all of the components are simply [`std::ffi::OsStr`].
+///
+/// [`std::path::Components`]: https://doc.rust-lang.org/std/path/struct.Components.html
+/// [`std::ffi::OsStr`]: https://doc.rust-lang.org/std/ffi/struct.OsStr.html
+pub(crate) struct RawComponents<'a> {
+    inner: Option<&'a OsStr>,
+}
+
+impl<'a> Iterator for RawComponents<'a> {
+    type Item = &'a OsStr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner {
+            None => None,
+            Some(inner) => {
+                let (next, remaining) = match memchr::memchr(b'/', inner.as_bytes()) {
+                    None => (inner, None),
+                    Some(idx) => {
+                        let (head, mut tail) = inner.as_bytes().split_at(idx);
+                        tail = &tail[1..]; // strip slash
+                        (OsStrExt::from_bytes(head), Some(OsStrExt::from_bytes(tail)))
+                    }
+                };
+                self.inner = remaining;
+                Some(next)
+            }
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for RawComponents<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self.inner {
+            None => None,
+            Some(inner) => {
+                let (next, remaining) = match memchr::memrchr(b'/', inner.as_bytes()) {
+                    None => (inner, None),
+                    Some(idx) => {
+                        let (head, mut tail) = inner.as_bytes().split_at(idx);
+                        tail = &tail[1..]; // strip slash
+                        (OsStrExt::from_bytes(tail), Some(OsStrExt::from_bytes(head)))
+                    }
+                };
+                self.inner = remaining;
+                Some(next)
+            }
+        }
+    }
+}
+
+impl RawComponents<'_> {
+    pub(crate) fn prepend(&mut self, deque: &mut VecDeque<OsString>) {
+        self.map(|p| p.to_os_string())
+            // VecDeque doesn't have an amortized way of prepending a
+            // Vec, so we need to do this manually. We need to rev() the
+            // iterator since we're pushing to the front each time.
+            .rev()
+            .for_each(|p| deque.push_front(p));
+    }
+}
+
+pub(crate) trait RawComponentsIter {
+    fn raw_components(&self) -> RawComponents<'_>;
+}
+
+impl<P: AsRef<Path>> RawComponentsIter for P {
+    fn raw_components(&self) -> RawComponents<'_> {
+        RawComponents {
+            inner: Some(self.as_ref().as_ref()),
+        }
     }
 }

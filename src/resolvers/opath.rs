@@ -39,13 +39,12 @@ use crate::{
     error::{self, Error, ErrorExt},
     resolvers::ResolverFlags,
     syscalls,
-    utils::{FileExt, RawFdExt},
+    utils::{FileExt, RawComponentsIter, RawFdExt},
     Handle,
 };
 
 use std::{
     collections::VecDeque,
-    ffi::OsStr,
     fs::File,
     io::Error as IOError,
     os::unix::{ffi::OsStrExt, io::AsRawFd},
@@ -54,70 +53,6 @@ use std::{
 };
 
 use snafu::ResultExt;
-
-/// RawComponents is like [`std::path::Components`] execpt that no normalisation
-/// is done for any path components ([`std::path::Components`] normalises "/./"
-/// components), and all of the components are simply [`std::ffi::OsStr`].
-///
-/// [`std::path::Components`]: https://doc.rust-lang.org/std/path/struct.Components.html
-/// [`std::ffi::OsStr`]: https://doc.rust-lang.org/std/ffi/struct.OsStr.html
-struct RawComponents<'a> {
-    inner: Option<&'a OsStr>,
-}
-
-impl<'a> Iterator for RawComponents<'a> {
-    type Item = &'a OsStr;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.inner {
-            None => None,
-            Some(inner) => {
-                let (next, remaining) = match memchr::memchr(b'/', inner.as_bytes()) {
-                    None => (inner, None),
-                    Some(idx) => {
-                        let (head, mut tail) = inner.as_bytes().split_at(idx);
-                        tail = &tail[1..]; // strip slash
-                        (OsStrExt::from_bytes(head), Some(OsStrExt::from_bytes(tail)))
-                    }
-                };
-                self.inner = remaining;
-                Some(next)
-            }
-        }
-    }
-}
-
-impl<'a> DoubleEndedIterator for RawComponents<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        match self.inner {
-            None => None,
-            Some(inner) => {
-                let (next, remaining) = match memchr::memrchr(b'/', inner.as_bytes()) {
-                    None => (inner, None),
-                    Some(idx) => {
-                        let (head, mut tail) = inner.as_bytes().split_at(idx);
-                        tail = &tail[1..]; // strip slash
-                        (OsStrExt::from_bytes(tail), Some(OsStrExt::from_bytes(head)))
-                    }
-                };
-                self.inner = remaining;
-                Some(next)
-            }
-        }
-    }
-}
-
-trait RawComponentsIter {
-    fn raw_components(&self) -> RawComponents<'_>;
-}
-
-impl<P: AsRef<Path>> RawComponentsIter for P {
-    fn raw_components(&self) -> RawComponents<'_> {
-        RawComponents {
-            inner: Some(self.as_ref().as_ref()),
-        }
-    }
-}
 
 /// Maximum number of symlink traversals we will accept.
 const MAX_SYMLINK_TRAVERSALS: usize = 128;
@@ -204,13 +139,13 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // Get initial set of components from the passed path. We remove components
     // as we do the path walk, and update them with the contents of any symlinks
     // we encounter. Path walking terminates when there are no components left.
-    let mut components = path
+    let mut remaining_components = path
         .raw_components()
         .map(|p| p.to_os_string())
         .collect::<VecDeque<_>>();
 
     let mut symlink_traversals = 0;
-    while let Some(part) = components
+    while let Some(part) = remaining_components
         .pop_front()
         // If we hit an empty component, we need to treat it as though it is
         // "." so that trailing "/" and "//" components on a non-directory
@@ -324,26 +259,22 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             })?;
         }
 
-        let contents = syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
-            operation: "readlink next symlink component",
-        })?;
+        let link_target =
+            syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
+                operation: "readlink next symlink component",
+            })?;
+
+        // Remove the link component from our expectex path.
+        expected_path.pop();
 
         // Add contents of the symlink to the set of components we are looping
-        // over. The
-        contents
+        // over.
+        link_target
             .raw_components()
-            .map(|p| p.to_os_string())
-            // VecDeque doesn't have an amortized way of prepending a
-            // Vec, so we need to do this manually. We need to rev() the
-            // iterator since we're pushing to the front each time.
-            .rev()
-            .for_each(|p| components.push_front(p));
+            .prepend(&mut remaining_components);
 
-        // Remove our tentative expected_path contents. They will be
-        // filled on later iterations. If the path is absolute we need
-        // to reset our current back to the root.
-        expected_path.pop();
-        if contents.is_absolute() {
+        // Absolute symlinks reset our current state.
+        if link_target.is_absolute() {
             current = Rc::clone(&root);
             expected_path = PathBuf::from("/");
         }
