@@ -27,11 +27,6 @@ use std::{fs::File, os::unix::io::AsRawFd, path::Path};
 
 use snafu::ResultExt;
 
-lazy_static! {
-    pub(crate) static ref IS_SUPPORTED: bool =
-        syscalls::openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
-}
-
 /// Resolve `path` within `root` through `openat2(2)`.
 pub(crate) fn resolve<P: AsRef<Path>>(
     root: &File,
@@ -39,7 +34,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     rflags: ResolverFlags,
 ) -> Result<Handle, Error> {
     ensure!(
-        *IS_SUPPORTED,
+        *syscalls::OPENAT2_IS_SUPPORTED,
         error::NotSupportedSnafu { feature: "openat2" }
     );
 

@@ -61,7 +61,7 @@ macro_rules! resolve_tests {
 
                 #[test]
                 fn [<test_root_openat2_ $test_name>]() -> Result<(), Error> {
-                    if !*$crate::resolvers::openat2::IS_SUPPORTED {
+                    if !*$crate::syscalls::OPENAT2_IS_SUPPORTED {
                         // skip test
                         return Ok(());
                     }
@@ -103,7 +103,7 @@ macro_rules! resolve_tests {
 
                 #[test]
                 fn [<test_openat2_ $test_name>]() -> Result<(), Error> {
-                    if !*$crate::resolvers::openat2::IS_SUPPORTED {
+                    if !*$crate::syscalls::OPENAT2_IS_SUPPORTED {
                         // skip test
                         return Ok(());
                     }

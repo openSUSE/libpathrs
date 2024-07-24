@@ -18,7 +18,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{error::Error, Handle};
+use crate::{error::Error, syscalls, Handle};
 
 use std::{fs::File, path::Path};
 
@@ -69,7 +69,7 @@ pub enum ResolverBackend {
 }
 
 lazy_static! {
-    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *openat2::IS_SUPPORTED {
+    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *syscalls::OPENAT2_IS_SUPPORTED {
         ResolverBackend::KernelOpenat2
     } else {
         ResolverBackend::EmulatedOpath
@@ -86,7 +86,7 @@ impl ResolverBackend {
     /// Checks if the resolver is supported on the current platform.
     pub fn supported(self) -> bool {
         match self {
-            ResolverBackend::KernelOpenat2 => *openat2::IS_SUPPORTED,
+            ResolverBackend::KernelOpenat2 => *syscalls::OPENAT2_IS_SUPPORTED,
             ResolverBackend::EmulatedOpath => true,
         }
     }

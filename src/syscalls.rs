@@ -37,6 +37,11 @@ use std::{
 use libc::{c_int, dev_t, mode_t, stat, statfs};
 use snafu::ResultExt;
 
+lazy_static! {
+    pub(crate) static ref OPENAT2_IS_SUPPORTED: bool =
+        openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
+}
+
 /// Representation of a file descriptor and its associated path at a given point
 /// in time.
 ///
