@@ -297,7 +297,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     }
 
     // Make sure that the path is what we expect...
-    check_current(&current, &*root, &expected_path).wrap("check final handle didn't escape")?;
+    check_current(&current, &root, &expected_path).wrap("check final handle didn't escape")?;
 
     // Drop root in case current is a reference to it.
     std::mem::drop(root);

@@ -391,7 +391,7 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
     // If the contents of the symlink are larger than this, we raise a
     // SafetyViolation to avoid DoS vectors (because there is no way to get the
     // size of a symlink beforehand, you just have to read it).
-    let mut buffer = [0 as u8; 32 * libc::PATH_MAX as usize];
+    let mut buffer = [0_u8; 32 * libc::PATH_MAX as usize];
     // SAFETY: Obviously safe-to-use Linux syscall.
     let len = unsafe {
         libc::readlinkat(

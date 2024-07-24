@@ -108,7 +108,7 @@ impl From<&Error> for CError {
     /// an IOError then errno is populated with that value.
     fn from(err: &Error) -> Self {
         let desc = err.iter_chain_hotfix().fold(String::new(), |mut s, next| {
-            if s != "" {
+            if !s.is_empty() {
                 s.push_str(": ");
             }
             s.push_str(&next.to_string());

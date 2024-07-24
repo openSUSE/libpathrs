@@ -303,8 +303,7 @@ mod utils {
                 assert_eq!(
                     err.root_cause()
                         .downcast_ref::<io::Error>()
-                        .map(io::Error::raw_os_error)
-                        .flatten(),
+                        .and_then(io::Error::raw_os_error),
                     Some(want_err),
                     "expected io::Error {}, got '{}'",
                     errno_description(want_err),
@@ -370,8 +369,7 @@ mod utils {
                     assert_eq!(
                         err.root_cause()
                             .downcast_ref::<io::Error>()
-                            .map(io::Error::raw_os_error)
-                            .flatten(),
+                            .and_then(io::Error::raw_os_error),
                         Some(*want_err),
                         "expected io::Error {}, got '{}'",
                         errno_description(*want_err),

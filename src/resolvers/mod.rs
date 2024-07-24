@@ -39,6 +39,16 @@ bitflags! {
     }
 }
 
+impl ResolverFlags {
+    pub(crate) fn openat2_flag_bits(self) -> u64 {
+        self.intersection(ResolverFlags::NO_FOLLOW_TRAILING).bits()
+    }
+
+    pub(crate) fn openat2_resolve_bits(self) -> u64 {
+        self.intersection(ResolverFlags::NO_SYMLINKS).bits()
+    }
+}
+
 /// The backend used for path resolution within a [`Root`] to get a [`Handle`].
 ///
 /// We don't generally recommend specifying this, since libpathrs will

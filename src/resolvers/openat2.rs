@@ -19,7 +19,8 @@
 use crate::{
     error::{self, Error},
     resolvers::ResolverFlags,
-    syscalls, Handle,
+    syscalls::{self, OpenHow},
+    Handle,
 };
 
 use std::{fs::File, os::unix::io::AsRawFd, path::Path};
@@ -35,27 +36,23 @@ lazy_static! {
 pub(crate) fn resolve<P: AsRef<Path>>(
     root: &File,
     path: P,
-    flags: ResolverFlags,
+    rflags: ResolverFlags,
 ) -> Result<Handle, Error> {
     ensure!(
         *IS_SUPPORTED,
         error::NotSupportedSnafu { feature: "openat2" }
     );
 
-    let mut how = syscalls::OpenHow::default();
-    how.flags = libc::O_PATH as u64;
-    if flags.contains(ResolverFlags::NO_FOLLOW_TRAILING) {
-        how.flags |= libc::O_NOFOLLOW as u64;
-    }
+    // Copy the O_NOFOLLOW and RESOLVE_NO_SYMLINKS bits from flags.
+    let oflags = libc::O_PATH as u64 | rflags.openat2_flag_bits();
+    let rflags =
+        libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | rflags.openat2_resolve_bits();
 
-    // RESOLVE_IN_ROOT does exactly what we want, but we also want to avoid
-    // resolving magic-links. RESOLVE_IN_ROOT already blocks magic-link
-    // crossings, but that may change in the future (if the magic-links are
-    // considered "safe") but we should still explicitly avoid them entirely.
-    how.resolve = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS;
-    if flags.contains(ResolverFlags::NO_SYMLINKS) {
-        how.resolve |= libc::RESOLVE_NO_SYMLINKS;
-    }
+    let how = OpenHow {
+        flags: oflags,
+        resolve: rflags,
+        ..Default::default()
+    };
 
     // openat2(2) can fail with -EAGAIN if there was a racing rename or mount
     // *anywhere on the system*. This can happen pretty frequently, so what we
@@ -81,8 +78,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         }
     }
 
-    return error::SafetyViolationSnafu {
+    error::SafetyViolationSnafu {
         description: "racing filesystem changes caused openat2 to abort",
     }
-    .fail();
+    .fail()
 }
