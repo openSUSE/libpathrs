@@ -26,7 +26,7 @@ use crate::{
 
 use std::{
     backtrace::Backtrace,
-    ffi::OsStr,
+    ffi::{CString, OsStr},
     fmt,
     fs::File,
     io::Error as IOError,
@@ -35,6 +35,7 @@ use std::{
         io::{FromRawFd, RawFd},
     },
     path::{Path, PathBuf},
+    ptr,
 };
 
 use libc::{c_int, dev_t, mode_t, stat, statfs};
@@ -285,6 +286,48 @@ pub enum Error {
         source: IOError,
         backtrace: Option<Backtrace>,
     },
+
+    #[snafu(display("fsopen({:?}, {:?})", fstype, flags))]
+    Fsopen {
+        fstype: String,
+        flags: FsopenFlags,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("fsconfig({}, FSCONFIG_CMD_CREATE)", sfd))]
+    FsconfigCreate {
+        sfd: FrozenFd,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("fsconfig({}, FSCONFIG_SET_STRING, {:?}, {:?})", sfd, key, value))]
+    FsconfigSetString {
+        sfd: FrozenFd,
+        key: String,
+        value: String,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("fsmount({}, {:?}, 0x{:x})", sfd, flags, mount_attrs))]
+    Fsmount {
+        sfd: FrozenFd,
+        flags: FsmountFlags,
+        mount_attrs: u64,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("open_tree({}, {:?}, {:?})", dirfd, path, flags))]
+    OpenTree {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        flags: OpenTreeFlags,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
 }
 
 impl Error {
@@ -307,6 +350,11 @@ impl Error {
             Error::Fstatfs { source, .. } => source,
             Error::Fstatat { source, .. } => source,
             Error::Statx { source, .. } => source,
+            Error::Fsopen { source, .. } => source,
+            Error::FsconfigCreate { source, .. } => source,
+            Error::FsconfigSetString { source, .. } => source,
+            Error::Fsmount { source, .. } => source,
+            Error::OpenTree { source, .. } => source,
         }
     }
 }
@@ -815,4 +863,145 @@ pub fn getpid() -> libc::pid_t {
 pub fn gettid() -> libc::pid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::gettid() }
+}
+
+bitflags! {
+    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
+    pub struct FsopenFlags: i32 {
+        const FSOPEN_CLOEXEC = 0x1;
+    }
+
+    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
+    pub struct FsmountFlags: i32 {
+        const FSMOUNT_CLOEXEC = 0x1;
+    }
+
+    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
+    pub struct OpenTreeFlags: i32 {
+        const AT_RECURSIVE = libc::AT_RECURSIVE;
+        const OPEN_TREE_CLOEXEC = libc::O_CLOEXEC;
+        const OPEN_TREE_CLONE = 0x1;
+    }
+}
+
+#[repr(i32)]
+#[allow(dead_code)]
+enum FsconfigCmd {
+    SetFlag = 0x0,      // FSCONFIG_SET_FLAG
+    SetString = 0x1,    // FSCONFIG_SET_STRING
+    SetBinary = 0x2,    // FSCONFIG_SET_BINARY
+    SetPath = 0x3,      // FSCONFIG_SET_PATH
+    SetPathEmpty = 0x4, // FSCONFIG_SET_PATH_EMPTY
+    SetFd = 0x5,        // FSCONFIG_SET_FD
+    Create = 0x6,       // FSCONFIG_SET_FD
+    Reconfigure = 0x7,  // FSCONFIG_SET_FD
+}
+
+pub fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<File, Error> {
+    let fstype = fstype.as_ref();
+    let c_fstype = CString::new(fstype).expect("fsopen argument should be valid C string");
+
+    // SAFETY: Obviously safe-to-use Linux syscall.
+    let fd = unsafe { libc::syscall(libc::SYS_fsopen, c_fstype.as_ptr(), flags.bits()) as RawFd };
+    let err = IOError::last_os_error();
+
+    if fd >= 0 {
+        // SAFETY: We know it's a real file descriptor.
+        Ok(unsafe { File::from_raw_fd(fd) })
+    } else {
+        Err(err).context(FsopenSnafu { fstype, flags })
+    }
+}
+
+pub fn fsconfig_set_string<K: AsRef<str>, V: AsRef<str>>(
+    sfd: RawFd,
+    key: K,
+    value: V,
+) -> Result<(), Error> {
+    let key = key.as_ref();
+    let c_key = CString::new(key).expect("fsconfig_set_string key should be valid C string");
+    let value = value.as_ref();
+    let c_value = CString::new(value).expect("fsconfig_set_string value should be valid C string");
+
+    // SAFETY: Obviously safe-to-use Linux syscall.
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_fsconfig,
+            sfd,
+            FsconfigCmd::SetString,
+            c_key.as_ptr(),
+            c_value.as_ptr(),
+            0,
+        )
+    };
+    let err = IOError::last_os_error();
+
+    if ret >= 0 {
+        Ok(())
+    } else {
+        Err(err).context(FsconfigCreateSnafu { sfd })
+    }
+}
+
+// clippy doesn't understand that we need to specify a type for ptr::null() here
+// because libc::syscall() is variadic.
+#[allow(clippy::unnecessary_cast)]
+pub fn fsconfig_create(sfd: RawFd) -> Result<(), Error> {
+    // SAFETY: Obviously safe-to-use Linux syscall.
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_fsconfig,
+            sfd,
+            FsconfigCmd::Create,
+            ptr::null() as *const (),
+            ptr::null() as *const (),
+            0,
+        )
+    };
+    let err = IOError::last_os_error();
+
+    if ret >= 0 {
+        Ok(())
+    } else {
+        Err(err).context(FsconfigCreateSnafu { sfd })
+    }
+}
+
+pub fn fsmount(sfd: RawFd, flags: FsmountFlags, mount_attrs: u64) -> Result<File, Error> {
+    // SAFETY: Obviously safe-to-use Linux syscall.
+    let fd = unsafe { libc::syscall(libc::SYS_fsmount, sfd, flags.bits(), mount_attrs) as RawFd };
+    let err = IOError::last_os_error();
+
+    if fd >= 0 {
+        // SAFETY: We know it's a real file descriptor.
+        Ok(unsafe { File::from_raw_fd(fd) })
+    } else {
+        Err(err).context(FsmountSnafu {
+            sfd,
+            flags,
+            mount_attrs,
+        })
+    }
+}
+
+pub fn open_tree<P: AsRef<Path>>(
+    dirfd: RawFd,
+    path: P,
+    flags: OpenTreeFlags,
+) -> Result<File, Error> {
+    let path = path.as_ref();
+    let c_path = path.to_c_string();
+
+    // SAFETY: Obviously safe-to-use Linux syscall.
+    let fd = unsafe {
+        libc::syscall(libc::SYS_open_tree, dirfd, c_path.as_ptr(), flags.bits()) as RawFd
+    };
+    let err = IOError::last_os_error();
+
+    if fd >= 0 {
+        // SAFETY: We know it's a real file descriptor.
+        Ok(unsafe { File::from_raw_fd(fd) })
+    } else {
+        Err(err).context(OpenTreeSnafu { dirfd, path, flags })
+    }
 }

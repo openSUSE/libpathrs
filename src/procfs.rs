@@ -21,7 +21,8 @@
 use crate::{
     error::{self, Error},
     resolvers::{procfs::ProcfsResolver, ResolverFlags},
-    syscalls, utils, OpenFlags,
+    syscalls::{self, FsmountFlags, FsopenFlags, OpenTreeFlags},
+    utils, OpenFlags,
 };
 
 use std::{
@@ -136,16 +137,60 @@ impl ProcfsHandle {
     // This is part of Linux's ABI.
     const PROC_ROOT_INO: u64 = 1;
 
-    pub fn new() -> Result<Self, Error> {
-        // TODO: Add support for fsopen(2) and open_tree(2) based proc handles,
-        // which are safe against racing mounts (for the privileged users that
-        // can create them).
+    fn new_fsopen() -> Result<Self, Error> {
+        let sfd =
+            syscalls::fsopen("proc", FsopenFlags::FSOPEN_CLOEXEC).context(error::RawOsSnafu {
+                operation: "create procfs suberblock",
+            })?;
+
+        // Try to configure hidepid=ptraceable,subset=pid if possible, but
+        // ignore errors.
+        let _ = syscalls::fsconfig_set_string(sfd.as_raw_fd(), "hidepid", "ptraceable");
+        let _ = syscalls::fsconfig_set_string(sfd.as_raw_fd(), "subset", "pid");
+
+        syscalls::fsconfig_create(sfd.as_raw_fd()).context(error::RawOsSnafu {
+            operation: "instantiate procfs superblock",
+        })?;
+
+        syscalls::fsmount(
+            sfd.as_raw_fd(),
+            FsmountFlags::FSMOUNT_CLOEXEC,
+            libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID,
+        )
+        .context(error::RawOsSnafu {
+            operation: "mount new private procfs",
+        })
+        // NOTE: try_from checks this is an actual procfs root.
+        .and_then(Self::try_from)
+    }
+
+    fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
+        syscalls::open_tree(
+            -libc::EBADF,
+            "/proc",
+            OpenTreeFlags::OPEN_TREE_CLONE | flags,
+        )
+        .context(error::RawOsSnafu {
+            operation: "create private /proc bind-mount",
+        })
+        // NOTE: try_from checks this is an actual procfs root.
+        .and_then(Self::try_from)
+    }
+
+    fn new_unsafe_open() -> Result<Self, Error> {
         syscalls::openat(libc::AT_FDCWD, "/proc", libc::O_PATH | libc::O_DIRECTORY, 0)
             .context(error::RawOsSnafu {
                 operation: "open /proc handle",
             })
             // NOTE: try_from checks this is an actual procfs root.
             .and_then(Self::try_from)
+    }
+
+    pub fn new() -> Result<Self, Error> {
+        Self::new_fsopen()
+            .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
+            .or_else(|_| Self::new_open_tree(OpenTreeFlags::AT_RECURSIVE))
+            .or_else(|_| Self::new_unsafe_open())
     }
 
     fn check_is_procfs(file: &File) -> Result<(), Error> {
@@ -241,8 +286,8 @@ impl ProcfsHandle {
 
         // Detect if the magic-link we are about to open is actually a
         // bind-mount.
-        // NOTE: This check is only safe if there are no racing mounts. When we
-        // add fsopen(2) and open_tree(2) support this will be safer.
+        // NOTE: This check is only safe if there are no racing mounts, so only
+        // for the ProcfsHandle::{new_fsopen,new_open_tree} cases.
         self.check_mnt_id(&parent, trailing)?;
 
         syscalls::openat_follow(parent.as_raw_fd(), trailing, flags.bits(), 0).context(
