@@ -268,6 +268,23 @@ pub enum Error {
         source: IOError,
         backtrace: Option<Backtrace>,
     },
+
+    #[snafu(display(
+        "statx({}, {:?}, 0x{:x}, 0x{:x}): {}",
+        dirfd,
+        path,
+        flags,
+        mask,
+        source
+    ))]
+    Statx {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        flags: i32,
+        mask: u32,
+        source: IOError,
+        backtrace: Option<Backtrace>,
+    },
 }
 
 impl Error {
@@ -289,6 +306,7 @@ impl Error {
             Error::Renameat2 { source, .. } => source,
             Error::Fstatfs { source, .. } => source,
             Error::Fstatat { source, .. } => source,
+            Error::Statx { source, .. } => source,
         }
     }
 }
@@ -692,6 +710,41 @@ pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Err
         Ok(buf)
     } else {
         Err(err).context(FstatatSnafu { dirfd, path, flags })
+    }
+}
+
+pub(crate) fn statx<P: AsRef<Path>>(
+    dirfd: RawFd,
+    path: P,
+    mask: u32,
+) -> Result<libc::statx, Error> {
+    // SAFETY: repr(C) struct without internal references is definitely valid. C
+    //         callers are expected to zero it as well.
+    let mut buf: libc::statx = unsafe { std::mem::zeroed() };
+    let path = path.as_ref();
+    let flags = libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH;
+
+    // SAFETY: Obviously safe-to-use Linux syscall.
+    let ret = unsafe {
+        libc::statx(
+            dirfd,
+            path.to_c_string().as_ptr(),
+            flags,
+            mask,
+            &mut buf as *mut _,
+        )
+    };
+    let err = IOError::last_os_error();
+
+    if ret >= 0 {
+        Ok(buf)
+    } else {
+        Err(err).context(StatxSnafu {
+            dirfd,
+            path,
+            flags,
+            mask,
+        })
     }
 }
 

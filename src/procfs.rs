@@ -108,9 +108,8 @@ impl ProcfsBase {
 #[derive(Debug)]
 pub(crate) struct ProcfsHandle {
     inner: File,
+    mnt_id: Option<u64>,
 }
-
-// TODO: Add mnt_id hardening.
 
 // TODO: Use a restricted resolver for doing subpath lookups.
 
@@ -149,6 +148,21 @@ impl ProcfsHandle {
         Ok(())
     }
 
+    fn check_mnt_id<P: AsRef<Path>>(&self, dir: &File, path: P) -> Result<(), Error> {
+        let mnt_id = utils::fetch_mnt_id(dir, path)?;
+        ensure!(
+            self.mnt_id == mnt_id,
+            error::SafetyViolationSnafu {
+                // TODO: Include the full path in the error.
+                description: format!(
+                    "mount id mismatch for procfs subpath (mnt_id is {:?}, not procfs {:?})",
+                    mnt_id, self.mnt_id
+                ),
+            }
+        );
+        Ok(())
+    }
+
     fn open_base(&self, base: ProcfsBase) -> Result<File, Error> {
         // TODO: Switch this with a proper resolver.
         let file = syscalls::openat_follow(
@@ -160,10 +174,14 @@ impl ProcfsHandle {
         .context(error::RawOsSnafu {
             operation: "open procfs base path",
         })?;
-        // TODO: Until we add STATX_MNT_ID checks, the best we can do is check
-        // the fs_type to avoid mounts non-procfs filesystems. Unfortunately,
-        // attackers can bind-mount procfs files and still cause damage so this
-        // protection is marginal at best.
+        // Detect if the file we landed is in a bind-mount.
+        // NOTE: This is not safe against magic-link bind-mount attacks. We need
+        // to have a proper restricted resolver to solve that issue.
+        self.check_mnt_id(&file, "")?;
+        // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
+        // do is check the fs_type to avoid mounts non-procfs filesystems.
+        // Unfortunately, attackers can bind-mount procfs files and still
+        // cause damage so this protection is marginal at best.
         Self::check_is_procfs(&file)?;
         Ok(file)
     }
@@ -204,11 +222,14 @@ impl ProcfsHandle {
 
         let parent = self.open(base, parent, OpenFlags::O_PATH | OpenFlags::O_DIRECTORY)?;
 
-        // TODO: Until we add STATX_MNT_ID checks, the best we can do is check
-        // the fs_type to avoid mounts non-procfs filesystems. Unfortunately,
-        // attackers can bind-mount procfs files and still cause damage so this
-        // protection is marginal at best.
-        Self::check_is_procfs(&parent)?;
+        // Detect if the magic-link we are about to open is actually a
+        // bind-mount.
+        // NOTE: This is not properly safe against magic-link bind-mount attacks
+        // for path components we walked through before this. We need to have a
+        // proper restricted resolver to solve that issue.
+        // NOTE: This check is only safe if there are no racing mounts. When we
+        // add fsopen(2) and open_tree(2) support this will be safer.
+        self.check_mnt_id(&parent, trailing)?;
 
         syscalls::openat_follow(parent.as_raw_fd(), trailing, flags.bits(), 0).context(
             error::RawOsSnafu {
@@ -235,10 +256,14 @@ impl ProcfsHandle {
         .context(error::RawOsSnafu {
             operation: "open procfs path",
         })?;
-        // TODO: Until we add STATX_MNT_ID checks, the best we can do is check
-        // the fs_type to avoid mounts non-procfs filesystems. Unfortunately,
-        // attackers can bind-mount procfs files and still cause damage so this
-        // protection is marginal at best.
+        // Detect if the file we landed is in a bind-mount.
+        // NOTE: This is not safe against magic-link bind-mount attacks. We need
+        // to have a proper restricted resolver to solve that issue.
+        self.check_mnt_id(&file, "")?;
+        // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
+        // do is check the fs_type to avoid mounts non-procfs filesystems.
+        // Unfortunately, attackers can bind-mount procfs files and still
+        // cause damage so this protection is marginal at best.
         Self::check_is_procfs(&file)?;
         Ok(file)
     }
@@ -273,7 +298,9 @@ impl TryFrom<File> for ProcfsHandle {
             }
         );
 
-        Ok(Self { inner })
+        let mnt_id = utils::fetch_mnt_id(&inner, "")?;
+
+        Ok(Self { inner, mnt_id })
     }
 }
 

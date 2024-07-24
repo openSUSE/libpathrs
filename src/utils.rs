@@ -275,6 +275,53 @@ impl FileExt for File {
     }
 }
 
+pub(crate) fn fetch_mnt_id<P: AsRef<Path>>(dirfd: &File, path: P) -> Result<Option<u64>, Error> {
+    // NOTE: stx.stx_mnt_id is fairly new (added in Linux 5.8[1]) so this check
+    // might not work on quite a few kernels and so we have to fallback to not
+    // checking the mount ID (removing some protections).
+    //
+    // In theory, name_to_handle_at(2) also lets us get the mount of a
+    // handle in a race-free way (and would be a useful fallback for pre-statx
+    // kernels -- name_to_handle_at(2) was added in Linux 2.6.39[2]).
+    //
+    // Unfortunately, before AT_HANDLE_FID (added in Linux 6.7[3]) procfs did
+    // not permit the export of file handles. name_to_handle_at(2) does return
+    // the mount ID in most error cases, but for -EOPNOTSUPP it doesn't and so
+    // we can't use it for pre-statx kernels.
+    //
+    // The only other alternative would be to scan /proc/self/mountinfo, but
+    // since we are worried about procfs attacks there isn't much point (an
+    // attacker could bind-mount /proc/self/environ over /proc/$pid/mountinfo
+    // and simply change their environment to make the mountinfo look
+    // reasonable.
+    //
+    // So we have to live with limited protection for pre-5.8 kernels.
+    //
+    // [1]: Linux commit fa2fcf4f1df1 ("statx: add mount ID")
+    // [2]: Linux commit 990d6c2d7aee ("vfs: Add name to file handle conversion support")
+    // [3]: Linux commit 64343119d7b8 ("exportfs: support encoding non-decodeable file handles by default")
+
+    const STATX_MNT_ID_UNIQUE: u32 = 0x4000;
+    let want_mask = libc::STATX_MNT_ID | STATX_MNT_ID_UNIQUE;
+
+    match syscalls::statx(dirfd.as_raw_fd(), path, want_mask) {
+        Ok(stx) => Ok(if stx.stx_mask & want_mask != 0 {
+            Some(stx.stx_mnt_id)
+        } else {
+            None
+        }),
+        Err(err) => match err.root_cause().raw_os_error() {
+            // We have to handle STATX_MNT_ID not being supported on pre-5.8
+            // kernels, so treat an ENOSYS or EINVAL the same so that we can
+            // work on pre-4.11 (pre-statx) kernels as well.
+            Some(libc::ENOSYS) | Some(libc::EINVAL) => Ok(None),
+            _ => Err(err).context(error::RawOsSnafu {
+                operation: "check mnt_id of filesystem",
+            })?,
+        },
+    }
+}
+
 /// RawComponents is like [`std::path::Components`] execpt that no normalisation
 /// is done for any path components ([`std::path::Components`] normalises "/./"
 /// components), and all of the components are simply [`std::ffi::OsStr`].
