@@ -66,7 +66,7 @@ impl From<RawFd> for FrozenFd {
         } else {
             // SAFETY: as_unsafe_path is safe here since it is only used for
             //         pretty-printing error messages and no real logic.
-            FrozenFd(fd, fd.as_unsafe_path().ok())
+            FrozenFd(fd, fd.as_unsafe_path_unchecked().ok())
         }
     }
 }

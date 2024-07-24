@@ -354,7 +354,7 @@ mod utils {
             (Ok(f), Some(expected)) => anyhow::bail!(
                 "expected to get io::Error {} but instead got file {}",
                 errno_description(expected),
-                f.as_unsafe_path()?.display(),
+                f.as_unsafe_path_unchecked()?.display(),
             ),
             (Err(err), Some(want_err)) => {
                 assert_eq!(
@@ -370,8 +370,8 @@ mod utils {
             }
         };
 
-        let real_handle_path = handle.as_file().as_unsafe_path()?;
-        let real_reopen_path = file.as_unsafe_path()?;
+        let real_handle_path = handle.as_file().as_unsafe_path_unchecked()?;
+        let real_reopen_path = file.as_unsafe_path_unchecked()?;
 
         assert_eq!(
             real_handle_path, real_reopen_path,
@@ -420,7 +420,7 @@ mod utils {
                 (Ok(h), ExpectedResult::Err(want_err)) => anyhow::bail!(
                     "expected to get io::Error {} but instead got file {}",
                     errno_description(*want_err),
-                    h.as_file().as_unsafe_path()?.display(),
+                    h.as_file().as_unsafe_path_unchecked()?.display(),
                 ),
 
                 (Err(err), ExpectedResult::Err(want_err)) => {
@@ -438,7 +438,7 @@ mod utils {
             };
 
         let expected_path = expected_path.trim_start_matches('/');
-        let real_handle_path = handle.as_file().as_unsafe_path()?;
+        let real_handle_path = handle.as_file().as_unsafe_path_unchecked()?;
         assert_eq!(
             real_handle_path,
             root_dir.as_ref().join(expected_path),
@@ -491,7 +491,7 @@ mod utils {
                     .map_err(Into::into)
             },
             root,
-            root.as_unsafe_path()?,
+            root.as_unsafe_path_unchecked()?,
             unsafe_path,
             expected,
             reopen_tests,
@@ -510,7 +510,7 @@ mod utils {
         check_resolve(
             |root: &Root, unsafe_path: P| root.resolve(unsafe_path).map_err(Into::into),
             root,
-            root.as_file().as_unsafe_path()?,
+            root.as_file().as_unsafe_path_unchecked()?,
             unsafe_path,
             expected,
             reopen_tests,

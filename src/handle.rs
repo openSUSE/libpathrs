@@ -18,7 +18,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{error::Error, flags::OpenFlags, utils::RawFdExt};
+use crate::{error::Error, flags::OpenFlags, procfs::PROCFS_HANDLE, utils::RawFdExt};
 
 use std::fs::File;
 
@@ -63,7 +63,7 @@ impl Handle {
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create
     pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
-        self.inner.reopen(flags.into())
+        self.inner.reopen(&PROCFS_HANDLE, flags.into())
     }
 
     /// Create a copy of an existing [`Handle`].
