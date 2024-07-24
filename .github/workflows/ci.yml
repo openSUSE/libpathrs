@@ -38,6 +38,22 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --workspace --all-targets
 
+  rustdoc:
+    name: cargo doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo doc --workspace --all-features
+      - name: upload docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdoc
+          path: target/doc
+
   test:
     name: cargo test
     runs-on: ubuntu-latest

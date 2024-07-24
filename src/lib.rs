@@ -118,6 +118,7 @@
 
 // libpathrs only supports Linux at the moment.
 #![cfg(target_os = "linux")]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 #[macro_use]
 extern crate bitflags;
