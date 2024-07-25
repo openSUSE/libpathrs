@@ -53,9 +53,13 @@ pub struct FrozenFd(c_int, Option<PathBuf>);
 // TODO: Should probably be a pub(crate) impl.
 impl From<RawFd> for FrozenFd {
     fn from(fd: RawFd) -> Self {
-        // SAFETY: as_unsafe_path is safe here since it is only used for
-        //         pretty-printing error messages and no real logic.
-        FrozenFd(fd, fd.as_unsafe_path().ok())
+        if fd < 0 {
+            FrozenFd(fd, None)
+        } else {
+            // SAFETY: as_unsafe_path is safe here since it is only used for
+            //         pretty-printing error messages and no real logic.
+            FrozenFd(fd, fd.as_unsafe_path().ok())
+        }
     }
 }
 
