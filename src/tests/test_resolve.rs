@@ -18,7 +18,7 @@
 
 use std::fs::File;
 
-use crate::{Handle, ResolverBackend, ResolverFlags, Root};
+use crate::{tests::common as tests_common, Handle, ResolverBackend, ResolverFlags, Root};
 use utils::ExpectedResult;
 
 use anyhow::Error;
@@ -33,7 +33,7 @@ macro_rules! resolve_tests {
             $(
                 #[test]
                 fn [<test_root_default_ $test_name>]() -> Result<(), Error> {
-                    let root_dir = super::common::create_basic_tree()?;
+                    let root_dir = tests_common::create_basic_tree()?;
                     let root = Root::open(&root_dir)?;
                     let expected = $expected;
                     utils::check_resolve_in_root(&root, $unsafe_path, &expected)?;
@@ -46,7 +46,7 @@ macro_rules! resolve_tests {
 
                 #[test]
                 fn [<test_root_opath_ $test_name>]() -> Result<(), Error> {
-                    let root_dir = super::common::create_basic_tree()?;
+                    let root_dir = tests_common::create_basic_tree()?;
                     let mut root = Root::open(&root_dir)?;
                     root.resolver.backend = ResolverBackend::EmulatedOpath;
 
@@ -66,7 +66,7 @@ macro_rules! resolve_tests {
                         return Ok(());
                     }
 
-                    let root_dir = super::common::create_basic_tree()?;
+                    let root_dir = tests_common::create_basic_tree()?;
                     let mut root = Root::open(&root_dir)?;
                     root.resolver.backend = ResolverBackend::KernelOpenat2;
 
@@ -81,7 +81,7 @@ macro_rules! resolve_tests {
 
                 #[test]
                 fn [<test_opath_ $test_name>]() -> Result<(), Error> {
-                    let root_dir = super::common::create_basic_tree()?;
+                    let root_dir = tests_common::create_basic_tree()?;
                     let root = File::open(&root_dir)?;
 
                     let expected = $expected;
@@ -108,7 +108,7 @@ macro_rules! resolve_tests {
                         return Ok(());
                     }
 
-                    let root_dir = super::common::create_basic_tree()?;
+                    let root_dir = tests_common::create_basic_tree()?;
                     let root = File::open(&root_dir)?;
 
                     let expected = $expected;
