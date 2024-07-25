@@ -23,10 +23,7 @@ import (
 	"unsafe"
 )
 
-// TODO: Switch to pkg-config.
-
-// #cgo CFLAGS: -I${SRCDIR}/../../../include
-// #cgo LDFLAGS: -L${SRCDIR}/../../../target/release -L${SRCDIR}/../../../target/debug -lpathrs
+// #cgo pkg-config: pathrs
 // #include <pathrs.h>
 import "C"
 
