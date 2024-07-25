@@ -27,6 +27,12 @@ import (
 // #include <pathrs.h>
 import "C"
 
+/*
+// This is a workaround for unsafe.Pointer() not working for non-void pointers.
+char *cast_ptr(void *ptr) { return ptr; }
+*/
+import "C"
+
 func fetchError(errId C.int) error {
 	if errId >= 0 {
 		return nil
@@ -120,4 +126,47 @@ func pathrsHardlink(rootFd uintptr, path, target string) error {
 
 	err := C.pathrs_hardlink(C.int(rootFd), cPath, cTarget)
 	return fetchError(err)
+}
+
+type pathrsProcBase C.pathrs_proc_base_t
+
+const (
+	pathrsProcSelf       pathrsProcBase = C.PATHRS_PROC_SELF
+	pathrsProcThreadSelf pathrsProcBase = C.PATHRS_PROC_THREAD_SELF
+)
+
+func pathrsProcOpen(base pathrsProcBase, path string, flags int) (uintptr, error) {
+	cBase := C.pathrs_proc_base_t(base)
+
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	fd := C.pathrs_proc_open(cBase, cPath, C.int(flags))
+	return uintptr(fd), fetchError(fd)
+}
+
+func pathrsProcReadlink(base pathrsProcBase, path string) (string, error) {
+	cBase := C.pathrs_proc_base_t(base)
+
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	size := 128
+	for {
+		linkBuf := make([]byte, size)
+		n := C.pathrs_proc_readlink(cBase, cPath, C.cast_ptr(unsafe.Pointer(&linkBuf[0])), C.ulong(len(linkBuf)))
+		switch {
+		case int(n) < 0:
+			return "", fetchError(n)
+		case int(n) <= len(linkBuf):
+			return string(linkBuf[:int(n)]), nil
+		default:
+			// The contents were truncated. Unlike readlinkat, pathrs returns
+			// the size of the link when it checked. So use the returned size
+			// as a basis for the reallocated size (but in order to avoid a DoS
+			// where a magic-link is growing by a single byte each iteration,
+			// make sure we are a fair bit larger).
+			size += int(n)
+		}
+	}
 }
