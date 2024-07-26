@@ -32,10 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --workspace --all-targets
 
   rustdoc:
@@ -43,10 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --workspace --all-features
       - name: upload docs
         uses: actions/upload-artifact@v4
@@ -59,12 +53,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install stable
-      - uses: Swatinem/rust-cache@v2
+      # Nightly rust is required for llvm-cov --doc.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
+
+      - name: cargo nextest
+        run: cargo llvm-cov --no-report nextest
+      - name: cargo test --doc
+        run: cargo llvm-cov --no-report --doc
+
+      - name: calculate coverage
+        run: cargo llvm-cov report
+      - name: generate coverage html
+        run: cargo llvm-cov report --html
+      - name: upload coverage html
+        uses: actions/upload-artifact@v4
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo test --workspace
-      - run: cargo test --workspace --release
+          name: coverage-report
+          path: target/llvm-cov/html
 
   fmt:
     name: rustfmt
@@ -72,10 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: rustup component add rustfmt
+          components: rustfmt
       - run: cargo fmt --all -- --check
 
   clippy:
@@ -84,8 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: rustup component add clippy
+          components: clippy
       - run: cargo clippy --all-features
