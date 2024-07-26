@@ -150,7 +150,7 @@ pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>),
         None => {
             return Ok((
                 Path::new("."),
-                if path_bytes.len() > 0 {
+                if !path_bytes.is_empty() {
                     Some(path)
                 } else {
                     None
