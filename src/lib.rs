@@ -119,6 +119,10 @@
 // libpathrs only supports Linux at the moment.
 #![cfg(target_os = "linux")]
 #![deny(rustdoc::broken_intra_doc_links)]
+#![deny(clippy::all)]
+// TODO: At the moment our Errors are too big.
+// <https://github.com/openSUSE/libpathrs/issues/44>
+#![allow(clippy::result_large_err)]
 // We use this the coverage_attribute when doing coverage runs.
 // <https://github.com/rust-lang/rust/issues/84605>
 #![cfg_attr(coverage, feature(coverage_attribute))]
