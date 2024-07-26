@@ -22,18 +22,18 @@ use crate::{
     error::{self, Error, ErrorExt},
     resolvers::Resolver,
     syscalls,
-    utils::RawFdExt,
+    utils::{self, RawFdExt},
     Handle, OpenFlags,
 };
 
 use std::{
     fs::{File, Permissions},
-    os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd},
+    os::unix::{fs::PermissionsExt, io::AsRawFd},
     path::Path,
 };
 
 use libc::dev_t;
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 
 /// An inode type to be created with [`Root::create`].
 ///
@@ -94,29 +94,6 @@ pub enum InodeType<'a> {
     ////
     //// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     //DetachedSocket(),
-}
-
-/// Helper to split a Path into its parent directory and trailing path. The
-/// trailing component is guaranteed to not contain a directory separator.
-fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
-    // Get the parent path.
-    let parent = path.parent().unwrap_or_else(|| "/".as_ref());
-
-    // Now construct the trailing portion of the target.
-    let name = path.file_name().context(error::InvalidArgumentSnafu {
-        name: "path",
-        description: "no trailing component",
-    })?;
-
-    // It's critical we are only touching the final component in the path.
-    // If there are any other path components we must bail.
-    ensure!(
-        !name.as_bytes().contains(&b'/'),
-        error::SafetyViolationSnafu {
-            description: "trailing component of split pathname contains '/'",
-        }
-    );
-    Ok((parent, name.as_ref()))
 }
 
 /// Wrapper for the underlying `libc`'s `RENAME_*` flags.
@@ -310,7 +287,7 @@ impl Root {
         // already exist, and once we have it we're safe from rename races in
         // the parent.
         let (parent, name) =
-            path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
@@ -333,8 +310,8 @@ impl Root {
                 syscalls::symlinkat(target, dirfd, &name)
             }
             InodeType::Hardlink(target) => {
-                let (oldparent, oldname) =
-                    path_split(target).wrap("split hardlink source path into (parent, name)")?;
+                let (oldparent, oldname) = utils::path_split(target)
+                    .wrap("split hardlink source path into (parent, name)")?;
                 let olddir = self
                     .resolve(oldparent)
                     .wrap("resolve hardlink source parent for hardlink")?
@@ -397,7 +374,7 @@ impl Root {
         // already exist, and once we have it we're safe from rename races in
         // the parent.
         let (parent, name) =
-            path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
@@ -437,7 +414,7 @@ impl Root {
         // already exist, and once we have it we're safe from rename races in
         // the parent.
         let (parent, name) =
-            path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
@@ -501,9 +478,9 @@ impl Root {
         flags: RenameFlags,
     ) -> Result<(), Error> {
         let (src_parent, src_name) =
-            path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
-        let (dst_parent, dst_name) =
-            path_split(destination.as_ref()).wrap("split target path into (parent, name)")?;
+            utils::path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
+        let (dst_parent, dst_name) = utils::path_split(destination.as_ref())
+            .wrap("split target path into (parent, name)")?;
 
         let src_dir = self
             .resolve(src_parent)

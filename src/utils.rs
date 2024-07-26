@@ -35,7 +35,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use snafu::ResultExt;
+use snafu::{OptionExt, ResultExt};
 
 // This is part of Linux's ABI.
 const PROC_ROOT_INO: u64 = 1;
@@ -138,6 +138,29 @@ impl ToCString for Path {
     fn to_c_string(&self) -> CString {
         self.as_os_str().to_c_string()
     }
+}
+
+/// Helper to split a Path into its parent directory and trailing path. The
+/// trailing component is guaranteed to not contain a directory separator.
+pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
+    // Get the parent path.
+    let parent = path.parent().unwrap_or_else(|| "/".as_ref());
+
+    // Now construct the trailing portion of the target.
+    let name = path.file_name().context(error::InvalidArgumentSnafu {
+        name: "path",
+        description: "no trailing component",
+    })?;
+
+    // It's critical we are only touching the final component in the path.
+    // If there are any other path components we must bail.
+    ensure!(
+        !name.as_bytes().contains(&b'/'),
+        error::SafetyViolationSnafu {
+            description: "trailing component of split pathname contains '/'",
+        }
+    );
+    Ok((parent, name.as_ref()))
 }
 
 pub(crate) trait RawFdExt {
