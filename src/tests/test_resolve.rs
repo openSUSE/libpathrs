@@ -28,7 +28,7 @@ macro_rules! resolve_tests {
     //     abc("foo") => ExpectedResult::Err(..);
     //     xyz("baz") => ExpectedResult::Ok{..};
     // }
-    ($($test_name:ident ( $unsafe_path:expr ) => $expected:expr);+ $(;)*) => {
+    ($($test_name:ident ( $unsafe_path:expr ) => $expected:expr);+ $(;)?) => {
         paste::paste! {
             $(
                 #[test]
