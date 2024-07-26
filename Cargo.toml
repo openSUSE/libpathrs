@@ -55,3 +55,7 @@ anyhow = "^1"
 errno = "^0.3"
 tempfile = "^3"
 paste = "^1"
+
+[lints.rust]
+# We have special handling for coverage runs (which set cfg(coverage)).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
