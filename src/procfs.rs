@@ -137,7 +137,7 @@ impl ProcfsHandle {
     // This is part of Linux's ABI.
     const PROC_ROOT_INO: u64 = 1;
 
-    fn new_fsopen() -> Result<Self, Error> {
+    pub(crate) fn new_fsopen() -> Result<Self, Error> {
         let sfd =
             syscalls::fsopen("proc", FsopenFlags::FSOPEN_CLOEXEC).context(error::RawOsSnafu {
                 operation: "create procfs suberblock",
@@ -164,7 +164,7 @@ impl ProcfsHandle {
         .and_then(Self::try_from)
     }
 
-    fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
+    pub(crate) fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
         syscalls::open_tree(
             -libc::EBADF,
             "/proc",
@@ -177,7 +177,7 @@ impl ProcfsHandle {
         .and_then(Self::try_from)
     }
 
-    fn new_unsafe_open() -> Result<Self, Error> {
+    pub(crate) fn new_unsafe_open() -> Result<Self, Error> {
         syscalls::openat(libc::AT_FDCWD, "/proc", libc::O_PATH | libc::O_DIRECTORY, 0)
             .context(error::RawOsSnafu {
                 operation: "open /proc handle",

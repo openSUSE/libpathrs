@@ -18,4 +18,5 @@
 
 pub(crate) mod common;
 
+mod test_procfs;
 mod test_resolve;

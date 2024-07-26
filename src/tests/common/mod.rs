@@ -18,3 +18,6 @@
 
 mod root;
 pub(crate) use root::*;
+
+mod mntns;
+pub(in crate::tests) use mntns::*;
