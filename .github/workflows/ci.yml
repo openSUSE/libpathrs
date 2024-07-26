@@ -53,12 +53,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Nightly rust is required for llvm-cov --doctests.
+      # Nightly rust is required for llvm-cov --doc.
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
 
-      - name: cargo test
-        run: cargo llvm-cov --no-report --doctests
+      - name: cargo nextest
+        run: cargo llvm-cov --no-report nextest
+      - name: cargo test --doc
+        run: cargo llvm-cov --no-report --doc
 
       - name: calculate coverage
         run: cargo llvm-cov report
