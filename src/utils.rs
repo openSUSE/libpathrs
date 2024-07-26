@@ -35,7 +35,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 
 // This is part of Linux's ABI.
 const PROC_ROOT_INO: u64 = 1;
@@ -142,25 +142,52 @@ impl ToCString for Path {
 
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
-pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, &'_ Path), Error> {
-    // Get the parent path.
-    let parent = path.parent().unwrap_or_else(|| "/".as_ref());
-
-    // Now construct the trailing portion of the target.
-    let name = path.file_name().context(error::InvalidArgumentSnafu {
-        name: "path",
-        description: "no trailing component",
-    })?;
+pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>), Error> {
+    let path_bytes = path.as_os_str().as_bytes();
+    // Find the last /.
+    let idx = match memchr::memrchr(b'/', path_bytes) {
+        Some(idx) => idx,
+        None => {
+            return Ok((
+                Path::new("."),
+                if path_bytes.len() > 0 {
+                    Some(path)
+                } else {
+                    None
+                },
+            ));
+        }
+    };
+    // Split the path. A trailing / gives a None base.
+    let (dir_bytes, base_bytes) = match path_bytes.split_at(idx) {
+        // TODO: There must be a way to simplify this.
+        (b"", b"/") => (&b"/"[..], None),
+        (dir, b"/") => (dir, None),
+        (b"", base) => (&b"/"[..], Some(&base[1..])),
+        (dir, base) => (dir, Some(&base[1..])),
+    };
 
     // It's critical we are only touching the final component in the path.
     // If there are any other path components we must bail.
-    ensure!(
-        !name.as_bytes().contains(&b'/'),
-        error::SafetyViolationSnafu {
-            description: "trailing component of split pathname contains '/'",
-        }
-    );
-    Ok((parent, name.as_ref()))
+    if let Some(base_bytes) = base_bytes {
+        ensure!(
+            base_bytes != b"",
+            error::SafetyViolationSnafu {
+                description: "trailing component of split pathname is ''",
+            }
+        );
+        ensure!(
+            !base_bytes.contains(&b'/'),
+            error::SafetyViolationSnafu {
+                description: "trailing component of split pathname contains '/'",
+            }
+        );
+    }
+
+    Ok((
+        Path::new(OsStr::from_bytes(dir_bytes)),
+        base_bytes.map(OsStr::from_bytes).map(Path::new),
+    ))
 }
 
 pub(crate) trait RawFdExt {
@@ -365,5 +392,75 @@ impl<P: AsRef<Path>> RawComponentsIter for P {
         RawComponents {
             inner: Some(self.as_ref().as_ref()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_split;
+
+    use std::path::{Path, PathBuf};
+
+    use anyhow::{Context, Error};
+
+    // TODO: Add propcheck tests?
+
+    macro_rules! path_split_tests {
+        // path_tests! {
+        //      abc("a/b" => "a", Some("b"));
+        //      xyz("/foo/bar/baz" => "/foo/bar", Some("baz"));
+        //      xyz("/" => "/", None);
+        // }
+        ($($test_name:ident ($path:expr => $dir:expr, $file:expr));* $(;)? ) => {
+            paste::paste! {
+                $(
+                    #[test]
+                    fn [<path_split_ $test_name>]() -> Result<(), Error> {
+                        let path: PathBuf = $path.into();
+                        let (got_dir, got_file) = path_split(&path)
+                            .with_context(|| format!("path_split({:?})", path))?;
+
+                        let want_dir: PathBuf = $dir.into();
+                        let want_file = {
+                            let file: Option<&str> = $file;
+                            file.map(PathBuf::from)
+                        };
+
+                        assert_eq!(
+                            (got_dir.as_os_str(), got_file.map(Path::as_os_str)),
+                            (want_dir.as_os_str(), want_file.as_ref().map(|p| p.as_os_str()))
+                        );
+                        Ok(())
+                    }
+                )*
+            }
+        };
+    }
+
+    path_split_tests! {
+        empty("" => ".", None);
+        root("/" => "/", None);
+
+        single1("single" => ".", Some("single"));
+        single2("./single" => ".", Some("single"));
+        single_root1("/single" => "/", Some("single"));
+
+        multi1("foo/bar" => "foo", Some("bar"));
+        multi2("foo/bar/baz" => "foo/bar", Some("baz"));
+        multi3("./foo/bar/baz" => "./foo/bar", Some("baz"));
+        multi_root1("/foo/bar" => "/foo", Some("bar"));
+        multi_root2("/foo/bar/baz" => "/foo/bar", Some("baz"));
+
+        trailing_dot1("/foo/." => "/foo", Some("."));
+        trailing_dot2("foo/../bar/../." => "foo/../bar/..", Some("."));
+
+        trailing_slash1("/foo/" => "/foo", None);
+        trailing_slash2("foo/bar///" => "foo/bar//", None);
+        trailing_slash3("./" => ".", None);
+        trailing_slash4("//" => "/", None);
+
+        complex1("foo//././bar/baz//./xyz" => "foo//././bar/baz//.", Some("xyz"));
+        complex2("//a/.///b/../../xyz" => "//a/.///b/../..", Some("xyz"));
+        complex3("../foo/bar/.///baz" => "../foo/bar/.//", Some("baz"));
     }
 }

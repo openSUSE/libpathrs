@@ -33,7 +33,7 @@ use std::{
 };
 
 use libc::dev_t;
-use snafu::ResultExt;
+use snafu::{OptionExt, ResultExt};
 
 /// An inode type to be created with [`Root::create`].
 ///
@@ -288,6 +288,11 @@ impl Root {
         // the parent.
         let (parent, name) =
             utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        let name = name.context(error::InvalidArgumentSnafu {
+            name: "path",
+            description: "create path has trailing slash",
+        })?;
+
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
@@ -312,6 +317,10 @@ impl Root {
             InodeType::Hardlink(target) => {
                 let (oldparent, oldname) = utils::path_split(target)
                     .wrap("split hardlink source path into (parent, name)")?;
+                let oldname = oldname.context(error::InvalidArgumentSnafu {
+                    name: "target",
+                    description: "hardlink target has trailing slash",
+                })?;
                 let olddir = self
                     .resolve(oldparent)
                     .wrap("resolve hardlink source parent for hardlink")?
@@ -375,6 +384,10 @@ impl Root {
         // the parent.
         let (parent, name) =
             utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        let name = name.context(error::InvalidArgumentSnafu {
+            name: "path",
+            description: "create_file path has trailing slash",
+        })?;
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
@@ -415,6 +428,10 @@ impl Root {
         // the parent.
         let (parent, name) =
             utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        let name = name.context(error::InvalidArgumentSnafu {
+            name: "path",
+            description: "remove path has trailing slash",
+        })?;
         let dir = self
             .resolve(parent)
             .wrap("resolve target parent directory for inode creation")?
@@ -479,8 +496,16 @@ impl Root {
     ) -> Result<(), Error> {
         let (src_parent, src_name) =
             utils::path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
+        let src_name = src_name.context(error::InvalidArgumentSnafu {
+            name: "source",
+            description: "rename source path has trailing slash",
+        })?;
         let (dst_parent, dst_name) = utils::path_split(destination.as_ref())
             .wrap("split target path into (parent, name)")?;
+        let dst_name = dst_name.context(error::InvalidArgumentSnafu {
+            name: "source",
+            description: "rename destination path has trailing slash",
+        })?;
 
         let src_dir = self
             .resolve(src_parent)
