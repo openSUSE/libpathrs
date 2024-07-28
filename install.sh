@@ -88,7 +88,7 @@ GETOPT="$(getopt -o h --long help,prefix:,exec-prefix:,includedir:,libdir: -- "$
 eval set -- "$GETOPT"
 
 DESTDIR="${DESTDIR:-}"
-prefix="/usr/local"
+prefix="/usr"
 exec_prefix=
 includedir=
 libdir=
