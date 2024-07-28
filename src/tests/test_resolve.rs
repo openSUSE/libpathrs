@@ -18,7 +18,11 @@
 
 use std::fs::File;
 
-use crate::{tests::common as tests_common, Handle, ResolverBackend, ResolverFlags, Root};
+use crate::{
+    resolvers::{opath, openat2},
+    tests::common as tests_common,
+    Handle, ResolverBackend, ResolverFlags, Root,
+};
 use utils::ExpectedResult;
 
 use anyhow::Error;
@@ -32,7 +36,7 @@ macro_rules! resolve_tests {
         paste::paste! {
             $(
                 #[test]
-                fn [<test_root_default_ $test_name>]() -> Result<(), Error> {
+                fn [<root_default_ $test_name>]() -> Result<(), Error> {
                     let root_dir = tests_common::create_basic_tree()?;
                     let root = Root::open(&root_dir)?;
                     let expected = $expected;
@@ -45,7 +49,7 @@ macro_rules! resolve_tests {
                 }
 
                 #[test]
-                fn [<test_root_opath_ $test_name>]() -> Result<(), Error> {
+                fn [<root_opath_ $test_name>]() -> Result<(), Error> {
                     let root_dir = tests_common::create_basic_tree()?;
                     let mut root = Root::open(&root_dir)?;
                     root.resolver.backend = ResolverBackend::EmulatedOpath;
@@ -60,15 +64,14 @@ macro_rules! resolve_tests {
                 }
 
                 #[test]
-                fn [<test_root_openat2_ $test_name>]() -> Result<(), Error> {
-                    if !*$crate::syscalls::OPENAT2_IS_SUPPORTED {
-                        // skip test
-                        return Ok(());
-                    }
-
+                fn [<root_openat2_ $test_name>]() -> Result<(), Error> {
                     let root_dir = tests_common::create_basic_tree()?;
                     let mut root = Root::open(&root_dir)?;
                     root.resolver.backend = ResolverBackend::KernelOpenat2;
+                    if !root.resolver.backend.supported() {
+                        // skip test
+                        return Ok(());
+                    }
 
                     let expected = $expected;
                     utils::check_resolve_in_root(&root, $unsafe_path, &expected)?;
@@ -80,14 +83,14 @@ macro_rules! resolve_tests {
                 }
 
                 #[test]
-                fn [<test_opath_ $test_name>]() -> Result<(), Error> {
+                fn [<opath_ $test_name>]() -> Result<(), Error> {
                     let root_dir = tests_common::create_basic_tree()?;
                     let root = File::open(&root_dir)?;
 
                     let expected = $expected;
                     utils::check_resolve_fn(
                         |file, subpath| {
-                            $crate::resolvers::opath::resolve(file, subpath, ResolverFlags::default())
+                            opath::resolve(file, subpath, ResolverFlags::default())
                                 .map(Handle::into_file)
                         },
                         &root,
@@ -102,7 +105,7 @@ macro_rules! resolve_tests {
                 }
 
                 #[test]
-                fn [<test_openat2_ $test_name>]() -> Result<(), Error> {
+                fn [<openat2_ $test_name>]() -> Result<(), Error> {
                     if !*$crate::syscalls::OPENAT2_IS_SUPPORTED {
                         // skip test
                         return Ok(());
@@ -114,7 +117,7 @@ macro_rules! resolve_tests {
                     let expected = $expected;
                     utils::check_resolve_fn(
                         |file, subpath| {
-                            $crate::resolvers::openat2::resolve(file, subpath, ResolverFlags::default())
+                            openat2::resolve(file, subpath, ResolverFlags::default())
                                 .map(Handle::into_file)
                         },
                         &root,
