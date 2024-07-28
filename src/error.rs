@@ -143,6 +143,11 @@ pub enum Error {
 pub(crate) trait ErrorExt {
     /// Wrap a `Result<..., Error>` with an additional context string.
     fn wrap<S: Into<String>>(self, context: S) -> Self;
+
+    /// Wrap a `Result<..., Error>` with an additional context string created by a closure.
+    fn with_wrap<F>(self, context_fn: F) -> Self
+    where
+        F: FnOnce() -> String;
 }
 
 impl<T> ErrorExt for Result<T, Error> {
@@ -150,6 +155,13 @@ impl<T> ErrorExt for Result<T, Error> {
         self.context(WrappedSnafu {
             context: context.into(),
         })
+    }
+
+    fn with_wrap<F>(self, context_fn: F) -> Self
+    where
+        F: FnOnce() -> String,
+    {
+        self.wrap(context_fn())
     }
 }
 

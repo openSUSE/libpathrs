@@ -247,23 +247,16 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 
         // Don't continue walking if user asked for no symlinks.
         if flags.contains(ResolverFlags::NO_SYMLINKS) {
-            return error::SafetyViolationSnafu {
-                description: "next is a symlink and symlink resolution disabled",
-            }
-            .fail();
-        }
-
-        // Check if it's safe for us to touch. In principle this should
-        // never be an actual security issue (since we readlink(2) the
-        // symlink) but it's much better to be safe than sorry here.
-        if next
-            .is_dangerous()
-            .wrap("check if next is on a dangerous filesystem")?
-        {
-            return error::SafetyViolationSnafu {
-                description: "next is a symlink on a dangerous filesystem",
-            }
-            .fail();
+            return Err(IOError::from_raw_os_error(libc::ELOOP))
+                .context(error::OsSnafu {
+                    operation: "emulated symlink resolution",
+                })
+                .with_wrap(|| {
+                    format!(
+                        "component {:?} is a symlink but symlink resolution is disabled",
+                        part
+                    )
+                })?;
         }
 
         // We need a limit on the number of symlinks we traverse to
@@ -279,6 +272,34 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
                 operation: "readlink next symlink component",
             })?;
+
+        // Check if it's a good idea to walk this symlink. If we are on a
+        // filesystem that supports magic-links and we've hit an absolute
+        // symlink, it is incredibly likely that this component is a magic-link
+        // and it makes no sense to try to resolve it in userspace.
+        //
+        // NOTE: There are some pseudo-magic-links like /proc/self (which
+        // dynamically generates the symlink contents but doesn't use
+        // nd_jump_link). In the case of procfs, these are always relative, and
+        // they are reasonable for us to walk.
+        //
+        // In procfs, all magic-links use d_path() to generate readlink() and
+        // thus are all absolute paths. (Unfortunately, apparmorfs uses
+        // nd_jump_link to make /sys/kernel/security/apparmor/policy dynamic
+        // using actual nd_jump_link() and their readlink give us a dummy
+        // relative path like "apparmorfs:[123]". But in that case we will just
+        // get an error.)
+        if link_target.is_absolute()
+            && next
+                .is_dangerous()
+                .wrap("check if next is on a dangerous filesystem")?
+        {
+            return Err(IOError::from_raw_os_error(libc::ELOOP))
+                .context(error::OsSnafu {
+                    operation: "emulated RESOLVE_NO_MAGICLINKS",
+                })
+                .wrap("walked into a potential magic-link")?;
+        }
 
         // Remove the link component from our expectex path.
         expected_path.pop();

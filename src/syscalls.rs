@@ -752,3 +752,9 @@ pub fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<F
         })
     }
 }
+
+#[cfg(test)]
+pub fn getpid() -> libc::pid_t {
+    // SAFETY: Obviously safe libc function.
+    unsafe { libc::getpid() }
+}
