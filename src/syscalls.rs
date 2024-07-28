@@ -19,7 +19,10 @@
 // We need to permit unsafe code because we are interacting with libc APIs.
 #![allow(unsafe_code)]
 
-use crate::utils::{RawFdExt, ToCString};
+use crate::{
+    utils::{RawFdExt, ToCString},
+    OpenFlags,
+};
 
 use std::{
     backtrace::Backtrace,
@@ -125,7 +128,7 @@ pub enum Error {
     Openat {
         dirfd: FrozenFd,
         path: PathBuf,
-        flags: i32,
+        flags: OpenFlags,
         mode: u32,
         source: IOError,
         backtrace: Option<Backtrace>,
@@ -370,7 +373,7 @@ pub(crate) fn openat_follow<P: AsRef<Path>>(
         Err(err).context(OpenatSnafu {
             dirfd,
             path,
-            flags,
+            flags: OpenFlags::from_bits_retain(flags),
             mode,
         })
     }
