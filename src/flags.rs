@@ -16,6 +16,8 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::syscalls;
+
 bitflags! {
     /// Wrapper for the underlying `libc`'s `O_*` flags.
     ///
@@ -110,6 +112,8 @@ bitflags! {
         //       with large offset support). glibc defines it as 0, and it is
         //       also architecture-specific.
         //const O_LARGEFILE = libc::O_LARGEFILE;
+
+        // Don't clobber unknown O_* bits.
         const _ = !0;
     }
 }
@@ -159,9 +163,45 @@ impl OpenFlags {
     }
 }
 
+bitflags! {
+    /// Wrapper for the underlying `libc`'s `RENAME_*` flags.
+    ///
+    /// The flag values and their meaning is identical to the description in the
+    /// [`renameat2(2)`] man page.
+    ///
+    /// [`renameat2(2)`] might not not be supported on your kernel -- in which
+    /// case [`Root::rename`] will fail if you specify any RenameFlags. You can
+    /// verify whether [`renameat2(2)`] flags are supported by calling
+    /// [`RenameFlags::supported`].
+    ///
+    /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/rename.2.html
+    /// [`Root::rename`]: struct.Root.html#method.rename
+    /// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
+    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
+    pub struct RenameFlags: libc::c_uint {
+        const RENAME_EXCHANGE = libc::RENAME_EXCHANGE;
+        const RENAME_NOREPLACE = libc::RENAME_NOREPLACE;
+        const RENAME_WHITEOUT = libc::RENAME_WHITEOUT;
+
+        // Don't clobber unknown RENAME_* bits.
+        const _ = !0;
+    }
+}
+
+impl RenameFlags {
+    /// Is this set of RenameFlags supported by the running kernel?
+    pub fn is_supported(self) -> bool {
+        // TODO: This check won't work once new RENAME_* flags are added.
+        self.is_empty() || *syscalls::RENAME_FLAGS_SUPPORTED
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::OpenFlags;
+    use crate::{
+        flags::{OpenFlags, RenameFlags},
+        syscalls,
+    };
 
     macro_rules! openflags_tests {
         ($($test_name:ident ( $($flag:ident)|+ ) == {accmode: $accmode:expr, read: $wants_read:expr, write: $wants_write:expr} );+ $(;)?) => {
@@ -207,5 +247,18 @@ mod tests {
         creat_wronly(O_WRONLY|O_CREAT) == {accmode: Some(libc::O_WRONLY), read: false, write: true};
         creat_rdwr(O_RDWR|O_CREAT) == {accmode: Some(libc::O_RDWR), read: true, write: true};
         creat_path(O_PATH|O_CREAT) == {accmode: None, read: false, write: false};
+    }
+
+    #[test]
+    fn rename_flags_is_supported() {
+        assert!(
+            RenameFlags::empty().is_supported(),
+            "empty flags should be supported"
+        );
+        assert_eq!(
+            RenameFlags::RENAME_EXCHANGE.is_supported(),
+            *syscalls::RENAME_FLAGS_SUPPORTED,
+            "rename flags being supported should be identical to RENAME_FLAGS_SUPPORTED"
+        );
     }
 }

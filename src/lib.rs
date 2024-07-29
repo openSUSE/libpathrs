@@ -137,8 +137,9 @@ extern crate snafu;
 
 /// Bit-flags for controlling various operations.
 pub mod flags;
+// TODO: Remove this.
 #[doc(inline)]
-pub use flags::OpenFlags;
+pub use flags::{OpenFlags, RenameFlags};
 
 // `Handle` implementation.
 mod handle;

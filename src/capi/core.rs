@@ -22,10 +22,11 @@ use crate::{
         utils,
     },
     error,
+    flags::{OpenFlags, RenameFlags},
     procfs::PROCFS_HANDLE,
     syscalls,
     utils::RawFdExt,
-    InodeType, OpenFlags, RenameFlags, Root,
+    InodeType, Root,
 };
 
 use std::{
@@ -140,8 +141,8 @@ pub extern "C" fn pathrs_rename(
     flags: u32,
 ) -> c_int {
     ret::with_fd(root_fd, |root: &mut Root| {
-        let flags = RenameFlags(flags);
-        root.rename(utils::parse_path(src)?, utils::parse_path(dst)?, flags)
+        let rflags = RenameFlags::from_bits_retain(flags);
+        root.rename(utils::parse_path(src)?, utils::parse_path(dst)?, rflags)
     })
 }
 

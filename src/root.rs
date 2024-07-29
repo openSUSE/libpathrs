@@ -20,10 +20,11 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
+    flags::{OpenFlags, RenameFlags},
     resolvers::Resolver,
     syscalls,
     utils::{self, RawFdExt},
-    Handle, OpenFlags,
+    Handle,
 };
 
 use std::{
@@ -94,30 +95,6 @@ pub enum InodeType<'a> {
     ////
     //// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     //DetachedSocket(),
-}
-
-/// Wrapper for the underlying `libc`'s `RENAME_*` flags.
-///
-/// The flag values and their meaning is identical to the description in the
-/// [`renameat2(2)`] man page.
-///
-/// [`renameat2(2)`] might not not be supported on your kernel -- in which
-/// case [`Root::rename`] will fail if you specify any RenameFlags. You can
-/// verify whether [`renameat2(2)`] flags are supported by calling
-/// [`RenameFlags::supported`].
-///
-/// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/rename.2.html
-/// [`Root::rename`]: struct.Root.html#method.rename
-/// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
-// TODO: Switch to bitflags!.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RenameFlags(pub u32);
-
-impl RenameFlags {
-    /// Is this set of RenameFlags supported by the running kernel?
-    pub fn supported(self) -> bool {
-        self.0 == 0 || *syscalls::RENAME_FLAGS_SUPPORTED
-    }
 }
 
 /// A handle to the root of a directory tree.
@@ -492,7 +469,7 @@ impl Root {
         &self,
         source: P,
         destination: P,
-        flags: RenameFlags,
+        rflags: RenameFlags,
     ) -> Result<(), Error> {
         let (src_parent, src_name) =
             utils::path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
@@ -518,7 +495,7 @@ impl Root {
             .into_file();
         let dst_dirfd = dst_dir.as_raw_fd();
 
-        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, flags.0).context(
+        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, rflags.bits()).context(
             error::RawOsSnafu {
                 operation: "pathrs rename",
             },
