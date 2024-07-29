@@ -238,11 +238,11 @@ pub extern "C" fn pathrs_mknod(
         let perms = Permissions::from_mode(mode ^ fmt);
         let path = utils::parse_path(path)?;
         let inode_type = match fmt {
-            libc::S_IFREG => InodeType::File(&perms),
-            libc::S_IFDIR => InodeType::Directory(&perms),
-            libc::S_IFBLK => InodeType::BlockDevice(&perms, dev),
-            libc::S_IFCHR => InodeType::CharacterDevice(&perms, dev),
-            libc::S_IFIFO => InodeType::Fifo(&perms),
+            libc::S_IFREG => InodeType::File(perms),
+            libc::S_IFDIR => InodeType::Directory(perms),
+            libc::S_IFBLK => InodeType::BlockDevice(perms, dev),
+            libc::S_IFCHR => InodeType::CharacterDevice(perms, dev),
+            libc::S_IFIFO => InodeType::Fifo(perms),
             libc::S_IFSOCK => error::NotImplementedSnafu {
                 feature: "mknod(S_IFSOCK)",
             }
@@ -277,7 +277,7 @@ pub extern "C" fn pathrs_symlink(
     ret::with_fd(root_fd, |root: &mut Root| {
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
-        root.create(path, &InodeType::Symlink(target))
+        root.create(path, &InodeType::Symlink(target.into()))
     })
 }
 
@@ -301,6 +301,6 @@ pub extern "C" fn pathrs_hardlink(
     ret::with_fd(root_fd, |root: &mut Root| {
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
-        root.create(path, &InodeType::Hardlink(target))
+        root.create(path, &InodeType::Hardlink(target.into()))
     })
 }

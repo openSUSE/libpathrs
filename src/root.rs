@@ -30,7 +30,7 @@ use crate::{
 use std::{
     fs::{File, Permissions},
     os::unix::{fs::PermissionsExt, io::AsRawFd},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use libc::dev_t;
@@ -39,20 +39,20 @@ use snafu::{OptionExt, ResultExt};
 /// An inode type to be created with [`Root::create`].
 ///
 /// [`Root::create`]: struct.Root.html#method.create
-#[derive(Copy, Clone, Debug)]
-pub enum InodeType<'a> {
+#[derive(Clone, Debug)]
+pub enum InodeType {
     /// Ordinary file, as in [`creat(2)`].
     ///
     /// [`creat(2)`]: http://man7.org/linux/man-pages/man2/creat.2.html
     // XXX: It is possible to support non-O_EXCL O_CREAT with the native
     //      backend. But it's unclear whether we should expose it given it's
     //      only supported on native-kernel systems.
-    File(&'a Permissions),
+    File(Permissions),
 
     /// Directory, as in [`mkdir(2)`].
     ///
     /// [`mkdir(2)`]: http://man7.org/linux/man-pages/man2/mkdir.2.html
-    Directory(&'a Permissions),
+    Directory(Permissions),
 
     /// Symlink with the given [`Path`], as in [`symlinkat(2)`].
     ///
@@ -62,7 +62,7 @@ pub enum InodeType<'a> {
     ///
     /// [`Path`]: https://doc.rust-lang.org/std/path/struct.Path.html
     /// [`symlinkat(2)`]: http://man7.org/linux/man-pages/man2/symlinkat.2.html
-    Symlink(&'a Path),
+    Symlink(PathBuf),
 
     /// Hard-link to the given [`Path`], as in [`linkat(2)`].
     ///
@@ -74,22 +74,22 @@ pub enum InodeType<'a> {
     /// [`Path`]: https://doc.rust-lang.org/std/path/struct.Path.html
     /// [`Root`]: struct.Root.html
     // XXX: Should we ever support that?
-    Hardlink(&'a Path),
+    Hardlink(PathBuf),
 
     /// Named pipe (aka FIFO), as in [`mkfifo(3)`].
     ///
     /// [`mkfifo(3)`]: http://man7.org/linux/man-pages/man3/mkfifo.3.html
-    Fifo(&'a Permissions),
+    Fifo(Permissions),
 
     /// Character device, as in [`mknod(2)`] with `S_IFCHR`.
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
-    CharacterDevice(&'a Permissions, dev_t),
+    CharacterDevice(Permissions, dev_t),
 
     /// Block device, as in [`mknod(2)`] with `S_IFBLK`.
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
-    BlockDevice(&'a Permissions, dev_t),
+    BlockDevice(Permissions, dev_t),
     // XXX: Does this really make sense?
     //// "Detached" unix socket, as in [`mknod(2)`] with `S_IFSOCK`.
     ////
