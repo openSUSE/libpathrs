@@ -40,7 +40,7 @@ use crate::{
     procfs::PROCFS_HANDLE,
     resolvers::{ResolverFlags, MAX_SYMLINK_TRAVERSALS},
     syscalls,
-    utils::{FileExt, RawComponentsIter, RawFdExt},
+    utils::{RawComponentsIter, RawFdExt},
     Handle,
 };
 
@@ -325,7 +325,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // get an error.)
         if link_target.is_absolute()
             && next
-                .is_dangerous()
+                .is_magiclink_filesystem()
                 .wrap("check if next is on a dangerous filesystem")?
         {
             return Err(IOError::from_raw_os_error(libc::ELOOP))
