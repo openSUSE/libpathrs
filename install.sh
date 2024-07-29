@@ -18,7 +18,7 @@
 set -Eeuo pipefail
 
 src_dir="$(readlink -f "$(dirname "${BASH_SOURCE[0]}")")"
-pushd "$src_dir"
+pushd "$src_dir" |:
 
 get_crate_info() {
 	# TODO: Should we use toml-cli if it's available?
@@ -40,6 +40,7 @@ SOVERSION="$(get_so_version)"
 SONAME="lib$(get_crate_info name).so.$FULLVERSION"
 
 # Try to emulate autoconf's basic flags.
+DEFAULT_PREFIX=/usr
 usage() {
 	[ "$#" -eq 0 ] || echo "ERROR:" "$@" >&2
 
@@ -56,21 +57,23 @@ usage() {
 	The following autoconf arguments are accepted by this script. The value in
 	brackets is the default value used if the flags are not specified.
 
-	  --prefix[=/usr/local]
+	  --prefix[=$DEFAULT_PREFIX]
 	  --exec-prefix[=<prefix>]
 	  --includedir=[<prefix>/include]
-	  --libdir=[<prefix>/lib(64)]
+	  --libdir=[<exec-prefix>/lib(64)]     (lib64 is used if available)
 
 	As with automake, if the DESTDIR= environment variable is set, this script
 	will install the files into DESTDIR as though it were the root of the
-	filesystem. This is usually used for distribution packaging.
+	filesystem. This is usually used for distribution packaging. You can also
+	pass environment variables as command-line arguments.
 
 	Example:
 
 	In an openSUSE rpm spec, this script could be used like this:
 
 	  %install
-	  DESTDIR=%{buildroot} ./install.sh \\
+	  ./install.sh \\
+	      DESTDIR=%{buildroot} \\
 	      --prefix=%{_prefix} \\
 	      --exec-prefix=%{_exec_prefix} \\
 	      --includedir=%{_includedir} \\
@@ -88,7 +91,7 @@ GETOPT="$(getopt -o h --long help,prefix:,exec-prefix:,includedir:,libdir: -- "$
 eval set -- "$GETOPT"
 
 DESTDIR="${DESTDIR:-}"
-prefix="/usr"
+prefix="$DEFAULT_PREFIX"
 exec_prefix=
 includedir=
 libdir=
@@ -104,7 +107,15 @@ while true; do
 	esac
 done
 
-[ "$#" -eq 0 ] || usage "unknown trailing arguments:" "$@"
+
+for extra_arg in "$@"; do
+	if [[ "$extra_arg" = *=* ]]; then
+		echo "[options] using $extra_arg from command-line"
+		eval "$extra_arg"
+	else
+		usage "unknown trailing argument $extra_arg"
+	fi
+done
 
 find_libdir() {
 	exec_prefix="$1"
@@ -121,6 +132,7 @@ exec_prefix="${exec_prefix:-$prefix}"
 includedir="${includedir:-$prefix/include}"
 libdir="${libdir:-$(find_libdir "$exec_prefix")}"
 
+echo "[pkg-config] generating pathrs pkg-config"
 cat >"pathrs.pc" <<EOF
 # libpathrs: safe path resolution on Linux
 # Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
@@ -150,7 +162,6 @@ URL: https://github.com/openSUSE/libpathrs
 Cflags: -I\${includedir}
 Libs: -L\${libdir} -lpathrs
 EOF
-echo "[install] generate pathrs pkg-config"
 
 echo "[install] installing libpathrs into DESTDIR=${DESTDIR:-/}"
 set -x
