@@ -48,6 +48,7 @@ use snafu::ResultExt;
 /// [`Error::chain`]: https://doc.rust-lang.org/nightly/std/error/trait.Error.html#method.chain
 #[derive(Snafu, Debug)]
 #[snafu(visibility(pub(crate)))]
+#[non_exhaustive]
 pub enum Error {
     /// The requested feature is not yet implemented.
     #[snafu(display("feature '{}' not implemented", feature))]
@@ -137,6 +138,35 @@ pub enum Error {
         #[snafu(source(from(Error, Box::new)))]
         source: Box<Error>,
     },
+}
+
+// TODO: Export this?
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[non_exhaustive]
+#[cfg(test)]
+pub(crate) enum ErrorKind {
+    NotImplemented,
+    NotSupported,
+    InvalidArgument,
+    SafetyViolation,
+    OsError(Option<i32>),
+}
+
+impl Error {
+    #[cfg(test)]
+    pub(crate) fn kind(&self) -> ErrorKind {
+        match self {
+            Self::NotImplemented { .. } => ErrorKind::NotImplemented,
+            Self::NotSupported { .. } => ErrorKind::NotSupported,
+            Self::InvalidArgument { .. } => ErrorKind::InvalidArgument,
+            Self::SafetyViolation { .. } => ErrorKind::SafetyViolation,
+            Self::OsError { source, .. } => ErrorKind::OsError(source.raw_os_error()),
+            Self::RawOsError { source, .. } => {
+                ErrorKind::OsError(source.root_cause().raw_os_error())
+            }
+            Self::Wrapped { source, .. } => source.kind(),
+        }
+    }
 }
 
 // Private trait necessary to work around the "orphan trait" restriction.

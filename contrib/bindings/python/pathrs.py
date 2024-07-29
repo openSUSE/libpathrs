@@ -24,7 +24,15 @@ import fcntl
 
 from _pathrs import ffi, lib as libpathrs_so
 
-__all__ = ["Root", "Handle", "Error"]
+__all__ = [
+	# core api
+	"Root", "Handle",
+	# procfs api
+	"PROC_SELF", "PROC_THREAD_SELF",
+	"proc_open", "proc_open_raw", "proc_readlink",
+	# error api
+	"Error",
+]
 
 def _cstr(pystr):
 	return ffi.new("char[]", pystr.encode("utf8"))
@@ -34,6 +42,9 @@ def _pystr(cstr):
 
 def _pyptr(cptr):
 	return int(ffi.cast("uintptr_t", cptr))
+
+def _cbuffer(size):
+	return ffi.new("char[%d]" % (size,))
 
 
 class Error(Exception):
@@ -120,6 +131,16 @@ class WrappedFd(object):
 	def leak(self):
 		self._fd = None
 
+	def fdopen(self, mode="r"):
+		try:
+			fd = self.fileno()
+			file = os.fdopen(fd, mode)
+			self.leak()
+			return file
+		except:
+			fd.close()
+			raise
+
 	@classmethod
 	def from_raw_fd(cls, fd):
 		return cls(fd)
@@ -190,6 +211,40 @@ def convert_mode(mode):
 	# We don't care about "b" or "t" since that's just a Python thing.
 	return flags
 
+
+PROC_SELF = libpathrs_so.PATHRS_PROC_SELF
+PROC_THREAD_SELF = libpathrs_so.PATHRS_PROC_THREAD_SELF
+
+def proc_open(base, path, mode="r", extra_flags=0):
+	flags = convert_mode(mode) | extra_flags
+	return proc_open_raw(base, path, flags).fdopen(mode)
+
+def proc_open_raw(base, path, flags):
+	path = _cstr(path)
+	fd = libpathrs_so.pathrs_proc_open(base, path, flags)
+	if fd < 0:
+		raise Error._fetch(fd) or INTERNAL_ERROR
+	return WrappedFd(fd)
+
+def proc_readlink(base, path):
+	path = _cstr(path)
+	linkbuf_size = 128
+	while True:
+		linkbuf = _cbuffer(linkbuf_size)
+		n = libpathrs_so.pathrs_proc_readlink(base, path, linkbuf, linkbuf_size)
+		if n < 0:
+			raise Error._fetch(n) or INTERNAL_ERROR
+		elif n <= linkbuf_size:
+			return ffi.buffer(linkbuf, linkbuf_size)[:n].decode("latin1")
+		else:
+			# The contents were truncated. Unlike readlinkat, pathrs returns
+			# the size of the link when it checked. So use the returned size
+			# as a basis for the reallocated size (but in order to avoid a DoS
+			# where a magic-link is growing by a single byte each iteration,
+			# make sure we are a fair bit larger).
+			linkbuf_size += n
+
+
 class Handle(WrappedFd):
 	def __init__(self, file):
 		# XXX: Is this necessary?
@@ -201,15 +256,7 @@ class Handle(WrappedFd):
 
 	def reopen(self, mode="r", extra_flags=0):
 		flags = convert_mode(mode) | extra_flags
-		rawfile = self.reopen_raw(flags)
-		try:
-			fd = rawfile.fileno()
-			file = os.fdopen(fd, mode)
-			rawfile.leak()
-			return file
-		except:
-			rawfile.close()
-			raise
+		return self.reopen_raw(flags).fdopen(mode)
 
 	def reopen_raw(self, flags):
 		fd = libpathrs_so.pathrs_reopen(self.fileno(), flags)

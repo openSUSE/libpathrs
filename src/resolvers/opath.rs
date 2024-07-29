@@ -37,7 +37,8 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
-    resolvers::ResolverFlags,
+    procfs::PROCFS_HANDLE,
+    resolvers::{ResolverFlags, MAX_SYMLINK_TRAVERSALS},
     syscalls,
     utils::{FileExt, RawComponentsIter, RawFdExt},
     Handle,
@@ -56,9 +57,6 @@ use std::{
 
 use snafu::ResultExt;
 
-/// Maximum number of symlink traversals we will accept.
-const MAX_SYMLINK_TRAVERSALS: usize = 128;
-
 /// Ensure that the expected path within the root matches the current fd.
 fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Result<(), Error> {
     // SAFETY: as_unsafe_path is safe here since we're using it to build a path
@@ -66,7 +64,7 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     //         path will be re-checked after the unsafe "current_path" is
     //         generated.
     let root_path = root
-        .as_unsafe_path()
+        .as_unsafe_path(&PROCFS_HANDLE)
         .wrap("get root path to construct expected path")?;
 
     // Combine the root path and our expected_path to get the full path to
@@ -91,7 +89,7 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     // SAFETY: as_unsafe_path is safe here since we're explicitly doing a
     //         string-based check to see whether the path we want is correct.
     let current_path = current
-        .as_unsafe_path()
+        .as_unsafe_path(&PROCFS_HANDLE)
         .wrap("check fd against expected path")?;
 
     // The paths should be identical.
@@ -112,7 +110,7 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     // SAFETY: as_unsafe_path path is safe here because it's just used in a
     //         string check -- and it's known that this check isn't perfect.
     let new_root_path = root
-        .as_unsafe_path()
+        .as_unsafe_path(&PROCFS_HANDLE)
         .wrap("get root path to double-check it hasn't moved")?;
     ensure!(
         root_path == new_root_path,
@@ -222,8 +220,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // Is the next dirfd a symlink or an ordinary path? If we're an ordinary
         // dirent, we just update current and move on to the next component.
         // Nothing special here.
-        // NOTE: File::metadata definitely does an fstat(2) here.
         if !next
+            // NOTE: File::metadata definitely does an fstat(2) here.
             .metadata()
             .context(error::OsSnafu {
                 operation: "fstat of next component",

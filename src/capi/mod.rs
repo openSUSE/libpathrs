@@ -26,6 +26,9 @@
 /// Core pathrs function wrappers.
 pub mod core;
 
+/// procfs-related function wrappers.
+pub mod procfs;
+
 /// Helpers for converting Result<...> into C-style int returns.
 pub mod ret;
 

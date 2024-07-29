@@ -35,6 +35,10 @@ travis-ci = { repository = "openSUSE/libpathrs" }
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]
 
+[features]
+# Only used for tests.
+_test_as_root = []
+
 [profile.release]
 # Enable link-time optimisations.
 lto = true

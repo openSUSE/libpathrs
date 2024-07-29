@@ -21,7 +21,9 @@ use crate::{
         ret::{self, IntoCReturn},
         utils,
     },
-    error, syscalls,
+    error,
+    procfs::PROCFS_HANDLE,
+    syscalls,
     utils::RawFdExt,
     InodeType, OpenFlags, RenameFlags, Root,
 };
@@ -86,7 +88,7 @@ pub extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
 pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
     let flags = OpenFlags::from_bits_retain(flags);
 
-    fd.reopen(flags)
+    fd.reopen(&PROCFS_HANDLE, flags)
         .and_then(|file| {
             // Rust sets O_CLOEXEC by default, without an opt-out. We need to
             // disable it if we weren't asked to do O_CLOEXEC.

@@ -70,6 +70,8 @@ aligned_n = "__CBINDGEN_ALIGNED"
 
 [export]
 exclude = [
+	# CReturn is a rust-only typedef.
+	"CReturn",
 	# Don't export the RESOLVE_* definitions.
 	"RESOLVE_NO_XDEV",
 	"RESOLVE_NO_MAGICLINKS",
@@ -80,6 +82,7 @@ exclude = [
 
 # Clean up the naming of structs.
 [export.rename]
+"CProcfsBase" = "pathrs_proc_base_t"
 
 # Error API.
 "CError" = "pathrs_error_t"
