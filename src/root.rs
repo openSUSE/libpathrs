@@ -286,10 +286,8 @@ impl Root {
                 syscalls::mkdirat(dirfd, name, mode)
             }
             InodeType::Symlink(target) => {
-                // I have no idea why &name is required here. it might be a
-                // compiler bug (the last argument seems to always be &&Path
-                // even if you switch around the argument order).
-                syscalls::symlinkat(target, dirfd, &name)
+                // No need to touch target.
+                syscalls::symlinkat(target, dirfd, name)
             }
             InodeType::Hardlink(target) => {
                 let (oldparent, oldname) = utils::path_split(target)

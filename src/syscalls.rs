@@ -560,11 +560,11 @@ pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> R
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `linkat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn linkat<P: AsRef<Path>>(
+pub(crate) fn linkat<P1: AsRef<Path>, P2: AsRef<Path>>(
     olddirfd: RawFd,
-    oldpath: P,
+    oldpath: P1,
     newdirfd: RawFd,
-    newpath: P,
+    newpath: P2,
     flags: c_int,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
@@ -598,7 +598,11 @@ pub(crate) fn linkat<P: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `symlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
-pub(crate) fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Result<(), Error> {
+pub(crate) fn symlinkat<P1: AsRef<Path>, P2: AsRef<Path>>(
+    target: P1,
+    dirfd: RawFd,
+    path: P2,
+) -> Result<(), Error> {
     let (target, path) = (target.as_ref(), path.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
@@ -625,11 +629,11 @@ pub(crate) fn symlinkat<P: AsRef<Path>>(target: P, dirfd: RawFd, path: P) -> Res
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `renameat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn renameat<P: AsRef<Path>>(
+pub(crate) fn renameat<P1: AsRef<Path>, P2: AsRef<Path>>(
     olddirfd: RawFd,
-    oldpath: P,
+    oldpath: P1,
     newdirfd: RawFd,
-    newpath: P,
+    newpath: P2,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
@@ -675,11 +679,11 @@ lazy_static! {
 ///
 /// This is needed because Rust doesn't provide any interface for `renameat2(2)`
 /// (especially not an interface for the dirfd).
-pub(crate) fn renameat2<P: AsRef<Path>>(
+pub(crate) fn renameat2<P1: AsRef<Path>, P2: AsRef<Path>>(
     olddirfd: RawFd,
-    oldpath: P,
+    oldpath: P1,
     newdirfd: RawFd,
-    newpath: P,
+    newpath: P2,
     flags: libc::c_uint,
 ) -> Result<(), Error> {
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
