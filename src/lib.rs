@@ -135,7 +135,7 @@ extern crate libc;
 #[macro_use]
 extern crate snafu;
 
-// `OpenFlags`
+/// Bit-flags for controlling various operations.
 pub mod flags;
 #[doc(inline)]
 pub use flags::OpenFlags;

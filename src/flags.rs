@@ -24,14 +24,52 @@ bitflags! {
     ///
     /// # Caveats
     ///
-    /// For historical reasons, the first three bits of `open(2)`'s flags are for
-    /// the access mode and are actually treated as a 2-bit number. So, it is
-    /// incorrect to attempt to do any checks on the access mode without masking it
-    /// correctly. So some helpers were added to make usage more ergonomic.
+    /// For historical reasons, the first three bits of `open(2)`'s flags are
+    /// for the access mode and are actually treated as a 2-bit number. So, it
+    /// is incorrect to attempt to do any checks on the access mode without
+    /// masking it correctly. So some helpers were added to make usage more
+    /// ergonomic.
+    ///
+    /// ```
+    /// # use pathrs::flags::OpenFlags;
+    /// // Using .contains() can lead to confusing behaviour:
+    /// # let ret =
+    /// OpenFlags::O_WRONLY.contains(OpenFlags::O_RDONLY); // returns true!
+    /// # assert!(ret);
+    /// # let ret =
+    /// OpenFlags::O_RDWR.contains(OpenFlags::O_RDONLY); // returns true!
+    /// # assert!(ret);
+    /// # let ret =
+    /// OpenFlags::O_RDWR.contains(OpenFlags::O_WRONLY); // returns false!
+    /// # assert!(!ret);
+    /// // But using the .wants_write() and .wants_read() helpers works:
+    /// assert_eq!(OpenFlags::O_WRONLY.wants_read(), false);
+    /// # #[allow(clippy::bool_assert_comparison)]
+    /// assert_eq!(OpenFlags::O_RDONLY.wants_read(), true);
+    /// # #[allow(clippy::bool_assert_comparison)]
+    /// assert_eq!(OpenFlags::O_RDWR.wants_write(), true);
+    /// // And we also correctly handle O_PATH as being "neither read nor write".
+    /// assert_eq!((OpenFlags::O_PATH | OpenFlags::O_RDWR).access_mode(), None);
+    /// assert_eq!((OpenFlags::O_PATH | OpenFlags::O_RDWR).wants_read(), false);
+    /// assert_eq!((OpenFlags::O_PATH | OpenFlags::O_RDWR).wants_write(), false);
+    /// // As well as the sneaky "implied write" cases.
+    /// assert_eq!((OpenFlags::O_CREAT|OpenFlags::O_RDONLY).wants_write(), true);
+    /// assert_eq!((OpenFlags::O_TRUNC|OpenFlags::O_RDONLY).wants_write(), true);
+    /// ```
     ///
     /// Also, if you wish to check for `O_TMPFILE`, make sure to use `contains`.
     /// `O_TMPFILE` includes `O_DIRECTORY`, so doing `intersection` will match
     /// `O_DIRECTORY` as well.
+    ///
+    /// ```
+    /// # use pathrs::flags::OpenFlags;
+    /// // O_TMPFILE contains O_DIRECTORY (as a kernel implementation detail).
+    /// # let ret =
+    /// OpenFlags::O_DIRECTORY.intersection(OpenFlags::O_TMPFILE).is_empty(); // returns false!
+    /// # assert!(!ret);
+    /// // Instead, use contains:
+    /// assert_eq!(OpenFlags::O_DIRECTORY.contains(OpenFlags::O_TMPFILE), false);
+    /// ```
     #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
     pub struct OpenFlags: libc::c_int {
         // Access modes (including O_PATH).
@@ -101,8 +139,8 @@ impl OpenFlags {
     }
 
     /// Does the access mode imply write access? Note that there are several
-    /// other bits in OpenFlags that imply write acces other than `O_WRONLY` and
-    /// `O_RDWR`. This function checks those bits as well.
+    /// other bits in OpenFlags that imply write access other than `O_WRONLY`
+    /// and `O_RDWR`. This function checks those bits as well.
     ///
     /// Returns false for `O_PATH`.
     #[inline]
