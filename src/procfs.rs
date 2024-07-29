@@ -42,15 +42,25 @@ lazy_static! {
 }
 
 /// Indicate what base directory should be used when doing `/proc/...`
-/// operations with [`ProcfsHandle`]. This is necessary because
-/// `/proc/thread-self` is not present on pre-3.17 kernels and so it may be
-/// necessary to emulate `/proc/thread-self` access on those older kernels.
+/// operations with a [`ProcfsHandle`].
+///
+/// This is necessary because `/proc/thread-self` is not present on pre-3.17
+/// kernels and so it may be necessary to emulate `/proc/thread-self` access on
+/// those older kernels.
+///
+/// Most users should use `ProcfsBase::ProcSelf`, but certain users (such as
+/// multi-threaded programs where you really want thread-specific information)
+/// may want to use `ProcSelf::ProcThreadSelf`. Note that on systems that use
+/// green threads (such as Go), you must take care to ensure the thread stays
+/// alive until you stop using the handle (if the thread dies the handle may
+/// start returning invalid data or errors because it refers to a specific
+/// thread that no longer exists).
 ///
 /// [`ProcfsHandle`]: struct.ProcfsHandle.html
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)] // TODO: Remove when we export this properly.
-pub(crate) enum ProcfsBase {
+pub enum ProcfsBase {
     /// Use `/proc/self`. For most programs, this is the standard choice.
     ProcSelf,
     /// Use `/proc/thread-self`. In multi-threaded programs where one thread has
@@ -118,8 +128,17 @@ impl ProcfsBase {
 /// with.
 ///
 /// NOTE: At the moment, `ProcfsHandle` only supports doing operations within
-/// `/proc/self` and `/proc/thread-self/`. This is because there are tools like
+/// `/proc/self` and `/proc/thread-self`. This is because there are tools like
 /// [lxcfs] which intentionally mask parts of `/proc` in order to fix issues
+/// like `/proc/meminfo` and `/proc/cpuinfo` not being cgroup-aware.
+/// `ProcfsHandle` will refuse to open files that have these overmounts, which
+/// could lead to application errors that users may not expect. However, no such
+/// tool masks paths inside `/proc/$pid` directories because such masking would
+/// be expensive (because of FUSE limitations, you would need to emulate every
+/// file within `/proc` to do this properly) and would cause application-visible
+/// issues (magic-link lookups would not work as they normally do). So we can
+/// safely provide handlers for `/proc/self` and `/proc/thread-self` (which are
+/// the main things a lot of libpathrs users care about).
 ///
 /// [cve-2019-16884]: https://nvd.nist.gov/vuln/detail/CVE-2019-16884
 /// [cve-2019-19921]: https://nvd.nist.gov/vuln/detail/CVE-2019-19921
@@ -127,7 +146,7 @@ impl ProcfsBase {
 /// [lpc2022]: https://youtu.be/y1PaBzxwRWQ
 /// [lxcfs]: https://github.com/lxc/lxcfs
 #[derive(Debug)]
-pub(crate) struct ProcfsHandle {
+pub struct ProcfsHandle {
     inner: File,
     mnt_id: Option<u64>,
     pub(crate) resolver: ProcfsResolver,
@@ -137,6 +156,11 @@ impl ProcfsHandle {
     // This is part of Linux's ABI.
     const PROC_ROOT_INO: u64 = 1;
 
+    /// Create a new `fsopen(2)`-based [`ProcfsHandle`]. This handle is safe
+    /// against racing attackers changing the mount table and is guaranteed to
+    /// have no overmounts because it is a brand-new procfs.
+    ///
+    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     pub(crate) fn new_fsopen() -> Result<Self, Error> {
         let sfd =
             syscalls::fsopen("proc", FsopenFlags::FSOPEN_CLOEXEC).context(error::RawOsSnafu {
@@ -164,6 +188,11 @@ impl ProcfsHandle {
         .and_then(Self::try_from)
     }
 
+    /// Create a new `open_tree(2)`-based [`ProcfsHandle`]. This handle is
+    /// guaranteed to be safe against racing attackers, and will not have
+    /// overmounts unless `flags` contains `OpenTreeFlags::AT_RECURSIVE`.
+    ///
+    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     pub(crate) fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
         syscalls::open_tree(
             -libc::EBADF,
@@ -177,6 +206,11 @@ impl ProcfsHandle {
         .and_then(Self::try_from)
     }
 
+    /// Create a plain `open(2)`-style [`ProcfsHandle`].
+    ///
+    /// This handle is NOT safe against racing attackers and overmounts.
+    ///
+    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     pub(crate) fn new_unsafe_open() -> Result<Self, Error> {
         syscalls::openat(libc::AT_FDCWD, "/proc", libc::O_PATH | libc::O_DIRECTORY, 0)
             .context(error::RawOsSnafu {
@@ -186,6 +220,29 @@ impl ProcfsHandle {
             .and_then(Self::try_from)
     }
 
+    /// Create a new handle that references a safe `/proc`.
+    ///
+    /// For privileged users (those that have the ability to create mounts) on
+    /// new enough kernels (Linux 5.1 or later), this created handle will be
+    /// safe racing attackers that . If your `/proc` does not have locked
+    /// overmounts (which is the case for most users except those running inside
+    /// a nested container with user namespaces) then the handle will also be
+    /// completely safe against overmounts.
+    ///
+    /// For the userns-with-locked-overmounts case, on slightly newer kernels
+    /// (those with `STATX_MNT_ID` support -- Linux 5.8 or later)
+    /// [`ProcfsHandle::open`] and [`ProcfsHandle::open_follow`] this handle
+    /// will be safe against overmounts.
+    ///
+    /// For unprivileged users, this handle will not be safe against a racing
+    /// attacker that can modify the mount table while doing operations.
+    /// However, the Linux 5.8-or-later `STATX_MNT_ID` protections will protect
+    /// against static overmounts created by an attacker that cannot modify the
+    /// mount table while these operations are running.
+    ///
+    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
+    /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
+    /// [`ProcfsHandle::open_follow`]: struct.ProcfsHandle.html#method.open_follow
     pub fn new() -> Result<Self, Error> {
         Self::new_fsopen()
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
@@ -244,6 +301,29 @@ impl ProcfsHandle {
         Ok(file)
     }
 
+    /// Safely open a magic-link inside `procfs`.
+    ///
+    /// The semantics of this method are very similar to [`ProcfsHandle::open`],
+    /// with the following differences:
+    ///
+    ///  - The final component of the path will be opened with very minimal
+    ///    protections. This is necessary because magic-links by design involve
+    ///    mountpoint crossings and cannot be confined. This method does verify
+    ///    that the symlink itself doesn't have any overmounts, but this
+    ///    verification is only safe against races for [`ProcfsHandle`]s created
+    ///    by privileged users.
+    ///
+    ///  - A trailing `/` at the end of `subpath` implies `O_DIRECTORY`.
+    ///
+    /// Most users should use [`ProcfsHandle::open`]. This method should only be
+    /// used to open magic-links like `/proc/self/exe` or `/proc/self/fd/$n`.
+    ///
+    /// In addition (like [`ProcfsHandle::open`]), `open_follow` will not permit
+    /// a magic-link to be a path component (ie. `/proc/self/root/etc/passwd`).
+    /// This method *only* permits *trailing* symlinks.
+    ///
+    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
+    /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
     pub fn open_follow<P: AsRef<Path>>(
         &self,
         base: ProcfsBase,
@@ -297,6 +377,42 @@ impl ProcfsHandle {
         )
     }
 
+    /// Safely open a path inside `procfs`.
+    ///
+    /// The provided `subpath` is relative to the [`ProcfsBase`] (and must not
+    /// contain `..` components -- [`openat2(2)`] permits `..` in some cases but
+    /// the restricted `O_PATH` resolver for older kernels doesn't and thus
+    /// using `..` could result in application errors when running on pre-5.6
+    /// kernels).
+    ///
+    /// The provided `OpenFlags` apply to the returned [`File`]. However, note
+    /// that the following flags are not allowed and using them will result in
+    /// an error:
+    ///
+    ///  - `O_CREAT`
+    ///  - `O_EXCL`
+    ///  - `O_TMPFILE`
+    ///
+    /// # Symlinks
+    ///
+    /// This method *will not follow any magic links*, and also implies
+    /// `O_NOFOLLOW` so *trailing symlinks will also not be followed*
+    /// (regardless of type). Regular symlink path components are followed
+    /// however (though lookups are forced to stay inside the `procfs`
+    /// referenced by `ProcfsHandle`).
+    ///
+    /// If you wish to open a magic-link (such as `/proc/self/fd/$n` or
+    /// `/proc/self/exe`), use [`ProcfsHandle::open_follow`] instead.
+    ///
+    /// # Mountpoint Crossings
+    ///
+    /// All mount point crossings are also forbidden (including bind-mounts),
+    /// meaning that this method implies [`RESOLVE_NO_XDEV`][`openat2(2)`].
+    ///
+    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    /// [`ProcfsBase`]: enum.ProcfsBase.html
+    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
+    /// [`openat2(2)`]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
     pub fn open<P: AsRef<Path>>(
         &self,
         base: ProcfsBase,
@@ -323,6 +439,15 @@ impl ProcfsHandle {
         Ok(file)
     }
 
+    /// Safely read the contents of a symlink inside `procfs`.
+    ///
+    /// This method is effectively shorthand for doing [`readlinkat(2)`] on the
+    /// handle you'd get from `ProcfsHandle::open(..., OpenFlags::O_PATH)`. So
+    /// all of the caveats from [`ProcfsHandle::open`] apply to this method as
+    /// well.
+    ///
+    /// [`readlinkat(2)`]: https://www.man7.org/linux/man-pages/man2/readlinkat.2.html
+    /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
     pub fn readlink<P: AsRef<Path>>(&self, base: ProcfsBase, subpath: P) -> Result<PathBuf, Error> {
         let link = self.open(base, subpath, OpenFlags::O_PATH)?;
         syscalls::readlinkat(link.as_raw_fd(), "").context(error::RawOsSnafu {

@@ -158,8 +158,8 @@ mod resolvers;
 #[doc(inline)]
 pub use resolvers::{Resolver, ResolverBackend, ResolverFlags};
 
-// Safe procfs handles.
-mod procfs;
+/// Safe procfs handles.
+pub mod procfs;
 
 // C API.
 mod capi;
