@@ -409,11 +409,65 @@ impl<P: AsRef<Path>> RawComponentsIter for P {
 
 #[cfg(test)]
 mod tests {
-    use super::{path_split, path_strip_trailing_slash};
+    use crate::{
+        procfs::PROCFS_HANDLE,
+        syscalls,
+        utils::{path_split, path_strip_trailing_slash, RawFdExt},
+    };
 
-    use std::path::{Path, PathBuf};
+    use std::{
+        fs::File,
+        os::fd::{AsRawFd, RawFd},
+        path::{Path, PathBuf},
+    };
 
     use anyhow::{Context, Error};
+    use tempfile::TempDir;
+
+    fn check_as_unsafe_path<P: AsRef<Path>>(fd: RawFd, want_path: P) -> Result<(), Error> {
+        let want_path = want_path.as_ref();
+
+        // Plain /proc/... lookup.
+        let got_path = fd.as_unsafe_path_unchecked()?;
+        assert_eq!(
+            got_path, want_path,
+            "expected as_unsafe_path_unchecked to give the correct path"
+        );
+        // ProcfsHandle-based lookup.
+        let got_path = fd.as_unsafe_path(&PROCFS_HANDLE)?;
+        assert_eq!(
+            got_path, want_path,
+            "expected as_unsafe_path to give the correct path"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn as_unsafe_path_cwd() -> Result<(), Error> {
+        let real_cwd = syscalls::getcwd()?;
+        check_as_unsafe_path(libc::AT_FDCWD, real_cwd)
+    }
+
+    #[test]
+    fn as_unsafe_path_fd() -> Result<(), Error> {
+        let real_tmpdir = TempDir::new()?;
+        let file = File::open(&real_tmpdir)?;
+        check_as_unsafe_path(file.as_raw_fd(), real_tmpdir)
+    }
+
+    #[test]
+    fn as_unsafe_path_badfd() {
+        let bad_fd: RawFd = -1;
+
+        assert!(
+            bad_fd.as_unsafe_path_unchecked().is_err(),
+            "as_unsafe_path_unchecked should fail for bad file descriptor"
+        );
+        assert!(
+            bad_fd.as_unsafe_path(&PROCFS_HANDLE).is_err(),
+            "as_unsafe_path should fail for bad file descriptor"
+        );
+    }
 
     // TODO: Add propcheck tests?
 

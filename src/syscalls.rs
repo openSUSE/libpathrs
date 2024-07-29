@@ -865,6 +865,21 @@ pub fn gettid() -> libc::pid_t {
     unsafe { libc::gettid() }
 }
 
+#[cfg(test)]
+pub fn getcwd() -> Result<PathBuf, anyhow::Error> {
+    use std::ffi::CStr;
+
+    let mut buffer = [0_u8; libc::PATH_MAX as usize];
+    let ret = unsafe { libc::getcwd(buffer.as_mut_ptr() as *mut libc::c_char, buffer.len()) };
+
+    if ret.is_null() {
+        Err(IOError::last_os_error().into())
+    } else {
+        let cwd = OsStr::from_bytes(CStr::from_bytes_until_nul(&buffer[..])?.to_bytes());
+        Ok(PathBuf::from(cwd))
+    }
+}
+
 bitflags! {
     #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
     pub struct FsopenFlags: i32 {
