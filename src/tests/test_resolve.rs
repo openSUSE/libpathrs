@@ -378,6 +378,14 @@ mod utils {
             "reopened handle should be equivalent to old handle",
         );
 
+        let clone_handle = handle.try_clone()?;
+        let clone_handle_path = clone_handle.as_file().as_unsafe_path_unchecked()?;
+
+        assert_eq!(
+            real_handle_path, clone_handle_path,
+            "cloned handle should be equivalent to old handle",
+        );
+
         // TODO: Check fd flags.
 
         Ok(())

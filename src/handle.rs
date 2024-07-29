@@ -73,9 +73,7 @@ impl Handle {
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn try_clone(&self) -> Result<Self, Error> {
-        Ok(Self {
-            inner: self.inner.try_clone_hotfix()?,
-        })
+        self.inner.try_clone_hotfix().map(Self::from_file_unchecked)
     }
 
     /// Unwrap a [`Handle`] to reveal the underlying [`File`].
