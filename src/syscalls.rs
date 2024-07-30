@@ -38,7 +38,7 @@ use std::{
     ptr,
 };
 
-use libc::{c_int, dev_t, mode_t, stat, statfs};
+use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
 use snafu::ResultExt;
 
 lazy_static! {
@@ -509,6 +509,11 @@ pub(crate) fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Re
     }
 }
 
+pub(crate) fn devmajorminor(dev: dev_t) -> (c_uint, c_uint) {
+    // SAFETY: Obviously safe-to-use libc function.
+    unsafe { (libc::major(dev), libc::minor(dev)) }
+}
+
 /// Wrapper for `mknodat(2)`.
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
@@ -527,14 +532,13 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
+        let (major, minor) = devmajorminor(dev);
         Err(err).context(MknodatSnafu {
             dirfd,
             path,
             mode,
-            // SAFETY: Obviously safe-to-use libc function.
-            major: unsafe { libc::major(dev) },
-            // SAFETY: Obviously safe-to-use libc function.
-            minor: unsafe { libc::minor(dev) },
+            major,
+            minor,
         })
     }
 }
@@ -684,8 +688,13 @@ pub(crate) fn renameat2<P1: AsRef<Path>, P2: AsRef<Path>>(
     oldpath: P1,
     newdirfd: RawFd,
     newpath: P2,
-    flags: libc::c_uint,
+    flags: c_uint,
 ) -> Result<(), Error> {
+    // Use renameat(2) if no flags are specified.
+    if flags == 0 {
+        return renameat(olddirfd, oldpath, newdirfd, newpath);
+    }
+
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
@@ -704,10 +713,6 @@ pub(crate) fn renameat2<P1: AsRef<Path>, P2: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        if flags == 0 {
-            // Fall back to renameat(2) if possible.
-            return renameat(olddirfd, oldpath, newdirfd, newpath);
-        }
         Err(err).context(Renameat2Snafu {
             olddirfd,
             oldpath,
@@ -874,6 +879,7 @@ pub fn getcwd() -> Result<PathBuf, anyhow::Error> {
     use std::ffi::CStr;
 
     let mut buffer = [0_u8; libc::PATH_MAX as usize];
+    // SAFETY: Obviously safe libc function.
     let ret = unsafe { libc::getcwd(buffer.as_mut_ptr() as *mut libc::c_char, buffer.len()) };
 
     if ret.is_null() {
