@@ -169,7 +169,10 @@ impl Root {
     /// [`Root`]: struct.Root.html
     pub fn try_clone(&self) -> Result<Self, Error> {
         Ok(Self {
-            inner: self.inner.try_clone_hotfix()?,
+            inner: self
+                .as_file()
+                .try_clone_hotfix()
+                .wrap("clone underlying root file")?,
             resolver: self.resolver,
         })
     }
@@ -249,6 +252,8 @@ impl Root {
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.resolver.resolve(&self.inner, path)
     }
+
+    // TODO: readlink (need to move ResolverFlags out of Resolver)
 
     /// Within the [`Root`]'s tree, create an inode at `path` as specified by
     /// `inode_type`.

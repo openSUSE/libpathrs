@@ -18,7 +18,12 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{error::Error, flags::OpenFlags, procfs::PROCFS_HANDLE, utils::RawFdExt};
+use crate::{
+    error::{Error, ErrorExt},
+    flags::OpenFlags,
+    procfs::PROCFS_HANDLE,
+    utils::RawFdExt,
+};
 
 use std::fs::File;
 
@@ -73,7 +78,10 @@ impl Handle {
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn try_clone(&self) -> Result<Self, Error> {
-        self.inner.try_clone_hotfix().map(Self::from_file_unchecked)
+        self.inner
+            .try_clone_hotfix()
+            .map(Self::from_file_unchecked)
+            .wrap("clone underlying handle file")
     }
 
     /// Unwrap a [`Handle`] to reveal the underlying [`File`].
