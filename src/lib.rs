@@ -48,7 +48,7 @@
 //!
 //! ```
 //! # extern crate libc;
-//! # use pathrs::{error::Error, Root, OpenFlags};
+//! # use pathrs::{error::Error, flags::OpenFlags, Root};
 //! # fn main() -> Result<(), Error> {
 //! let (root_path, unsafe_path) = ("/path/to/root", "/etc/passwd");
 //! # let root_path = "/";

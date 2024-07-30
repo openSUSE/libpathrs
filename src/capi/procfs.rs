@@ -23,12 +23,7 @@ use crate::{
     procfs::{ProcfsBase, PROCFS_HANDLE},
 };
 
-use std::{
-    cmp,
-    ffi::CString,
-    os::{fd::RawFd, unix::ffi::OsStringExt},
-    ptr,
-};
+use std::os::fd::RawFd;
 
 use libc::{c_char, c_int, size_t};
 
@@ -127,7 +122,7 @@ pub extern "C" fn pathrs_proc_open(base: CProcfsBase, path: *const c_char, flags
 /// This function is effectively shorthand for
 ///
 /// ```c
-/// fd = pathrs_proc_readlink(base, path, O_PATH|O_NOFOLLOW);
+/// fd = pathrs_proc_open(base, path, O_PATH|O_NOFOLLOW);
 /// if (fd < 0) {
 ///     liberr = fd; // for use with pathrs_errorinfo()
 ///     goto err;
@@ -144,9 +139,10 @@ pub extern "C" fn pathrs_proc_open(base: CProcfsBase, path: *const c_char, flags
 /// not include the NUL byte. A `NULL` `linkbuf` or invalid `linkbuf_size` are
 /// treated as zero-size buffers.
 ///
-/// NOTE: Unlike `readlinkat(2)`, in the case where `linkbuf` is too small to
-/// contain the symlink contents, `pathrs_proc_readlink` will return *the number
-/// of bytes it would have copied if the buffer was large enough*.
+/// NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
+/// contain the symlink contents, pathrs_proc_readlink() will return *the number
+/// of bytes it would have copied if the buffer was large enough*. This matches
+/// the behaviour of pathrs_readlink().
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
@@ -162,26 +158,9 @@ pub extern "C" fn pathrs_proc_readlink(
     || -> Result<_, Error> {
         let path = utils::parse_path(path)?;
 
-        let link_target = CString::new(
-            PROCFS_HANDLE
-                .readlink(base.into(), path)?
-                .into_os_string()
-                .into_vec(),
-        )
-        .expect("link from readlink should not contain any nulls");
+        let link_target = PROCFS_HANDLE.readlink(base.into(), path)?;
 
-        // If the linkbuf is null, we just return the number of bytes we
-        // would've written.
-        if !linkbuf.is_null() && linkbuf_size > 0 {
-            let to_copy = cmp::min(link_target.count_bytes(), linkbuf_size);
-            // SAFETY: The C caller guarantees that linkbuf is safe to write to
-            // up to linkbuf_size bytes.
-            unsafe {
-                ptr::copy_nonoverlapping(link_target.as_ptr(), linkbuf, to_copy);
-            }
-        }
-
-        Ok(link_target.count_bytes() as c_int)
+        utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size)
     }()
     .into_c_return()
 }

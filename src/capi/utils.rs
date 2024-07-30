@@ -19,6 +19,7 @@
 use crate::error::{self, Error};
 
 use std::{
+    cmp,
     convert::TryInto,
     ffi::{CStr, CString, OsStr},
     io::Error as IOError,
@@ -27,7 +28,7 @@ use std::{
     ptr,
 };
 
-use libc::c_char;
+use libc::{c_char, c_int, size_t};
 
 pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     ensure!(
@@ -40,6 +41,28 @@ pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     // SAFETY: C caller guarantees that the path is a valid C-style string.
     let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
     Ok(OsStr::from_bytes(bytes).as_ref())
+}
+
+pub(crate) fn copy_path_into_buffer<P: AsRef<Path>>(
+    path: P,
+    buf: *mut c_char,
+    bufsize: size_t,
+) -> Result<c_int, Error> {
+    let path = CString::new(path.as_ref().as_os_str().as_bytes())
+        .expect("link from readlink should not contain any nulls");
+
+    // If the linkbuf is null, we just return the number of bytes we
+    // would've written.
+    if !buf.is_null() && bufsize > 0 {
+        let to_copy = cmp::min(path.count_bytes(), bufsize);
+        // SAFETY: The C caller guarantees that buf is safe to write to
+        // up to bufsize bytes.
+        unsafe {
+            ptr::copy_nonoverlapping(path.as_ptr(), buf, to_copy);
+        }
+    }
+
+    Ok(path.count_bytes() as c_int)
 }
 
 pub(crate) trait Leakable {

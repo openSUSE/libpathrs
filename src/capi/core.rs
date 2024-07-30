@@ -37,7 +37,7 @@ use std::{
     },
 };
 
-use libc::{c_char, c_int, c_uint, dev_t};
+use libc::{c_char, c_int, c_uint, dev_t, size_t};
 use snafu::ResultExt;
 
 /// Open a root handle.
@@ -144,6 +144,54 @@ pub extern "C" fn pathrs_resolve(root_fd: RawFd, path: *const c_char) -> RawFd {
 pub extern "C" fn pathrs_resolve_nofollow(root_fd: RawFd, path: *const c_char) -> RawFd {
     ret::with_fd(root_fd, |root: &mut Root| {
         root.resolve_nofollow(utils::parse_path(path)?)
+    })
+}
+
+/// Get the target of a symlink within the rootfs referenced by root_fd.
+///
+/// NOTE: The returned path is not modified to be "safe" outside of the
+/// root. You should not use this path for doing further path lookups -- use
+/// pathrs_resolve() instead.
+///
+/// This method is just shorthand for:
+///
+/// ```c
+/// int linkfd = pathrs_resolve_nofollow(rootfd, path);
+/// if (linkfd < 0) {
+///     liberr = fd; // for use with pathrs_errorinfo()
+///     goto err;
+/// }
+/// copied = readlinkat(linkfd, "", linkbuf, linkbuf_size);
+/// close(linkfd);
+/// ```
+///
+/// # Return Value
+///
+/// On success, this function copies the symlink contents to `linkbuf` (up to
+/// `linkbuf_size` bytes) and returns the full size of the symlink path buffer.
+/// This function will not copy the trailing NUL byte, and the return size does
+/// not include the NUL byte. A `NULL` `linkbuf` or invalid `linkbuf_size` are
+/// treated as zero-size buffers.
+///
+/// NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
+/// contain the symlink contents, pathrs_readlink() will return *the number of
+/// bytes it would have copied if the buffer was large enough*. This matches the
+/// behaviour of pathrs_proc_readlink().
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub extern "C" fn pathrs_readlink(
+    root_fd: RawFd,
+    path: *const c_char,
+    linkbuf: *mut c_char,
+    linkbuf_size: size_t,
+) -> RawFd {
+    ret::with_fd(root_fd, |root: &mut Root| {
+        let link_target = root.readlink(utils::parse_path(path)?)?;
+        utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size)
     })
 }
 
