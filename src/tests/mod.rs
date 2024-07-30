@@ -20,3 +20,4 @@ pub(crate) mod common;
 
 mod test_procfs;
 mod test_resolve;
+mod test_root_ops;
