@@ -307,11 +307,18 @@ mod utils {
                     }
                     // Check symlink is correct.
                     InodeType::Symlink(target) => {
+                        // Check using the a resolved handle.
                         let actual_target =
                             syscalls::readlinkat(created.as_file().as_raw_fd(), "")?;
                         assert_eq!(
                             target, actual_target,
                             "readlinkat(handle) link target mismatch"
+                        );
+                        // Double-check with Root::readlink.
+                        let actual_target = root.readlink(path)?;
+                        assert_eq!(
+                            target, actual_target,
+                            "root.readlink(path) link target mismatch"
                         );
                     }
                 }

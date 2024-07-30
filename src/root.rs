@@ -265,7 +265,26 @@ impl Root {
         self.resolver.resolve(&self.inner, path, true)
     }
 
-    // TODO: readlink (need to move ResolverFlags out of Resolver)
+    /// Get the target of a symlink within a [`Root`].
+    ///
+    /// **NOTE**: The returned path is not modified to be "safe" outside of the
+    /// root. You should not use this path for doing further path lookups -- use
+    /// [`Root::resolve`] instead.
+    ///
+    /// This method is just shorthand for calling `readlinkat(2)` on the handle
+    /// returned by [`Root::resolve_nofollow`].
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Root::resolve`]: struct.Root.html#method.resolve
+    /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
+    pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
+        let link = self
+            .resolve_nofollow(path)
+            .wrap("resolve symlink O_NOFOLLOW for readlink")?;
+        syscalls::readlinkat(link.as_file().as_raw_fd(), "").context(error::RawOsSnafu {
+            operation: "readlink resolve symlink",
+        })
+    }
 
     /// Within the [`Root`]'s tree, create an inode at `path` as specified by
     /// `inode_type`.
