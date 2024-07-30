@@ -168,6 +168,48 @@ int pathrs_resolve(int root_fd, const char *path);
 int pathrs_resolve_nofollow(int root_fd, const char *path);
 
 /**
+ * Get the target of a symlink within the rootfs referenced by root_fd.
+ *
+ * NOTE: The returned path is not modified to be "safe" outside of the
+ * root. You should not use this path for doing further path lookups -- use
+ * pathrs_resolve() instead.
+ *
+ * This method is just shorthand for:
+ *
+ * ```c
+ * int linkfd = pathrs_resolve_nofollow(rootfd, path);
+ * if (linkfd < 0) {
+ *     liberr = fd; // for use with pathrs_errorinfo()
+ *     goto err;
+ * }
+ * copied = readlinkat(linkfd, "", linkbuf, linkbuf_size);
+ * close(linkfd);
+ * ```
+ *
+ * # Return Value
+ *
+ * On success, this function copies the symlink contents to `linkbuf` (up to
+ * `linkbuf_size` bytes) and returns the full size of the symlink path buffer.
+ * This function will not copy the trailing NUL byte, and the return size does
+ * not include the NUL byte. A `NULL` `linkbuf` or invalid `linkbuf_size` are
+ * treated as zero-size buffers.
+ *
+ * NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
+ * contain the symlink contents, pathrs_readlink() will return *the number of
+ * bytes it would have copied if the buffer was large enough*. This matches the
+ * behaviour of pathrs_proc_readlink().
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_readlink(int root_fd,
+                    const char *path,
+                    char *linkbuf,
+                    size_t linkbuf_size);
+
+/**
  * Rename a path within the rootfs referenced by root_fd. The flags argument is
  * identical to the renameat2(2) flags that are supported on the system.
  *
@@ -328,7 +370,7 @@ int pathrs_proc_open(pathrs_proc_base_t base, const char *path, int flags);
  * This function is effectively shorthand for
  *
  * ```c
- * fd = pathrs_proc_readlink(base, path, O_PATH|O_NOFOLLOW);
+ * fd = pathrs_proc_open(base, path, O_PATH|O_NOFOLLOW);
  * if (fd < 0) {
  *     liberr = fd; // for use with pathrs_errorinfo()
  *     goto err;
@@ -345,9 +387,10 @@ int pathrs_proc_open(pathrs_proc_base_t base, const char *path, int flags);
  * not include the NUL byte. A `NULL` `linkbuf` or invalid `linkbuf_size` are
  * treated as zero-size buffers.
  *
- * NOTE: Unlike `readlinkat(2)`, in the case where `linkbuf` is too small to
- * contain the symlink contents, `pathrs_proc_readlink` will return *the number
- * of bytes it would have copied if the buffer was large enough*.
+ * NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
+ * contain the symlink contents, pathrs_proc_readlink() will return *the number
+ * of bytes it would have copied if the buffer was large enough*. This matches
+ * the behaviour of pathrs_readlink().
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
