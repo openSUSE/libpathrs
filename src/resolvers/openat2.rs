@@ -18,8 +18,7 @@
 
 use crate::{
     error::{self, Error},
-    flags::OpenFlags,
-    resolvers::ResolverFlags,
+    flags::{OpenFlags, ResolverFlags},
     syscalls::{self, OpenHow},
     Handle,
 };

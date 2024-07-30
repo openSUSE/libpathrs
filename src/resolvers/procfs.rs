@@ -31,8 +31,8 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
-    flags::OpenFlags,
-    resolvers::{ResolverFlags, MAX_SYMLINK_TRAVERSALS},
+    flags::{OpenFlags, ResolverFlags},
+    resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls::{self, OpenHow},
     utils::{self, RawComponentsIter},
 };

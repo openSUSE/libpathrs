@@ -139,7 +139,7 @@ extern crate snafu;
 pub mod flags;
 // TODO: Remove this.
 #[doc(inline)]
-pub use flags::{OpenFlags, RenameFlags};
+pub use flags::{OpenFlags, RenameFlags, ResolverFlags};
 
 // `Handle` implementation.
 mod handle;
@@ -157,7 +157,7 @@ pub mod error;
 // Backend resolver implementations.
 mod resolvers;
 #[doc(inline)]
-pub use resolvers::{Resolver, ResolverBackend, ResolverFlags};
+pub use resolvers::{Resolver, ResolverBackend};
 
 /// Safe procfs handles.
 pub mod procfs;

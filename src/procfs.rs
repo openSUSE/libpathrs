@@ -20,9 +20,10 @@
 
 use crate::{
     error::{self, Error},
-    resolvers::{procfs::ProcfsResolver, ResolverFlags},
+    flags::{OpenFlags, ResolverFlags},
+    resolvers::procfs::ProcfsResolver,
     syscalls::{self, FsmountFlags, FsopenFlags, OpenTreeFlags},
-    utils, OpenFlags,
+    utils,
 };
 
 use std::{

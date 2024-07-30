@@ -37,8 +37,9 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
+    flags::ResolverFlags,
     procfs::PROCFS_HANDLE,
-    resolvers::{ResolverFlags, MAX_SYMLINK_TRAVERSALS},
+    resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls,
     utils::{RawComponentsIter, RawFdExt},
     Handle,
