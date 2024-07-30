@@ -176,7 +176,9 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let root = Rc::new(root.try_clone_hotfix().wrap("dup root as starting point")?);
+    let root = Rc::new(root.try_clone().context(error::OsSnafu {
+        operation: "dup root handle as starting point of resolution",
+    })?);
     let mut current = RcFile::from_rc(&root);
 
     // Get initial set of components from the passed path. We remove components

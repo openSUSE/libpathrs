@@ -34,7 +34,7 @@ use crate::{
     flags::OpenFlags,
     resolvers::{ResolverFlags, MAX_SYMLINK_TRAVERSALS},
     syscalls::{self, OpenHow},
-    utils::{self, RawComponentsIter, RawFdExt},
+    utils::{self, RawComponentsIter},
 };
 
 use std::{
@@ -159,7 +159,9 @@ fn opath_resolve<P: AsRef<Path>>(
 
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one.
-    let mut current = root.try_clone_hotfix().wrap("dup root as starting point")?;
+    let mut current = root.try_clone().context(error::OsSnafu {
+        operation: "dup root handle as starting point of resolution",
+    })?;
 
     // Get initial set of components from the passed path. We remove components
     // as we do the path walk, and update them with the contents of any symlinks

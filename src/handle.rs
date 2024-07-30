@@ -19,13 +19,15 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    error::{Error, ErrorExt},
+    error::{self, Error},
     flags::OpenFlags,
     procfs::PROCFS_HANDLE,
     utils::RawFdExt,
 };
 
 use std::fs::File;
+
+use snafu::ResultExt;
 
 /// A handle to an existing inode within a [`Root`].
 ///
@@ -78,10 +80,12 @@ impl Handle {
     ///
     /// [`Handle`]: struct.Handle.html
     pub fn try_clone(&self) -> Result<Self, Error> {
-        self.inner
-            .try_clone_hotfix()
+        self.as_file()
+            .try_clone()
+            .context(error::OsSnafu {
+                operation: "clone underlying handle file",
+            })
             .map(Self::from_file_unchecked)
-            .wrap("clone underlying handle file")
     }
 
     /// Unwrap a [`Handle`] to reveal the underlying [`File`].
@@ -94,6 +98,7 @@ impl Handle {
     /// [`Handle`]: struct.Handle.html
     /// [`Handle::reopen`]: struct.Handle.html#method.reopen
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    #[inline]
     pub fn into_file(self) -> File {
         self.inner
     }
@@ -109,6 +114,7 @@ impl Handle {
     /// [`Handle::into_file`]: struct.Handle.html#method.into_file
     /// [`Handle::reopen`]: struct.Handle.html#method.reopen
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+    #[inline]
     pub fn as_file(&self) -> &File {
         &self.inner
     }

@@ -22,9 +22,7 @@ use crate::{
     error::{self, Error, ErrorExt},
     flags::{OpenFlags, RenameFlags},
     resolvers::Resolver,
-    syscalls,
-    utils::{self, RawFdExt},
-    Handle,
+    syscalls, utils, Handle,
 };
 
 use std::{
@@ -169,10 +167,9 @@ impl Root {
     /// [`Root`]: struct.Root.html
     pub fn try_clone(&self) -> Result<Self, Error> {
         Ok(Self {
-            inner: self
-                .as_file()
-                .try_clone_hotfix()
-                .wrap("clone underlying root file")?,
+            inner: self.as_file().try_clone().context(error::OsSnafu {
+                operation: "clone underlying root file",
+            })?,
             resolver: self.resolver,
         })
     }

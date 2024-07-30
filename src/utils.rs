@@ -162,15 +162,6 @@ pub(crate) trait RawFdExt {
     /// [`as_unsafe_path`]: #method.as_unsafe_path
     fn as_unsafe_path_unchecked(&self) -> Result<PathBuf, Error>;
 
-    /// This is a fixed version of the Rust stdlib's `File::try_clone()` which
-    /// works on `O_PATH` file descriptors, added to [work around an upstream
-    /// bug][bug62314]. The [fix for this bug was merged][pr62425] and will be
-    /// available in Rust 1.37.0.
-    ///
-    /// [bug62314]: https://github.com/rust-lang/rust/issues/62314
-    /// [pr62425]: https://github.com/rust-lang/rust/pull/62425
-    fn try_clone_hotfix(&self) -> Result<File, Error>;
-
     /// Check if the File is on a "dangerous" filesystem that might contain
     /// magic-links.
     fn is_magiclink_filesystem(&self) -> Result<bool, Error>;
@@ -234,12 +225,6 @@ impl RawFdExt for RawFd {
         })
     }
 
-    fn try_clone_hotfix(&self) -> Result<File, Error> {
-        syscalls::fcntl_dupfd_cloxec(*self).context(error::RawOsSnafu {
-            operation: "clone fd",
-        })
-    }
-
     fn is_magiclink_filesystem(&self) -> Result<bool, Error> {
         // There isn't a marker on a filesystem level to indicate whether
         // nd_jump_link() is used internally. So, we just have to make an
@@ -270,10 +255,6 @@ impl RawFdExt for File {
     fn as_unsafe_path_unchecked(&self) -> Result<PathBuf, Error> {
         // SAFETY: Caller guarantees that as_unsafe_path usage is safe.
         self.as_raw_fd().as_unsafe_path_unchecked()
-    }
-
-    fn try_clone_hotfix(&self) -> Result<File, Error> {
-        self.as_raw_fd().try_clone_hotfix()
     }
 
     fn is_magiclink_filesystem(&self) -> Result<bool, Error> {

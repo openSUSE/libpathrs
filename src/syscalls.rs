@@ -364,26 +364,6 @@ impl Error {
 //      C-like bindings. We also have the ability to check for support of each
 //      syscall.
 
-/// Wrapper for `fcntl(F_DUPFD_CLOEXEC)`.
-///
-/// This is required because [Rust's `File::try_clone` doesn't handle `O_PATH`
-/// descriptors properly][bug62314]. I have [sent a PR to fix it][pr62425].
-///
-/// [bug62314]: https://github.com/rust-lang/rust/issues/62314
-/// [pr62425]: https://github.com/rust-lang/rust/pull/62425
-pub(crate) fn fcntl_dupfd_cloxec(fd: RawFd) -> Result<File, Error> {
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let newfd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
-    let err = IOError::last_os_error();
-
-    if newfd >= 0 {
-        // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { File::from_raw_fd(newfd) })
-    } else {
-        Err(err).context(FcntlDupSnafu { fd })
-    }
-}
-
 /// Wrapper for `fcntl(F_GETFD)` followed by `fcntl(F_SETFD)`, clearing the
 /// `FD_CLOEXEC` bit.
 ///
