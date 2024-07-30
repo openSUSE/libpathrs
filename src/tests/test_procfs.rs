@@ -238,7 +238,7 @@ mod utils {
     {
         tests_common::in_mnt_ns(|| {
             // Add some overmounts to /proc/self and /proc/thread-self.
-            for prefix in vec!["/proc/self", "/proc/thread-self"] {
+            for prefix in ["/proc/self", "/proc/thread-self"] {
                 let prefix = PathBuf::from(prefix);
 
                 // A tmpfs on top of /proc/.../fdinfo.

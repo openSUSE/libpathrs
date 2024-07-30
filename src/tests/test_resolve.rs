@@ -166,14 +166,14 @@ macro_rules! resolve_tests {
 
 resolve_tests! {
     let proc_root_dir = Path::new("/proc") => @reopen_tests:false {
-        proc_pseudo_magiclink("self/status", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: &*format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
+        proc_pseudo_magiclink("self/status", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
         proc_pseudo_magiclink_nosym1("self", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
         proc_pseudo_magiclink_nosym2("self/status", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
         proc_pseudo_magiclink_nofollow1("self", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: "self", file_type: libc::S_IFLNK };
-        proc_pseudo_magiclink_nofollow2("self/status", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: &*format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
+        proc_pseudo_magiclink_nofollow2("self/status", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
 
         proc_magiclink("self/exe", ResolverFlags::empty()) => ExpectedResult::Err(libc::ELOOP);
-        proc_magiclink_nofollow("self/exe", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: &*format!("{}/exe", syscalls::getpid()), file_type: libc::S_IFLNK };
+        proc_magiclink_nofollow("self/exe", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: &format!("{}/exe", syscalls::getpid()), file_type: libc::S_IFLNK };
         proc_magiclink_component_nofollow("self/root/etc/passwd", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Err(libc::ELOOP);
     };
 

@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --workspace --all-targets
+      - run: cargo check --workspace --all-features --all-targets
 
   rustdoc:
     name: cargo doc
@@ -101,4 +101,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --all-features
+      - run: cargo clippy --all-features --all-targets
