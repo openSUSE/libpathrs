@@ -234,23 +234,57 @@ impl Root {
     }
 
     /// Within the given [`Root`]'s tree, resolve `path` and return a
-    /// [`Handle`]. All symlink path components are scoped to [`Root`].
+    /// [`Handle`]. All symlink path components are scoped to [`Root`]. Trailing
+    /// symlinks *are* followed, if you want to get a handle to a symlink use
+    /// [`Root::resolve_nofollow`].
     ///
     /// # Errors
     ///
     /// If `path` doesn't exist, or an attack was detected during resolution, a
-    /// corresponding Error will be returned. If no error is returned, then the
-    /// path is guaranteed to have been reachable from the root of the directory
-    /// tree and thus have been inside the root at one point in the resolution.
+    /// corresponding [`Error`] will be returned. If no error is returned, then
+    /// the path is guaranteed to have been reachable from the root of the
+    /// directory tree and thus have been inside the root at one point in the
+    /// resolution.
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
+    /// [`Error`]: error/struct.Error.html
+    /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
-        self.resolver.resolve(&self.inner, path)
+        self.resolver.resolve(&self.inner, path, false)
     }
 
-    // TODO: readlink (need to move ResolverFlags out of Resolver)
+    /// Identical to [`Root::resolve`], except that *trailing* symlinks are
+    /// *not* followed and if the trailing component is a symlink
+    /// `Root::resolve_nofollow` will return a handle to the symlink itself.
+    ///
+    /// [`Root::resolve`]: struct.Root.html#method.resolve
+    #[inline]
+    pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+        self.resolver.resolve(&self.inner, path, true)
+    }
+
+    /// Get the target of a symlink within a [`Root`].
+    ///
+    /// **NOTE**: The returned path is not modified to be "safe" outside of the
+    /// root. You should not use this path for doing further path lookups -- use
+    /// [`Root::resolve`] instead.
+    ///
+    /// This method is just shorthand for calling `readlinkat(2)` on the handle
+    /// returned by [`Root::resolve_nofollow`].
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Root::resolve`]: struct.Root.html#method.resolve
+    /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
+    pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
+        let link = self
+            .resolve_nofollow(path)
+            .wrap("resolve symlink O_NOFOLLOW for readlink")?;
+        syscalls::readlinkat(link.as_file().as_raw_fd(), "").context(error::RawOsSnafu {
+            operation: "readlink resolve symlink",
+        })
+    }
 
     /// Within the [`Root`]'s tree, create an inode at `path` as specified by
     /// `inode_type`.

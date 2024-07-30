@@ -262,3 +262,14 @@ mod tests {
         );
     }
 }
+
+bitflags! {
+    /// Optional flags to modify the resolution of paths inside a [`Root`].
+    ///
+    /// [`Root`]: struct.Root.html
+    #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
+    pub struct ResolverFlags: u64 {
+        // TODO: We should probably have our own bits...
+        const NO_SYMLINKS = libc::RESOLVE_NO_SYMLINKS;
+    }
+}

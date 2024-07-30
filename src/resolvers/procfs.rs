@@ -31,8 +31,8 @@
 
 use crate::{
     error::{self, Error, ErrorExt},
-    flags::OpenFlags,
-    resolvers::{ResolverFlags, MAX_SYMLINK_TRAVERSALS},
+    flags::{OpenFlags, ResolverFlags},
+    resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls::{self, OpenHow},
     utils::{self, RawComponentsIter},
 };
@@ -67,8 +67,8 @@ impl ProcfsResolver {
         &self,
         root: &File,
         path: P,
-        mut oflags: OpenFlags,
-        mut rflags: ResolverFlags,
+        oflags: OpenFlags,
+        rflags: ResolverFlags,
     ) -> Result<File, Error> {
         // These flags don't make sense for procfs and will just result in
         // confusing errors during lookup. O_TMPFILE contains multiple flags
@@ -84,14 +84,6 @@ impl ProcfsResolver {
                 ),
             },
         );
-
-        // If O_NOFOLLOW was specified, convert it to NO_FOLLOW_TRAILING.
-        if oflags.contains(OpenFlags::O_NOFOLLOW) {
-            rflags.insert(ResolverFlags::NO_FOLLOW_TRAILING);
-        }
-        if rflags.contains(ResolverFlags::NO_FOLLOW_TRAILING) {
-            oflags.insert(OpenFlags::O_NOFOLLOW);
-        }
 
         match *self {
             Self::Openat2 => openat2_resolve(root, path, oflags, rflags),
@@ -112,11 +104,9 @@ fn openat2_resolve<P: AsRef<Path>>(
     );
 
     // Copy the O_NOFOLLOW and RESOLVE_NO_SYMLINKS bits from rflags.
-    let oflags = oflags.bits() as u64 | rflags.openat2_flag_bits();
-    let rflags = libc::RESOLVE_BENEATH
-        | libc::RESOLVE_NO_MAGICLINKS
-        | libc::RESOLVE_NO_XDEV
-        | rflags.openat2_resolve_bits();
+    let oflags = oflags.bits() as u64;
+    let rflags =
+        libc::RESOLVE_BENEATH | libc::RESOLVE_NO_MAGICLINKS | libc::RESOLVE_NO_XDEV | rflags.bits();
 
     syscalls::openat2(
         root.as_raw_fd(),
@@ -376,11 +366,11 @@ fn opath_resolve<P: AsRef<Path>>(
 mod tests {
     use crate::{
         error::{Error as PathrsError, ErrorKind},
+        flags::{OpenFlags, ResolverFlags},
         resolvers::procfs::ProcfsResolver,
         syscalls,
         tests::common as tests_common,
         utils::RawFdExt,
-        OpenFlags, ResolverFlags,
     };
 
     use std::{fs::File, path::PathBuf};

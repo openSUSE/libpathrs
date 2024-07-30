@@ -227,6 +227,7 @@ def proc_open_raw(base, path, flags):
 	return WrappedFd(fd)
 
 def proc_readlink(base, path):
+	# TODO: See if we can merge this with Root.readlink.
 	path = _cstr(path)
 	linkbuf_size = 128
 	while True:
@@ -284,12 +285,33 @@ class Root(WrappedFd):
 	def from_file(cls, file):
 		return cls(file)
 
-	def resolve(self, path):
+	def resolve(self, path, follow_trailing=True):
 		path = _cstr(path)
-		fd = libpathrs_so.pathrs_resolve(self.fileno(), path)
+		if follow_trailing:
+			fd = libpathrs_so.pathrs_resolve(self.fileno(), path)
+		else:
+			fd = libpathrs_so.pathrs_resolve_nofollow(self.fileno(), path)
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
 		return Handle(fd)
+
+	def readlink(self, path):
+		path = _cstr(path)
+		linkbuf_size = 128
+		while True:
+			linkbuf = _cbuffer(linkbuf_size)
+			n = libpathrs_so.pathrs_readlink(self.fileno(), path, linkbuf, linkbuf_size)
+			if n < 0:
+				raise Error._fetch(n) or INTERNAL_ERROR
+			elif n <= linkbuf_size:
+				return ffi.buffer(linkbuf, linkbuf_size)[:n].decode("latin1")
+			else:
+				# The contents were truncated. Unlike readlinkat, pathrs returns
+				# the size of the link when it checked. So use the returned size
+				# as a basis for the reallocated size (but in order to avoid a DoS
+				# where a magic-link is growing by a single byte each iteration,
+				# make sure we are a fair bit larger).
+				linkbuf_size += n
 
 	def creat(self, path, filemode, mode="r", extra_flags=0):
 		path = _cstr(path)

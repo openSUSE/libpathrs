@@ -71,6 +71,38 @@ func pathrsResolve(rootFd uintptr, path string) (uintptr, error) {
 	return uintptr(fd), fetchError(fd)
 }
 
+func pathrsResolveNoFollow(rootFd uintptr, path string) (uintptr, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	fd := C.pathrs_resolve_nofollow(C.int(rootFd), cPath)
+	return uintptr(fd), fetchError(fd)
+}
+
+func pathrsReadlink(rootFd uintptr, path string) (string, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	size := 128
+	for {
+		linkBuf := make([]byte, size)
+		n := C.pathrs_readlink(C.int(rootFd), cPath, C.cast_ptr(unsafe.Pointer(&linkBuf[0])), C.ulong(len(linkBuf)))
+		switch {
+		case int(n) < 0:
+			return "", fetchError(n)
+		case int(n) <= len(linkBuf):
+			return string(linkBuf[:int(n)]), nil
+		default:
+			// The contents were truncated. Unlike readlinkat, pathrs returns
+			// the size of the link when it checked. So use the returned size
+			// as a basis for the reallocated size (but in order to avoid a DoS
+			// where a magic-link is growing by a single byte each iteration,
+			// make sure we are a fair bit larger).
+			size += int(n)
+		}
+	}
+}
+
 func pathrsCreat(rootFd uintptr, path string, flags int, mode uint32) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
@@ -146,6 +178,8 @@ func pathrsProcOpen(base pathrsProcBase, path string, flags int) (uintptr, error
 }
 
 func pathrsProcReadlink(base pathrsProcBase, path string) (string, error) {
+	// TODO: See if we can unify this code with pathrsReadlink.
+
 	cBase := C.pathrs_proc_base_t(base)
 
 	cPath := C.CString(path)
