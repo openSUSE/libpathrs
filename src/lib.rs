@@ -48,7 +48,7 @@
 //!
 //! ```
 //! # extern crate libc;
-//! # use pathrs::{error::Error, Root, OpenFlags};
+//! # use pathrs::{error::Error, flags::OpenFlags, Root};
 //! # fn main() -> Result<(), Error> {
 //! let (root_path, unsafe_path) = ("/path/to/root", "/etc/passwd");
 //! # let root_path = "/";
@@ -137,9 +137,6 @@ extern crate snafu;
 
 /// Bit-flags for controlling various operations.
 pub mod flags;
-// TODO: Remove this.
-#[doc(inline)]
-pub use flags::{OpenFlags, RenameFlags, ResolverFlags};
 
 // `Handle` implementation.
 mod handle;

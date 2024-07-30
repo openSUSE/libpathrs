@@ -366,11 +366,11 @@ fn opath_resolve<P: AsRef<Path>>(
 mod tests {
     use crate::{
         error::{Error as PathrsError, ErrorKind},
+        flags::{OpenFlags, ResolverFlags},
         resolvers::procfs::ProcfsResolver,
         syscalls,
         tests::common as tests_common,
         utils::RawFdExt,
-        OpenFlags, ResolverFlags,
     };
 
     use std::{fs::File, path::PathBuf};

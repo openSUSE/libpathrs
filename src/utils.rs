@@ -20,8 +20,9 @@
 
 use crate::{
     error::{self, Error},
+    flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
-    syscalls, OpenFlags,
+    syscalls,
 };
 
 use std::{

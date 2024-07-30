@@ -20,8 +20,8 @@
 #![allow(unsafe_code)]
 
 use crate::{
+    flags::OpenFlags,
     utils::{RawFdExt, ToCString},
-    OpenFlags,
 };
 
 use std::{
