@@ -169,3 +169,4 @@ install -Dt "$DESTDIR/$libdir/pkgconfig/" -m 0644 pathrs.pc
 install -Dt "$DESTDIR/$includedir/"       -m 0644 include/pathrs.h
 install -DT -m 0755 target/release/libpathrs.so "$DESTDIR/$libdir/$SONAME"
 ln -sf "$SONAME" "$DESTDIR/$libdir/libpathrs.so.$SOVERSION"
+ln -sf "$SONAME" "$DESTDIR/$libdir/libpathrs.so"
