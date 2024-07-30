@@ -284,9 +284,12 @@ class Root(WrappedFd):
 	def from_file(cls, file):
 		return cls(file)
 
-	def resolve(self, path):
+	def resolve(self, path, follow_trailing=True):
 		path = _cstr(path)
-		fd = libpathrs_so.pathrs_resolve(self.fileno(), path)
+		if follow_trailing:
+			fd = libpathrs_so.pathrs_resolve(self.fileno(), path)
+		else:
+			fd = libpathrs_so.pathrs_resolve_nofollow(self.fileno(), path)
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
 		return Handle(fd)

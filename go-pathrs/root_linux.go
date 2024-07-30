@@ -62,6 +62,10 @@ func RootFromFile(file *os.File) (*Root, error) {
 // Resolve resolves the given path within the Root's directory tree, and return
 // a Handle to the resolved path. The path must already exist, otherwise an
 // error will occur.
+//
+// All symlinks (including trailing symlinks) are followed, but they are
+// resolved within the rootfs. If you wish to open a handle to the symlink
+// itself, use ResolveNoFollow.
 func (r *Root) Resolve(path string) (*Handle, error) {
 	// TODO: Get the actual name of the handle through /proc/self/fd/...
 	fakeName, err := randName(32)
@@ -73,6 +77,29 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
 		handleFd, err := pathrsResolve(rootFd, path)
+		if err != nil {
+			return nil, err
+		}
+		handleFile := os.NewFile(uintptr(handleFd), fakeName)
+		return &Handle{inner: handleFile}, nil
+	})
+}
+
+// ResolveNoFollow is effectively an O_NOFOLLOW version of Resolve. Their
+// behaviour is identical, except that *trailing* symlinks will not be
+// followed. If the final component is a trailing symlink, an O_PATH|O_NOFOLLOW
+// handle to the symlink itself is returned.
+func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
+	// TODO: Get the actual name of the handle through /proc/self/fd/...
+	fakeName, err := randName(32)
+	if err != nil {
+		return nil, err
+	}
+	// Prefix the root.
+	fakeName = r.inner.Name() + fakeName
+
+	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
+		handleFd, err := pathrsResolveNoFollow(rootFd, path)
 		if err != nil {
 			return nil, err
 		}

@@ -71,6 +71,14 @@ func pathrsResolve(rootFd uintptr, path string) (uintptr, error) {
 	return uintptr(fd), fetchError(fd)
 }
 
+func pathrsResolveNoFollow(rootFd uintptr, path string) (uintptr, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	fd := C.pathrs_resolve_nofollow(C.int(rootFd), cPath)
+	return uintptr(fd), fetchError(fd)
+}
+
 func pathrsCreat(rootFd uintptr, path string, flags int, mode uint32) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))

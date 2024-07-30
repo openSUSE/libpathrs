@@ -106,6 +106,10 @@ pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
 /// Resolve the given path within the rootfs referenced by root_fd. The path
 /// *must already exist*, otherwise an error will occur.
 ///
+/// All symlinks (including trailing symlinks) are followed, but they are
+/// resolved within the rootfs. If you wish to open a handle to the symlink
+/// itself, use pathrs_resolve_nofollow().
+///
 /// # Return Value
 ///
 /// On success, this function returns an O_PATH file descriptor referencing the
@@ -119,6 +123,27 @@ pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
 pub extern "C" fn pathrs_resolve(root_fd: RawFd, path: *const c_char) -> RawFd {
     ret::with_fd(root_fd, |root: &mut Root| {
         root.resolve(utils::parse_path(path)?)
+    })
+}
+
+/// pathrs_resolve_nofollow() is effectively an O_NOFOLLOW version of
+/// pathrs_resolve(). Their behaviour is identical, except that *trailing*
+/// symlinks will not be followed. If the final component is a trailing symlink,
+/// an O_PATH|O_NOFOLLOW handle to the symlink itself is returned.
+///
+/// # Return Value
+///
+/// On success, this function returns an O_PATH file descriptor referencing the
+/// resolved path.
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub extern "C" fn pathrs_resolve_nofollow(root_fd: RawFd, path: *const c_char) -> RawFd {
+    ret::with_fd(root_fd, |root: &mut Root| {
+        root.resolve_nofollow(utils::parse_path(path)?)
     })
 }
 

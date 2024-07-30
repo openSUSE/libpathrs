@@ -133,6 +133,10 @@ int pathrs_reopen(int fd, int flags);
  * Resolve the given path within the rootfs referenced by root_fd. The path
  * *must already exist*, otherwise an error will occur.
  *
+ * All symlinks (including trailing symlinks) are followed, but they are
+ * resolved within the rootfs. If you wish to open a handle to the symlink
+ * itself, use pathrs_resolve_nofollow().
+ *
  * # Return Value
  *
  * On success, this function returns an O_PATH file descriptor referencing the
@@ -144,6 +148,24 @@ int pathrs_reopen(int fd, int flags);
  * pathrs_errorinfo().
  */
 int pathrs_resolve(int root_fd, const char *path);
+
+/**
+ * pathrs_resolve_nofollow() is effectively an O_NOFOLLOW version of
+ * pathrs_resolve(). Their behaviour is identical, except that *trailing*
+ * symlinks will not be followed. If the final component is a trailing symlink,
+ * an O_PATH|O_NOFOLLOW handle to the symlink itself is returned.
+ *
+ * # Return Value
+ *
+ * On success, this function returns an O_PATH file descriptor referencing the
+ * resolved path.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_resolve_nofollow(int root_fd, const char *path);
 
 /**
  * Rename a path within the rootfs referenced by root_fd. The flags argument is
