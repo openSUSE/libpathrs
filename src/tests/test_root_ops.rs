@@ -20,7 +20,7 @@ use crate::{
     error::ErrorKind,
     flags::{OpenFlags, RenameFlags},
     tests::common as tests_common,
-    InodeType, ResolverBackend, ResolverFlags, Root,
+    InodeType, ResolverBackend, Root,
 };
 
 use std::{fs::Permissions, os::unix::fs::PermissionsExt};
@@ -34,8 +34,7 @@ macro_rules! root_op_tests {
             #[test]
             fn [<root_ $test_name>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
-                let mut $root_var = Root::open(&root_dir)?;
-                $root_var.resolver.flags = ResolverFlags::NO_FOLLOW_TRAILING;
+                let $root_var = Root::open(&root_dir)?;
 
                 $body
             }
@@ -45,7 +44,6 @@ macro_rules! root_op_tests {
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let mut $root_var = Root::open(&root_dir)?;
-                $root_var.resolver.flags = ResolverFlags::NO_FOLLOW_TRAILING;
                 $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
 
                 $body
@@ -56,7 +54,6 @@ macro_rules! root_op_tests {
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let mut $root_var = Root::open(&root_dir)?;
-                $root_var.resolver.flags = ResolverFlags::NO_FOLLOW_TRAILING;
                 $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
 
                 $body
@@ -281,7 +278,7 @@ mod utils {
             Err(err) => assert_eq!(Err(err.kind()), expected_result, "unexpected error {err:?}",),
             Ok(_) => {
                 let root = root_roundtrip(root)?;
-                let created = root.resolve(path)?;
+                let created = root.resolve_nofollow(path)?;
                 let meta = created.as_file().metadata()?;
 
                 let actual_path = created.as_file().as_unsafe_path_unchecked()?;
@@ -301,7 +298,7 @@ mod utils {
                     }
                     // Check hardlink is the same inode.
                     InodeType::Hardlink(target) => {
-                        let target_meta = root.resolve(target)?.as_file().metadata()?;
+                        let target_meta = root.resolve_nofollow(target)?.as_file().metadata()?;
                         assert_eq!(
                             meta.ino(),
                             target_meta.ino(),
@@ -336,7 +333,7 @@ mod utils {
         let _ = unsafe { libc::umask(0) };
 
         // Get a handle to the original path if it existed beforehand.
-        let pre_create_handle = root.resolve(path); // do not unwrap
+        let pre_create_handle = root.resolve_nofollow(path); // do not unwrap
 
         // Update the expected path to have the rootdir as a prefix.
         let root_dir = root.as_file().as_unsafe_path_unchecked()?;
@@ -354,7 +351,7 @@ mod utils {
 
                 let root = root_roundtrip(root)?;
                 let new_lookup = root
-                    .resolve(path)
+                    .resolve_nofollow(path)
                     .wrap("re-open created file using original path")?;
 
                 assert_eq!(
@@ -399,7 +396,7 @@ mod utils {
 
         // Get a handle before we remove the path, to make sure the actual inode
         // was unlinked.
-        let handle = root.resolve(path); // do not unwrap
+        let handle = root.resolve_nofollow(path); // do not unwrap
 
         let res = root.remove(path);
         assert_eq!(
@@ -415,7 +412,7 @@ mod utils {
             assert_eq!(meta.nlink(), 0, "deleted file should have a 0 nlink");
 
             let root = root_roundtrip(root)?;
-            let new_lookup = root.resolve(path);
+            let new_lookup = root.resolve_nofollow(path);
             assert_eq!(
                 new_lookup.as_ref().map_err(PathrsError::kind).err(),
                 Some(ErrorKind::OsError(Some(libc::ENOENT))),
@@ -437,8 +434,8 @@ mod utils {
 
         // Get a handle before we move the paths, to make sure the right inodes
         // were moved.
-        let src_handle = root.resolve(src_path)?;
-        let dst_handle = root.resolve(dst_path); // do not unwrap this here!
+        let src_handle = root.resolve_nofollow(src_path)?;
+        let dst_handle = root.resolve_nofollow(dst_path); // do not unwrap this here!
 
         // Keep track of the original paths, pre-rename.
         let src_real_path = src_handle.as_file().as_unsafe_path_unchecked()?;
@@ -487,7 +484,7 @@ mod utils {
                     // Verify that there is a whiteout entry where the soure
                     // used to be.
                     let new_lookup = root
-                        .resolve(src_path)
+                        .resolve_nofollow(src_path)
                         .wrap("expected source to exist with RENAME_WHITEOUT")?;
 
                     let meta = new_lookup.as_file().metadata()?;

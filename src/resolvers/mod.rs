@@ -39,18 +39,7 @@ bitflags! {
     #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
     pub struct ResolverFlags: u64 {
         // TODO: We should probably have our own bits...
-        const NO_FOLLOW_TRAILING = libc::O_NOFOLLOW as u64;
         const NO_SYMLINKS = libc::RESOLVE_NO_SYMLINKS;
-    }
-}
-
-impl ResolverFlags {
-    pub(crate) fn openat2_flag_bits(self) -> u64 {
-        self.intersection(ResolverFlags::NO_FOLLOW_TRAILING).bits()
-    }
-
-    pub(crate) fn openat2_resolve_bits(self) -> u64 {
-        self.intersection(ResolverFlags::NO_SYMLINKS).bits()
     }
 }
 
@@ -116,10 +105,19 @@ pub struct Resolver {
 impl Resolver {
     /// Internal dispatcher to the relevant backend.
     #[inline]
-    pub(crate) fn resolve<P: AsRef<Path>>(&self, root: &File, path: P) -> Result<Handle, Error> {
+    pub(crate) fn resolve<P: AsRef<Path>>(
+        &self,
+        root: &File,
+        path: P,
+        no_follow_trailing: bool,
+    ) -> Result<Handle, Error> {
         match self.backend {
-            ResolverBackend::KernelOpenat2 => openat2::resolve(root, path, self.flags),
-            ResolverBackend::EmulatedOpath => opath::resolve(root, path, self.flags),
+            ResolverBackend::KernelOpenat2 => {
+                openat2::resolve(root, path, self.flags, no_follow_trailing)
+            }
+            ResolverBackend::EmulatedOpath => {
+                opath::resolve(root, path, self.flags, no_follow_trailing)
+            }
         }
     }
 }

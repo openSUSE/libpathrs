@@ -28,12 +28,15 @@ use utils::ExpectedResult;
 
 use anyhow::Error;
 
+// TODO: See if we can adjust the logic from test_root_ops or test_procs to make
+//       this macro soup a little nicer.
+
 macro_rules! resolve_tests {
     // resolve_tests! {
     //     abc("foo") => ExpectedResult::Err(..);
     //     xyz("baz") => ExpectedResult::Ok{..};
     // }
-    ($(let $root_dir_var:ident = $root_dir:expr => @reopen_tests:$reopen_tests:ident { $($test_name:ident ( $unsafe_path:expr, $rflags:expr ) => $expected:expr);+ $(;)? });* $(;)?) => {
+    ($(let $root_dir_var:ident = $root_dir:expr => @reopen_tests:$reopen_tests:ident { $($test_name:ident ( $unsafe_path:expr, $rflags:expr, $no_follow_trailing:expr ) => $expected:expr);+ $(;)? });* $(;)?) => {
         paste::paste! {
             $( $(
                 #[test]
@@ -46,6 +49,7 @@ macro_rules! resolve_tests {
                     utils::check_resolve_in_root(
                         &root,
                         $unsafe_path,
+                        $no_follow_trailing,
                         &expected,
                         reopen_tests,
                     )?;
@@ -68,6 +72,7 @@ macro_rules! resolve_tests {
                     utils::check_resolve_in_root(
                         &root,
                         $unsafe_path,
+                        $no_follow_trailing,
                         &expected,
                         reopen_tests,
                     )?;
@@ -95,6 +100,7 @@ macro_rules! resolve_tests {
                     utils::check_resolve_in_root(
                         &root,
                         $unsafe_path,
+                        $no_follow_trailing,
                         &expected,
                         reopen_tests,
                     )?;
@@ -115,7 +121,7 @@ macro_rules! resolve_tests {
                     let reopen_tests: bool = $reopen_tests;
                     utils::check_resolve_fn(
                         |file, subpath| {
-                            opath::resolve(file, subpath, rflags)
+                            opath::resolve(file, subpath, rflags, $no_follow_trailing)
                                 .map(Handle::into_file)
                         },
                         &root,
@@ -145,7 +151,7 @@ macro_rules! resolve_tests {
                     let reopen_tests: bool = $reopen_tests;
                     utils::check_resolve_fn(
                         |file, subpath| {
-                            openat2::resolve(file, subpath, rflags)
+                            openat2::resolve(file, subpath, rflags, $no_follow_trailing)
                                 .map(Handle::into_file)
                         },
                         &root,
@@ -166,164 +172,164 @@ macro_rules! resolve_tests {
 
 resolve_tests! {
     let proc_root_dir = Path::new("/proc") => @reopen_tests:false {
-        proc_pseudo_magiclink("self/status", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
-        proc_pseudo_magiclink_nosym1("self", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
-        proc_pseudo_magiclink_nosym2("self/status", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
-        proc_pseudo_magiclink_nofollow1("self", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: "self", file_type: libc::S_IFLNK };
-        proc_pseudo_magiclink_nofollow2("self/status", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
+        proc_pseudo_magiclink("self/status", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
+        proc_pseudo_magiclink_nosym1("self", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
+        proc_pseudo_magiclink_nosym2("self/status", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
+        proc_pseudo_magiclink_nofollow1("self", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "self", file_type: libc::S_IFLNK };
+        proc_pseudo_magiclink_nofollow2("self/status", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
 
-        proc_magiclink("self/exe", ResolverFlags::empty()) => ExpectedResult::Err(libc::ELOOP);
-        proc_magiclink_nofollow("self/exe", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: &format!("{}/exe", syscalls::getpid()), file_type: libc::S_IFLNK };
-        proc_magiclink_component_nofollow("self/root/etc/passwd", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Err(libc::ELOOP);
+        proc_magiclink("self/exe", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
+        proc_magiclink_nofollow("self/exe", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: &format!("{}/exe", syscalls::getpid()), file_type: libc::S_IFLNK };
+        proc_magiclink_component_nofollow("self/root/etc/passwd", ResolverFlags::empty(), true) => ExpectedResult::Err(libc::ELOOP);
     };
 
     // Complete lookups.
     let root_dir = tests_common::create_basic_tree()? => @reopen_tests:true {
-        complete_root1("/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root2("/../../../../../..", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root_link1("root-link1", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root_link2("root-link2", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root_link3("root-link3", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_dir1("a", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/a", file_type: libc::S_IFDIR };
-        complete_dir2("b/c/d/e/f", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };
-        complete_dir3("b///././c////.//d/./././///e////.//./f//././././", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };
-        complete_file("b/c/file", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/b/c/file", file_type: libc::S_IFREG };
-        complete_file_link("b-file", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/b/c/file", file_type: libc::S_IFREG };
-        complete_fifo("b/fifo", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/b/fifo", file_type: libc::S_IFIFO };
-        complete_sock("b/sock", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/b/sock", file_type: libc::S_IFSOCK };
+        complete_root1("/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+        complete_root2("/../../../../../..", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+        complete_root_link1("root-link1", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+        complete_root_link2("root-link2", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+        complete_root_link3("root-link3", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
+        complete_dir1("a", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/a", file_type: libc::S_IFDIR };
+        complete_dir2("b/c/d/e/f", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };
+        complete_dir3("b///././c////.//d/./././///e////.//./f//././././", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };
+        complete_file("b/c/file", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/file", file_type: libc::S_IFREG };
+        complete_file_link("b-file", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/file", file_type: libc::S_IFREG };
+        complete_fifo("b/fifo", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/fifo", file_type: libc::S_IFIFO };
+        complete_sock("b/sock", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/sock", file_type: libc::S_IFSOCK };
         // Partial lookups.
-        partial_dir_basic("a/b/c/d/e/f/g/h", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        partial_dir_dotdot("a/foo/../bar/baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
+        partial_dir_basic("a/b/c/d/e/f/g/h", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        partial_dir_dotdot("a/foo/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
         // Complete lookups of non_lexical symlinks.
-        nonlexical_basic_complete("target", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_basic_complete1("target/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_basic_complete2("target//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_basic_partial("target/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_basic_partial_dotdot("target/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_abs_complete1("link1/target_abs", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_abs_complete2("link1/target_abs/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_abs_complete3("link1/target_abs//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_abs_partial("link1/target_abs/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_abs_partial_dotdot("link1/target_abs/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_rel_complete1("link1/target_rel", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_rel_complete2("link1/target_rel/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_rel_complete3("link1/target_rel//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_rel_partial("link1/target_rel/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_rel_partial_dotdot("link1/target_rel/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_abs_complete1("link2/link1_abs/target_abs", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_abs_complete2("link2/link1_abs/target_abs/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_abs_complete3("link2/link1_abs/target_abs//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_abs_partial("link2/link1_abs/target_abs/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_abs_partial_dotdot("link2/link1_abs/target_abs/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_rel_complete1("link2/link1_abs/target_rel", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_rel_complete2("link2/link1_abs/target_rel/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_rel_complete3("link2/link1_abs/target_rel//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_rel_partial("link2/link1_abs/target_rel/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_rel_partial_dotdot("link2/link1_abs/target_rel/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_open_complete1("link2/link1_abs/../target", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_open_complete2("link2/link1_abs/../target/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_open_complete3("link2/link1_abs/../target//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_open_partial("link2/link1_abs/../target/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_open_partial_dotdot("link2/link1_abs/../target/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_abs_complete1("link2/link1_rel/target_abs", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_abs_complete2("link2/link1_rel/target_abs/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_abs_complete3("link2/link1_rel/target_abs//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_abs_partial("link2/link1_rel/target_abs/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_abs_partial_dotdot("link2/link1_rel/target_abs/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_rel_complete1("link2/link1_rel/target_rel", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_rel_complete2("link2/link1_rel/target_rel/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_rel_complete3("link2/link1_rel/target_rel//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_rel_partial("link2/link1_rel/target_rel/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_rel_partial_dotdot("link2/link1_rel/target_rel/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_open_complete1("link2/link1_rel/../target", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_open_complete2("link2/link1_rel/../target/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_open_complete3("link2/link1_rel/../target//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_open_partial("link2/link1_rel/../target/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_open_partial_dotdot("link2/link1_rel/../target/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_abs_complete1("link3/target_abs", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_abs_complete2("link3/target_abs/", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_abs_complete3("link3/target_abs//", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_abs_partial("link3/target_abs/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_abs_partial_dotdot("link3/target_abs/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_rel_complete("link3/target_rel", ResolverFlags::empty()) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_rel_partial("link3/target_rel/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_rel_partial_dotdot("link3/target_rel/../target/foo/bar/../baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_basic_complete("target", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_basic_complete1("target/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_basic_complete2("target//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_basic_partial("target/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_basic_partial_dotdot("target/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level1_abs_complete1("link1/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level1_abs_complete2("link1/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level1_abs_complete3("link1/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level1_abs_partial("link1/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level1_abs_partial_dotdot("link1/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level1_rel_complete1("link1/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level1_rel_complete2("link1/target_rel/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level1_rel_complete3("link1/target_rel//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level1_rel_partial("link1/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level1_rel_partial_dotdot("link1/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_abs_abs_complete1("link2/link1_abs/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_abs_complete2("link2/link1_abs/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_abs_complete3("link2/link1_abs/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_abs_partial("link2/link1_abs/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_abs_abs_partial_dotdot("link2/link1_abs/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_abs_rel_complete1("link2/link1_abs/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_rel_complete2("link2/link1_abs/target_rel/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_rel_complete3("link2/link1_abs/target_rel//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_rel_partial("link2/link1_abs/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_abs_rel_partial_dotdot("link2/link1_abs/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_abs_open_complete1("link2/link1_abs/../target", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_open_complete2("link2/link1_abs/../target/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_open_complete3("link2/link1_abs/../target//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_abs_open_partial("link2/link1_abs/../target/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_abs_open_partial_dotdot("link2/link1_abs/../target/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_rel_abs_complete1("link2/link1_rel/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_abs_complete2("link2/link1_rel/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_abs_complete3("link2/link1_rel/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_abs_partial("link2/link1_rel/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_rel_abs_partial_dotdot("link2/link1_rel/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_rel_rel_complete1("link2/link1_rel/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_rel_complete2("link2/link1_rel/target_rel/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_rel_complete3("link2/link1_rel/target_rel//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_rel_partial("link2/link1_rel/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_rel_rel_partial_dotdot("link2/link1_rel/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_rel_open_complete1("link2/link1_rel/../target", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_open_complete2("link2/link1_rel/../target/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_open_complete3("link2/link1_rel/../target//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level2_rel_open_partial("link2/link1_rel/../target/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level2_rel_open_partial_dotdot("link2/link1_rel/../target/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level3_abs_complete1("link3/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level3_abs_complete2("link3/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level3_abs_complete3("link3/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level3_abs_partial("link3/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level3_abs_partial_dotdot("link3/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level3_rel_complete("link3/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
+        nonlexical_level3_rel_partial("link3/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        nonlexical_level3_rel_partial_dotdot("link3/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
         // Partial lookups due to hitting a non_directory.
-        partial_nondir_slash1("b/c/file/", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_slash2("b/c/file//", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_dot("b/c/file/.", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_dotdot1("b/c/file/..", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_dotdot2("b/c/file/../foo/bar", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_slash1("b-file/", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_slash2("b-file//", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_dot("b-file/.", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_dotdot1("b-file/..", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_dotdot2("b-file/../foo/bar", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_slash1("b/fifo/", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_slash2("b/fifo//", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_dot("b/fifo/.", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_dotdot1("b/fifo/..", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_dotdot2("b/fifo/../foo/bar", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_slash1("b/sock/", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_slash2("b/sock//", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_dot("b/sock/.", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_dotdot1("b/sock/..", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_dotdot2("b/sock/../foo/bar", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_slash1("b/c/file/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_slash2("b/c/file//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_dot("b/c/file/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_dotdot1("b/c/file/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_dotdot2("b/c/file/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_symlink_slash1("b-file/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_symlink_slash2("b-file//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_symlink_dot("b-file/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_symlink_dotdot1("b-file/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_symlink_dotdot2("b-file/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_fifo_slash1("b/fifo/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_fifo_slash2("b/fifo//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_fifo_dot("b/fifo/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_fifo_dotdot1("b/fifo/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_fifo_dotdot2("b/fifo/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_sock_slash1("b/sock/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_sock_slash2("b/sock//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_sock_dot("b/sock/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_sock_dotdot1("b/sock/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_sock_dotdot2("b/sock/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
         // Dangling symlinks are treated as though they are non_existent.
-        dangling1_inroot_trailing("a-fake1", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_inroot_partial("a-fake1/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_inroot_partial_dotdot("a-fake1/../bar/baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_sub_trailing("c/a-fake1", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_sub_partial("c/a-fake1/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_sub_partial_dotdot("c/a-fake1/../bar/baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_inroot_trailing("a-fake2", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_inroot_partial("a-fake2/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_inroot_partial_dotdot("a-fake2/../bar/baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_sub_trailing("c/a-fake2", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_sub_partial("c/a-fake2/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_sub_partial_dotdot("c/a-fake2/../bar/baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_inroot_trailing("a-fake3", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_inroot_partial("a-fake3/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_inroot_partial_dotdot("a-fake3/../bar/baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_sub_trailing("c/a-fake3", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_sub_partial("c/a-fake3/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_sub_partial_dotdot("c/a-fake3/../bar/baz", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
+        dangling1_inroot_trailing("a-fake1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling1_inroot_partial("a-fake1/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling1_inroot_partial_dotdot("a-fake1/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling1_sub_trailing("c/a-fake1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling1_sub_partial("c/a-fake1/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling1_sub_partial_dotdot("c/a-fake1/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling2_inroot_trailing("a-fake2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling2_inroot_partial("a-fake2/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling2_inroot_partial_dotdot("a-fake2/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling2_sub_trailing("c/a-fake2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling2_sub_partial("c/a-fake2/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling2_sub_partial_dotdot("c/a-fake2/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling3_inroot_trailing("a-fake3", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling3_inroot_partial("a-fake3/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling3_inroot_partial_dotdot("a-fake3/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling3_sub_trailing("c/a-fake3", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling3_sub_partial("c/a-fake3/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling3_sub_partial_dotdot("c/a-fake3/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
         // Tricky dangling symlinks.
-        dangling_tricky1_trailing("link3/deep_dangling1", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky1_partial("link3/deep_dangling1/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky1_partial_dotdot("link3/deep_dangling1/..", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky2_trailing("link3/deep_dangling2", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky2_partial("link3/deep_dangling2/foo", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky2_partial_dotdot("link3/deep_dangling2/..", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
+        dangling_tricky1_trailing("link3/deep_dangling1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling_tricky1_partial("link3/deep_dangling1/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling_tricky1_partial_dotdot("link3/deep_dangling1/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling_tricky2_trailing("link3/deep_dangling2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling_tricky2_partial("link3/deep_dangling2/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling_tricky2_partial_dotdot("link3/deep_dangling2/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
         // Really deep dangling links.
-        deep_dangling1("dangling/a", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling2("dangling/b/c", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling3("dangling/c", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling4("dangling/d/e", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling5("dangling/e", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling6("dangling/g", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling_fileasdir1("dangling-file/a", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir2("dangling-file/b/c", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir3("dangling-file/c", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir4("dangling-file/d/e", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir5("dangling-file/e", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir6("dangling-file/g", ResolverFlags::empty()) => ExpectedResult::Err(libc::ENOTDIR);
+        deep_dangling1("dangling/a", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        deep_dangling2("dangling/b/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        deep_dangling3("dangling/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        deep_dangling4("dangling/d/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        deep_dangling5("dangling/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        deep_dangling6("dangling/g", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        deep_dangling_fileasdir1("dangling-file/a", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        deep_dangling_fileasdir2("dangling-file/b/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        deep_dangling_fileasdir3("dangling-file/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        deep_dangling_fileasdir4("dangling-file/d/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        deep_dangling_fileasdir5("dangling-file/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        deep_dangling_fileasdir6("dangling-file/g", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
         // Symlink loops.
-        loop1("loop/link", ResolverFlags::empty()) => ExpectedResult::Err(libc::ELOOP);
-        loop_basic1("loop/basic-loop1", ResolverFlags::empty()) => ExpectedResult::Err(libc::ELOOP);
-        loop_basic2("loop/basic-loop2", ResolverFlags::empty()) => ExpectedResult::Err(libc::ELOOP);
-        loop_basic3("loop/basic-loop3", ResolverFlags::empty()) => ExpectedResult::Err(libc::ELOOP);
+        loop1("loop/link", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
+        loop_basic1("loop/basic-loop1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
+        loop_basic2("loop/basic-loop2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
+        loop_basic3("loop/basic-loop3", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
         // NO_FOLLOW.
-        symlink_nofollow("link3/target_abs", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: "link3/target_abs", file_type: libc::S_IFLNK };
-        symlink_component_nofollow1("e/f", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: "b/c/d/e/f", file_type: libc::S_IFDIR };
-        symlink_component_nofollow2("link2/link1_abs/target_rel", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: "link1/target_rel", file_type: libc::S_IFLNK };
-        loop_nofollow("loop/link", ResolverFlags::NO_FOLLOW_TRAILING) => ExpectedResult::Ok { real_path: "loop/link", file_type: libc::S_IFLNK };
+        symlink_nofollow("link3/target_abs", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "link3/target_abs", file_type: libc::S_IFLNK };
+        symlink_component_nofollow1("e/f", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "b/c/d/e/f", file_type: libc::S_IFDIR };
+        symlink_component_nofollow2("link2/link1_abs/target_rel", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "link1/target_rel", file_type: libc::S_IFLNK };
+        loop_nofollow("loop/link", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "loop/link", file_type: libc::S_IFLNK };
         // RESOLVE_NO_SYMLINKS.
-        dir_nosym("b/c/d/e", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Ok { real_path: "b/c/d/e", file_type: libc::S_IFDIR };
-        symlink_nosym("link3/target_abs", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
-        symlink_component_nosym1("e/f", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
-        symlink_component_nosym2("link2/link1_abs/target_rel", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
-        loop_nosym("loop/link", ResolverFlags::NO_SYMLINKS) => ExpectedResult::Err(libc::ELOOP);
+        dir_nosym("b/c/d/e", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Ok { real_path: "b/c/d/e", file_type: libc::S_IFDIR };
+        symlink_nosym("link3/target_abs", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
+        symlink_component_nosym1("e/f", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
+        symlink_component_nosym2("link2/link1_abs/target_rel", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
+        loop_nosym("loop/link", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
     }
 }
 
@@ -509,6 +515,7 @@ mod utils {
     pub(super) fn check_resolve_in_root<P>(
         root: &Root,
         unsafe_path: P,
+        no_follow_trailing: bool,
         expected: &ExpectedResult,
         reopen_tests: bool,
     ) -> Result<(), Error>
@@ -516,7 +523,13 @@ mod utils {
         P: AsRef<Path>,
     {
         check_resolve(
-            |root: &Root, unsafe_path: P| root.resolve(unsafe_path).map_err(Into::into),
+            |root: &Root, unsafe_path: P| {
+                if no_follow_trailing {
+                    root.resolve_nofollow(unsafe_path).map_err(Into::into)
+                } else {
+                    root.resolve(unsafe_path).map_err(Into::into)
+                }
+            },
             root,
             root.as_file().as_unsafe_path_unchecked()?,
             unsafe_path,

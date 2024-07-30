@@ -18,6 +18,7 @@
 
 use crate::{
     error::{self, Error},
+    flags::OpenFlags,
     resolvers::ResolverFlags,
     syscalls::{self, OpenHow},
     Handle,
@@ -32,6 +33,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     root: &File,
     path: P,
     rflags: ResolverFlags,
+    no_follow_trailing: bool,
 ) -> Result<Handle, Error> {
     ensure!(
         *syscalls::OPENAT2_IS_SUPPORTED,
@@ -39,12 +41,14 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     );
 
     // Copy the O_NOFOLLOW and RESOLVE_NO_SYMLINKS bits from flags.
-    let oflags = libc::O_PATH as u64 | rflags.openat2_flag_bits();
-    let rflags =
-        libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | rflags.openat2_resolve_bits();
+    let mut oflags = OpenFlags::O_PATH;
+    if no_follow_trailing {
+        oflags.insert(OpenFlags::O_NOFOLLOW);
+    }
+    let rflags = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | rflags.bits();
 
     let how = OpenHow {
-        flags: oflags,
+        flags: oflags.bits() as u64,
         resolve: rflags,
         ..Default::default()
     };

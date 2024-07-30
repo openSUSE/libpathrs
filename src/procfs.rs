@@ -59,7 +59,6 @@ lazy_static! {
 /// [`ProcfsHandle`]: struct.ProcfsHandle.html
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // TODO: Remove when we export this properly.
 pub enum ProcfsBase {
     /// Use `/proc/self`. For most programs, this is the standard choice.
     ProcSelf,
@@ -424,9 +423,9 @@ impl ProcfsHandle {
 
         // Do a basic lookup.
         let base = self.open_base(base)?;
-        let file =
-            self.resolver
-                .resolve(&base, subpath, flags, ResolverFlags::NO_FOLLOW_TRAILING)?;
+        let file = self
+            .resolver
+            .resolve(&base, subpath, flags, ResolverFlags::empty())?;
 
         // Detect if the file we landed is in a bind-mount.
         self.check_mnt_id(&file, "")?;

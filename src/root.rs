@@ -234,20 +234,35 @@ impl Root {
     }
 
     /// Within the given [`Root`]'s tree, resolve `path` and return a
-    /// [`Handle`]. All symlink path components are scoped to [`Root`].
+    /// [`Handle`]. All symlink path components are scoped to [`Root`]. Trailing
+    /// symlinks *are* followed, if you want to get a handle to a symlink use
+    /// [`Root::resolve_nofollow`].
     ///
     /// # Errors
     ///
     /// If `path` doesn't exist, or an attack was detected during resolution, a
-    /// corresponding Error will be returned. If no error is returned, then the
-    /// path is guaranteed to have been reachable from the root of the directory
-    /// tree and thus have been inside the root at one point in the resolution.
+    /// corresponding [`Error`] will be returned. If no error is returned, then
+    /// the path is guaranteed to have been reachable from the root of the
+    /// directory tree and thus have been inside the root at one point in the
+    /// resolution.
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
+    /// [`Error`]: error/struct.Error.html
+    /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
-        self.resolver.resolve(&self.inner, path)
+        self.resolver.resolve(&self.inner, path, false)
+    }
+
+    /// Identical to [`Root::resolve`], except that *trailing* symlinks are
+    /// *not* followed and if the trailing component is a symlink
+    /// `Root::resolve_nofollow` will return a handle to the symlink itself.
+    ///
+    /// [`Root::resolve`]: struct.Root.html#method.resolve
+    #[inline]
+    pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+        self.resolver.resolve(&self.inner, path, true)
     }
 
     // TODO: readlink (need to move ResolverFlags out of Resolver)

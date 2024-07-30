@@ -165,6 +165,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     root: &File,
     path: P,
     flags: ResolverFlags,
+    no_follow_trailing: bool,
 ) -> Result<Handle, Error> {
     let path = path.as_ref();
 
@@ -276,7 +277,7 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         // If we hit the last component and we were told to not follow the
         // trailing symlink, just return the link we have.
         // TODO: Is this behaviour correct for "foo/" cases?
-        if remaining_components.is_empty() && flags.contains(ResolverFlags::NO_FOLLOW_TRAILING) {
+        if remaining_components.is_empty() && no_follow_trailing {
             current = next.into();
             break;
         }
