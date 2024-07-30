@@ -19,10 +19,11 @@
 use std::{fs::File, path::Path};
 
 use crate::{
+    flags::ResolverFlags,
     resolvers::{opath, openat2},
     syscalls,
     tests::common as tests_common,
-    Handle, ResolverBackend, ResolverFlags, Root,
+    Handle, ResolverBackend, Root,
 };
 use utils::ExpectedResult;
 
@@ -336,7 +337,7 @@ resolve_tests! {
 mod utils {
     use std::{fs::File, io, os::linux::fs::MetadataExt, path::Path};
 
-    use crate::{error::Error as PathrsError, utils::RawFdExt, Handle, OpenFlags, Root};
+    use crate::{error::Error as PathrsError, flags::OpenFlags, utils::RawFdExt, Handle, Root};
 
     use anyhow::Error;
     use errno::Errno;

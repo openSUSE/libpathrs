@@ -19,8 +19,8 @@
 use crate::{
     capi::{ret::IntoCReturn, utils},
     error::Error,
+    flags::OpenFlags,
     procfs::{ProcfsBase, PROCFS_HANDLE},
-    OpenFlags,
 };
 
 use std::{

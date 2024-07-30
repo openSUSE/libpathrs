@@ -18,10 +18,10 @@
 
 use crate::{
     error::ErrorKind,
+    flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
     resolvers::procfs::ProcfsResolver,
     syscalls::{self, OpenTreeFlags},
-    OpenFlags,
 };
 use utils::ExpectedResult;
 
