@@ -59,6 +59,8 @@ func main() {
 	}
 	defer file.Close()
 
+	fmt.Fprintf(os.Stderr, "file %q (from root %q):\n", file.Name(), root.IntoFile().Name())
+
 	_, err = io.Copy(os.Stdout, file)
 	if err != nil {
 		fmt.Printf("Cannot write content of file to stdout, %v\n", err)

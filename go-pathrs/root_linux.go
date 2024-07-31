@@ -42,7 +42,10 @@ func OpenRoot(path string) (*Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(fd, "//pathrs-root:"+path)
+	file, err := mkFile(fd)
+	if err != nil {
+		return nil, err
+	}
 	return &Root{inner: file}, nil
 }
 
@@ -67,20 +70,15 @@ func RootFromFile(file *os.File) (*Root, error) {
 // resolved within the rootfs. If you wish to open a handle to the symlink
 // itself, use ResolveNoFollow.
 func (r *Root) Resolve(path string) (*Handle, error) {
-	// TODO: Get the actual name of the handle through /proc/self/fd/...
-	fakeName, err := randName(32)
-	if err != nil {
-		return nil, err
-	}
-	// Prefix the root.
-	fakeName = r.inner.Name() + fakeName
-
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
 		handleFd, err := pathrsResolve(rootFd, path)
 		if err != nil {
 			return nil, err
 		}
-		handleFile := os.NewFile(uintptr(handleFd), fakeName)
+		handleFile, err := mkFile(uintptr(handleFd))
+		if err != nil {
+			return nil, err
+		}
 		return &Handle{inner: handleFile}, nil
 	})
 }
@@ -90,20 +88,15 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 // followed. If the final component is a trailing symlink, an O_PATH|O_NOFOLLOW
 // handle to the symlink itself is returned.
 func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
-	// TODO: Get the actual name of the handle through /proc/self/fd/...
-	fakeName, err := randName(32)
-	if err != nil {
-		return nil, err
-	}
-	// Prefix the root.
-	fakeName = r.inner.Name() + fakeName
-
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
 		handleFd, err := pathrsResolveNoFollow(rootFd, path)
 		if err != nil {
 			return nil, err
 		}
-		handleFile := os.NewFile(uintptr(handleFd), fakeName)
+		handleFile, err := mkFile(uintptr(handleFd))
+		if err != nil {
+			return nil, err
+		}
 		return &Handle{inner: handleFile}, nil
 	})
 }
@@ -112,25 +105,19 @@ func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
 // and returns a handle to the file. The provided mode is used for the new file
 // (the process's umask applies).
 func (r *Root) Create(path string, flags int, mode os.FileMode) (*Handle, error) {
-	// TODO: Get the actual name of the handle through /proc/self/fd/...
-	fakeName, err := randName(32)
-	if err != nil {
-		return nil, err
-	}
-	// Prefix the root.
-	fakeName = r.inner.Name() + fakeName
-
 	unixMode, err := toUnixMode(mode)
 	if err != nil {
 		return nil, err
 	}
-
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
 		handleFd, err := pathrsCreat(rootFd, path, flags, unixMode)
 		if err != nil {
 			return nil, err
 		}
-		handleFile := os.NewFile(uintptr(handleFd), fakeName)
+		handleFile, err := mkFile(uintptr(handleFd))
+		if err != nil {
+			return nil, err
+		}
 		return &Handle{inner: handleFile}, nil
 	})
 }

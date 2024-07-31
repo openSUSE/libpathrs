@@ -19,10 +19,8 @@
 package pathrs
 
 import (
-	"crypto/rand"
 	"fmt"
 	"os"
-	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -93,22 +91,18 @@ func dupFile(file *os.File) (*os.File, error) {
 	})
 }
 
-// randName generates a random hexadecimal name that is used for the Go-level
-// "file name" of libpathrs-generated fds, and can be used to help with
-// debugging.
-func randName(k int) (string, error) {
-	randBuf := make([]byte, k/2)
-
-	if n, err := rand.Read(randBuf); err != nil {
-		return "", err
-	} else if n != len(randBuf) {
-		return "", fmt.Errorf("rand.Read didn't return enough bytes (%d != %d)", n, len(randBuf))
+// mkFile creates a new *os.File from the provided file descriptor. However,
+// unlike os.NewFile, the file's Name is based on the real path (provided by
+// /proc/self/fd/$n).
+func mkFile(fd uintptr) (*os.File, error) {
+	fdPath := fmt.Sprintf("fd/%d", fd)
+	fdName, err := ProcReadlink(ProcBaseThreadSelf, fdPath)
+	if err != nil {
+		_ = unix.Close(int(fd))
+		return nil, fmt.Errorf("failed to fetch real name of fd %d: %w", fd, err)
 	}
-
-	var nameBuf strings.Builder
-	nameBuf.WriteString("//pathrs-fd:")
-	for _, b := range randBuf {
-		nameBuf.WriteString(fmt.Sprintf("%.2x", b))
-	}
-	return nameBuf.String(), nil
+	// TODO: Maybe we should prefix this name with something to indicate to
+	// users that they must not use this path as a "safe" path. Something like
+	// "//pathrs-handle:/foo/bar"?
+	return os.NewFile(fd, fdName), nil
 }
