@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # libpathrs: safe path resolution on Linux
-# Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
-# Copyright (C) 2019-2021 SUSE LLC
+# Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+# Copyright (C) 2019-2024 SUSE LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,11 +19,10 @@
 # build of libpathrs, and can be redistributed alongside the pathrs.py wrapping
 # library). It's much better than the ABI-mode of CFFI.
 
-# TODO: Make this work properly with setuptools -- this might take some work.
-
 import re
 import os
 import sys
+
 import cffi
 
 def load_hdr(ffi, hdr_path):
@@ -42,25 +41,24 @@ def load_hdr(ffi, hdr_path):
 	# Load the header.
 	ffi.cdef(hdr)
 
-def compile_module(**kwargs):
+def create_ffibuilder(**kwargs):
 	ffibuilder = cffi.FFI()
 	ffibuilder.cdef("typedef uint32_t dev_t;")
 
 	# We need to use cdef to tell cffi what functions we need to FFI to. But we
 	# don't need the structs (I hope).
-	for include_dir in kwargs["include_dirs"]:
+	for include_dir in kwargs.get("include_dirs", []):
 		pathrs_hdr = os.path.join(include_dir, "pathrs.h")
 		if os.path.exists(pathrs_hdr):
 			load_hdr(ffibuilder, pathrs_hdr)
 
 	# Add a source and link to libpathrs.
-	ffibuilder.set_source("_pathrs", "#include <pathrs.h>",
+	ffibuilder.set_source("_libpathrs_cffi", "#include <pathrs.h>",
 	                      libraries=["pathrs"], **kwargs)
 
-	# Compile the cffi module.
-	ffibuilder.compile(verbose=True)
+	return ffibuilder
 
-def main():
+def find_ffibuilder():
 	# Figure out where the libpathrs source dir is.
 	ROOT_DIR = None
 	candidate = os.path.dirname(sys.path[0] or os.getcwd())
@@ -91,8 +89,16 @@ def main():
 	lib_paths = [os.path.dirname(path) for path in lib_paths]
 
 	# Compile the libpathrs module.
-	compile_module(include_dirs=[os.path.join(ROOT_DIR, "include")],
-				   library_dirs=lib_paths)
+	return create_ffibuilder(include_dirs=[os.path.join(ROOT_DIR, "include")],
+	                         library_dirs=lib_paths)
 
 if __name__ == "__main__":
-	main()
+	# Compile the cffi module if running outside of setuptools.
+	ffibuilder = find_ffibuilder()
+	ffibuilder.compile(verbose=True)
+else:
+	# Use the system libraries if running inside setuptools.
+	ffibuilder = create_ffibuilder(include_dirs=[
+		"/usr/include",
+		"/usr/local/include"
+	])

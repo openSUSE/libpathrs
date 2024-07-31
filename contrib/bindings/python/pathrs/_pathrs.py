@@ -22,7 +22,7 @@ import sys
 import copy
 import fcntl
 
-from _pathrs import ffi, lib as libpathrs_so
+from ._libpathrs_cffi import ffi, lib as libpathrs_so
 
 __all__ = [
 	# core api
@@ -102,7 +102,7 @@ class Error(Exception):
 INTERNAL_ERROR = Error("tried to fetch libpathrs error but no error found")
 
 
-def fileno(file):
+def _fileno(file):
 	if isinstance(file, int):
 		# file is a plain fd
 		return file
@@ -110,14 +110,13 @@ def fileno(file):
 		# Assume there is a fileno method.
 		return file.fileno()
 
-
-def clonefile(file):
+def _clonefile(file):
 	return fcntl.fcntl(fileno(file), fcntl.F_DUPFD_CLOEXEC)
 
 
 class WrappedFd(object):
 	def __init__(self, file):
-		fd = fileno(file)
+		fd = _fileno(file)
 		if isinstance(file, io.IOBase):
 			# If this is a regular open file, we need to make a copy because
 			# you cannot leak files and so the GC might close it from
@@ -161,7 +160,7 @@ class WrappedFd(object):
 	def clone(self):
 		if self.isclosed():
 			raise ValueError("cannot clone closed file")
-		return self.__class__(clonefile(self))
+		return self.__class__(_clonefile(self))
 
 	def __copy__(self):
 		# A "shallow copy" of a file is the same as a deep copy.
@@ -175,7 +174,7 @@ class WrappedFd(object):
 
 
 # XXX: This is _super_ ugly but so is the one in CPython.
-def convert_mode(mode):
+def _convert_mode(mode):
 	mode = set(mode)
 	flags = os.O_CLOEXEC
 
@@ -216,7 +215,7 @@ PROC_SELF = libpathrs_so.PATHRS_PROC_SELF
 PROC_THREAD_SELF = libpathrs_so.PATHRS_PROC_THREAD_SELF
 
 def proc_open(base, path, mode="r", extra_flags=0):
-	flags = convert_mode(mode) | extra_flags
+	flags = _convert_mode(mode) | extra_flags
 	return proc_open_raw(base, path, flags).fdopen(mode)
 
 def proc_open_raw(base, path, flags):
@@ -256,7 +255,7 @@ class Handle(WrappedFd):
 		return cls(file)
 
 	def reopen(self, mode="r", extra_flags=0):
-		flags = convert_mode(mode) | extra_flags
+		flags = _convert_mode(mode) | extra_flags
 		return self.reopen_raw(flags).fdopen(mode)
 
 	def reopen_raw(self, flags):
@@ -315,7 +314,7 @@ class Root(WrappedFd):
 
 	def creat(self, path, filemode, mode="r", extra_flags=0):
 		path = _cstr(path)
-		flags = convert_mode(mode) | extra_flags
+		flags = _convert_mode(mode) | extra_flags
 		fd = libpathrs_so.pathrs_creat(self.fileno(), path, flags, filemode)
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
