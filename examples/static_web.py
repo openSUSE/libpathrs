@@ -1,7 +1,7 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # libpathrs: safe path resolution on Linux
-# Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
-# Copyright (C) 2019-2021 SUSE LLC
+# Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+# Copyright (C) 2019-2024 SUSE LLC
 #
 # This program is free software: you can redistribute it and/or modify it under
 # the terms of the GNU Lesser General Public License as published by the Free
@@ -65,16 +65,18 @@ def get(path):
 		}.get(e.errno, 500)
 		flask.abort(status_code, "Could not resolve path: %s." % (e,))
 
-	try:
-		f = handle.reopen("rb")
-		return flask.Response(f, mimetype="application/octet-stream", direct_passthrough=True)
-	except IsADirectoryError:
-		f = handle.reopen_raw(os.O_RDONLY)
-		with os.scandir(f.fileno()) as s:
-			return flask.json.jsonify({
-				dentry.name: json_dentry(dentry)
-				for dentry in s
-			})
+	with handle:
+		try:
+			f = handle.reopen("rb")
+			return flask.Response(f, mimetype="application/octet-stream", direct_passthrough=True)
+		except IsADirectoryError:
+			with handle.reopen_raw(os.O_RDONLY) as dirf:
+				with os.scandir(dirf.fileno()) as s:
+					return flask.json.jsonify({
+						dentry.name: json_dentry(dentry)
+						for dentry in s
+					})
+
 
 def main(root_path=None):
 	if root_path is None:
