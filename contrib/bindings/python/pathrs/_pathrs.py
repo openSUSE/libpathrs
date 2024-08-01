@@ -125,19 +125,22 @@ class WrappedFd(object):
 		self._fd = fd
 
 	def fileno(self):
+		if self._fd is None:
+			raise OSError(errno.EBADF, "Closed file descriptor")
 		return self._fd
 
 	def leak(self):
 		self._fd = None
 
 	def fdopen(self, mode="r"):
+		fd = self.fileno()
 		try:
-			fd = self.fileno()
 			file = os.fdopen(fd, mode)
 			self.leak()
 			return file
 		except:
-			fd.close()
+			# "Unleak" the file if there was an error.
+			self._fd = fd
 			raise
 
 	@classmethod
@@ -170,6 +173,12 @@ class WrappedFd(object):
 		return self.clone()
 
 	def __del__(self):
+		self.close()
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, exc_type, exc_value, exc_traceback):
 		self.close()
 
 
@@ -216,7 +225,8 @@ PROC_THREAD_SELF = libpathrs_so.PATHRS_PROC_THREAD_SELF
 
 def proc_open(base, path, mode="r", extra_flags=0):
 	flags = _convert_mode(mode) | extra_flags
-	return proc_open_raw(base, path, flags).fdopen(mode)
+	with proc_open_raw(base, path, flags) as file:
+		return file.fdopen(mode)
 
 def proc_open_raw(base, path, flags):
 	path = _cstr(path)
@@ -256,7 +266,8 @@ class Handle(WrappedFd):
 
 	def reopen(self, mode="r", extra_flags=0):
 		flags = _convert_mode(mode) | extra_flags
-		return self.reopen_raw(flags).fdopen(mode)
+		with self.reopen_raw(flags) as file:
+			return file.fdopen(mode)
 
 	def reopen_raw(self, flags):
 		fd = libpathrs_so.pathrs_reopen(self.fileno(), flags)
