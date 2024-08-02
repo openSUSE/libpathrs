@@ -31,6 +31,10 @@ release: target/release
 target/release: $(SRC_FILES)
 	$(CARGO) build --release
 
+.PHONY: smoke-test
+smoke-test:
+	make -C examples smoke-test
+
 .PHONY: clean
 clean:
 	-rm -rf target/
