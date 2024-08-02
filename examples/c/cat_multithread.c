@@ -17,10 +17,11 @@
  */
 
 /*
- * File: examples/cat_multithread.c
+ * File: examples/c/cat_multithread.c
  *
  * An example program which opens a file inside a root and outputs its contents
- * using libpathrs.
+ * using libpathrs, but multithreaded to show that there are no obvious race
+ * conditions when using pathrs.
  */
 
 #include <stdio.h>

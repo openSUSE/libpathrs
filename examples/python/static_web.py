@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Lesser General Public License along
 # with this program. If not, see <https://www.gnu.org/licenses/>.
 
-# File: examples/static_web.py
+# File: examples/python/static_web.py
 #
 # An example program which provides a static webserver which will serve files
 # from a directory, safely resolving paths with libpathrs.

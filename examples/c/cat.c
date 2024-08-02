@@ -17,7 +17,7 @@
  */
 
 /*
- * File: examples/cat.c
+ * File: examples/c/cat.c
  *
  * An example program which opens a file inside a root and outputs its contents
  * using libpathrs.
