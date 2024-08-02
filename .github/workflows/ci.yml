@@ -76,6 +76,15 @@ jobs:
           name: coverage-report
           path: target/llvm-cov/html
 
+  examples:
+    name: smoke-test examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --examples
+      - run: make -C examples smoke-test-rust
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest

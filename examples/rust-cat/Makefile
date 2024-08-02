@@ -14,13 +14,14 @@
 # You should have received a copy of the GNU Lesser General Public License along
 # with this program. If not, see <https://www.gnu.org/licenses/>.
 
-.PHONY: smoke-test
-smoke-test:
-	make -C c $@
-	make -C go $@
-	make -C python $@
-	make smoke-test-rust
+CARGO ?= cargo
 
-.PHONY: smoke-test-rust
-smoke-test-rust:
-	make -C rust-cat smoke-test
+EXAMPLE_NAME := $(basename $(shell basename $$PWD))
+
+.PHONY: build
+build:
+	$(CARGO) build --example $(EXAMPLE_NAME)
+
+.PHONY: smoke-test
+smoke-test: build
+	../../target/debug/examples/$(EXAMPLE_NAME) . ../../main.rs &>/dev/null
