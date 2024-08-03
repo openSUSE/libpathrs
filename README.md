@@ -1,10 +1,9 @@
 ## `libpathrs` ##
 
-[![build status](https://github.com/openSUSE/libpathrs/actions/workflows/ci.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/ci.yml)
+[![rust-ci build status](https://github.com/openSUSE/libpathrs/actions/workflows/rust.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/rust.yml)
+[![bindings-ci build status](https://github.com/openSUSE/libpathrs/actions/workflows/bindings.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/bindings.yml)
 [![docs](https://docs.rs/pathrs/badge.svg)](https://docs.rs/pathrs/)
 [![dependency status](https://deps.rs/repo/github/openSUSE/libpathrs/status.svg)](https://deps.rs/repo/github/openSUSE/libpathrs)
-
-![License: LGPL-3.0-or-later](https://img.shields.io/github/license/openSUSE/libpathrs.svg)
 
 This library implements a set of C-friendly APIs (written in Rust) to make path
 resolution within a potentially-untrusted directory safe on GNU/Linux. There
@@ -73,12 +72,14 @@ err:
 
 ### License ###
 
+![License: LGPL-3.0-or-later](https://img.shields.io/github/license/openSUSE/libpathrs.svg)
+
 `libpathrs` is licensed under the GNU LGPLv3 (or any later version).
 
 ```
 libpathrs: safe path resolution on Linux
-Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
-Copyright (C) 2019-2021 SUSE LLC
+Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+Copyright (C) 2019-2024 SUSE LLC
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU Lesser General Public License as published by the Free
