@@ -40,7 +40,7 @@ SOVERSION="$(get_so_version)"
 SONAME="lib$(get_crate_info name).so.$FULLVERSION"
 
 # Try to emulate autoconf's basic flags.
-DEFAULT_PREFIX=/usr
+DEFAULT_PREFIX=/usr/local
 usage() {
 	[ "$#" -eq 0 ] || echo "ERROR:" "$@" >&2
 
@@ -57,10 +57,11 @@ usage() {
 	The following autoconf arguments are accepted by this script. The value in
 	brackets is the default value used if the flags are not specified.
 
-	  --prefix[=$DEFAULT_PREFIX]
-	  --exec-prefix[=<prefix>]
-	  --includedir=[<prefix>/include]
-	  --libdir=[<exec-prefix>/lib(64)]     (lib64 is used if available)
+	  --prefix=[$DEFAULT_PREFIX]
+	  --exec-prefix=[PREFIX]
+	  --includedir=[EPREFIX/include]
+	  --libdir=[EPREFIX/lib(64)]              (lib64 is used if available)
+	  --pkgconfigdir=[LIBDIR/pkgconfig]
 
 	As with automake, if the DESTDIR= environment variable is set, this script
 	will install the files into DESTDIR as though it were the root of the
@@ -87,7 +88,7 @@ usage() {
 	[ "$#" -gt 0 ] && exit_code=1
 	exit "$exit_code"
 }
-GETOPT="$(getopt -o h --long help,prefix:,exec-prefix:,includedir:,libdir: -- "$@")"
+GETOPT="$(getopt -o h --long help,prefix:,exec-prefix:,includedir:,libdir:,pkgconfigdir: -- "$@")"
 eval set -- "$GETOPT"
 
 DESTDIR="${DESTDIR:-}"
@@ -95,12 +96,14 @@ prefix="$DEFAULT_PREFIX"
 exec_prefix=
 includedir=
 libdir=
+pkgconfigdir=
 while true; do
 	case "$1" in
-		--prefix)      prefix="$2";      shift 2 ;;
-		--exec-prefix) exec_prefix="$2"; shift 2 ;;
-		--includedir)  includedir="$2";  shift 2 ;;
-		--libdir)      libdir="$2";      shift 2 ;;
+		--prefix)       prefix="$2";       shift 2 ;;
+		--exec-prefix)  exec_prefix="$2";  shift 2 ;;
+		--includedir)   includedir="$2";   shift 2 ;;
+		--libdir)       libdir="$2";       shift 2 ;;
+		--pkgconfigdir) pkgconfigdir="$2"; shift 2 ;;
 		--) shift; break ;;
 		-h | --help) usage ;;
 		*)           usage "unknown argument $1" ;;
@@ -131,6 +134,7 @@ find_libdir() {
 exec_prefix="${exec_prefix:-$prefix}"
 includedir="${includedir:-$prefix/include}"
 libdir="${libdir:-$(find_libdir "$exec_prefix")}"
+pkgconfigdir="${pkgconfigdir:-$libdir/pkgconfig}"
 
 echo "[pkg-config] generating pathrs pkg-config"
 cat >"pathrs.pc" <<EOF
@@ -165,8 +169,8 @@ EOF
 
 echo "[install] installing libpathrs into DESTDIR=${DESTDIR:-/}"
 set -x
-install -Dt "$DESTDIR/$libdir/pkgconfig/" -m 0644 pathrs.pc
-install -Dt "$DESTDIR/$includedir/"       -m 0644 include/pathrs.h
+install -Dt "$DESTDIR/$pkgconfigdir/" -m 0644 pathrs.pc
+install -Dt "$DESTDIR/$includedir/"   -m 0644 include/pathrs.h
 install -DT -m 0755 target/release/libpathrs.so "$DESTDIR/$libdir/$SONAME"
 ln -sf "$SONAME" "$DESTDIR/$libdir/libpathrs.so.$SOVERSION"
 ln -sf "$SONAME" "$DESTDIR/$libdir/libpathrs.so"
