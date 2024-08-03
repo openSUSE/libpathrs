@@ -1,0 +1,99 @@
+# libpathrs: safe path resolution on Linux
+# Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+# Copyright (C) 2019-2024 SUSE LLC
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License along
+# with this program. If not, see <https://www.gnu.org/licenses/>.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+  schedule:
+    - cron: '0 0 * * *'
+
+name: bindings-ci
+
+jobs:
+  c:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build and install libpathrs.so.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build libpathrs
+        run: make release
+      - name: install libpathrs
+        run: sudo ./install.sh --libdir=/usr/lib
+      # Run smoke-tests.
+      - run: make -C examples/c smoke-test
+
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.18.x", "1.21.x", "1.22.x"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build and install libpathrs.so.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build libpathrs
+        run: make release
+      - name: install libpathrs
+        run: sudo ./install.sh --libdir=/usr/lib
+      # Setup go.
+      - name: install go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+      # Run smoke-tests.
+      - run: make -C examples/go smoke-test
+
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.10", "3.12"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build and install libpathrs.so.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build libpathrs
+        run: make release
+      - name: install libpathrs
+        run: sudo ./install.sh --libdir=/usr/lib
+      # Set up python venv.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: install pypa/build
+        run: >-
+          python3 -m pip install --user build
+      # Build and install our bindings.
+      - name: build python-libpathrs bindings
+        run: make -C contrib/bindings/python dist
+      - name: install python-libpathrs bindings
+        run: make -C contrib/bindings/python install
+      # Include the dist/ in our artefacts.
+      - name: upload python-libpathrs bindings dist/
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-${{ matrix.python-version }}-libpathrs-dist
+          path: contrib/bindings/python/dist/
+      # Run smoke-tests.
+      - run: make -C examples/python smoke-test

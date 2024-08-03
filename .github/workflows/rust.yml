@@ -24,7 +24,7 @@ on:
   schedule:
     - cron: '0 0 * * *'
 
-name: ci
+name: rust-ci
 
 jobs:
   check:
