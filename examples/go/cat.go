@@ -1,7 +1,6 @@
 // libpathrs: safe path resolution on Linux
-// Copyright (C) 2020 Maxim Zhiburt <zhiburt@gmail.com>
-// Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
-// Copyright (C) 2019-2021 SUSE LLC
+// Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+// Copyright (C) 2019-2024 SUSE LLC
 //
 // This program is free software: you can redistribute it and/or modify it under
 // the terms of the GNU Lesser General Public License as published by the Free
@@ -15,8 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License along
 // with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Package main implements a program which print file content to stdout
-// safely resolving paths with libpathrs.
+// Original author of this example code:
+// Copyright (C) 2020 Maxim Zhiburt <zhiburt@gmail.com>
+
+// File: examples/c/cat.c
+//
+// An example program which opens a file inside a root and outputs its contents
+// using libpathrs.
+
 package main
 
 import (
@@ -28,48 +33,44 @@ import (
 	"github.com/openSUSE/libpathrs/go-pathrs"
 )
 
-func usage() {
-	fmt.Println("usage: cat <root> <unsafe-path>")
-	os.Exit(1)
-}
-
-func main() {
-	if len(os.Args) < 3 {
-		usage()
+func Main(args []string) error {
+	if len(args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: cat <root> <unsafe-path>")
+		os.Exit(1)
 	}
 
-	rootPath := os.Args[1]
-	path := os.Args[2]
+	rootPath, unsafePath := args[0], args[1]
 
 	root, err := pathrs.OpenRoot(rootPath)
 	if err != nil {
-		printPathError(err)
+		return fmt.Errorf("open root %q: %w", rootPath, err)
 	}
 	defer root.Close()
 
-	handle, err := root.Resolve(path)
+	handle, err := root.Resolve(unsafePath)
 	if err != nil {
-		printPathError(err)
+		return fmt.Errorf("resolve %q: %w", unsafePath, err)
 	}
 	defer handle.Close()
 
 	file, err := handle.Open()
 	if err != nil {
-		printPathError(err)
+		return fmt.Errorf("reopen handle: %w", err)
 	}
 	defer file.Close()
 
-	fmt.Fprintf(os.Stderr, "file %q (from root %q):\n", file.Name(), root.IntoFile().Name())
+	fmt.Fprintf(os.Stderr, "== file %q (from root %q) ==\n", file.Name(), root.IntoFile().Name())
 
-	_, err = io.Copy(os.Stdout, file)
-	if err != nil {
-		fmt.Printf("Cannot write content of file to stdout, %v\n", err)
-		os.Exit(1)
+	if _, err := io.Copy(os.Stdout, file); err != nil {
+		return fmt.Errorf("copy file contents to stdout: %w", err)
 	}
+	return nil
 }
 
-func printPathError(err error) {
-	fmt.Println("Error", err)
-	fmt.Println("Unwrapped error", errors.Unwrap(err))
-	os.Exit(1)
+func main() {
+	if err := Main(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v", err)
+		fmt.Fprintf(os.Stderr, "Source: %v", errors.Unwrap(err))
+		os.Exit(1)
+	}
 }
