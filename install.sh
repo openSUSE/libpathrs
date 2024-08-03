@@ -169,8 +169,12 @@ EOF
 
 echo "[install] installing libpathrs into DESTDIR=${DESTDIR:-/}"
 set -x
+# pkg-config.
 install -Dt "$DESTDIR/$pkgconfigdir/" -m 0644 pathrs.pc
 install -Dt "$DESTDIR/$includedir/"   -m 0644 include/pathrs.h
+# Static library.
+install -Dt "$DESTDIR/$libdir"        -m 0644 target/release/libpathrs.a
+# Shared library.
 install -DT -m 0755 target/release/libpathrs.so "$DESTDIR/$libdir/$SONAME"
 ln -sf "$SONAME" "$DESTDIR/$libdir/libpathrs.so.$SOVERSION"
 ln -sf "$SONAME" "$DESTDIR/$libdir/libpathrs.so"
