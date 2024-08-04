@@ -31,15 +31,14 @@ use std::{
     os::fd::AsRawFd,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
 use snafu::{OptionExt, ResultExt};
 
-lazy_static! {
-    /// A `procfs` handle to which is used globally by libpathrs.
-    pub(crate) static ref PROCFS_HANDLE: ProcfsHandle =
-        ProcfsHandle::new().expect("should be able to get some /proc handle");
-}
+/// A `procfs` handle to which is used globally by libpathrs.
+pub(crate) static PROCFS_HANDLE: LazyLock<ProcfsHandle> =
+    LazyLock::new(|| ProcfsHandle::new().expect("should be able to get some /proc handle"));
 
 /// Indicate what base directory should be used when doing `/proc/...`
 /// operations with a [`ProcfsHandle`].

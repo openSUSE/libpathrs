@@ -20,7 +20,7 @@
 
 use crate::{error::Error, flags::ResolverFlags, syscalls, Handle};
 
-use std::{fs::File, path::Path};
+use std::{fs::File, path::Path, sync::LazyLock};
 
 /// `O_PATH`-based userspace resolver.
 pub mod opath;
@@ -51,13 +51,13 @@ pub enum ResolverBackend {
     //       hyper-concerned users.
 }
 
-lazy_static! {
-    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *syscalls::OPENAT2_IS_SUPPORTED {
+static DEFAULT_RESOLVER_TYPE: LazyLock<ResolverBackend> = LazyLock::new(|| {
+    if *syscalls::OPENAT2_IS_SUPPORTED {
         ResolverBackend::KernelOpenat2
     } else {
         ResolverBackend::EmulatedOpath
-    };
-}
+    }
+});
 
 impl Default for ResolverBackend {
     fn default() -> Self {

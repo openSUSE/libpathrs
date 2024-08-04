@@ -27,7 +27,7 @@ use std::{
     fs::File,
     mem::ManuallyDrop,
     os::unix::io::{FromRawFd, IntoRawFd, RawFd},
-    sync::Mutex,
+    sync::{LazyLock, Mutex},
 };
 
 use libc::c_int;
@@ -40,9 +40,8 @@ pub(super) trait IntoCReturn {
 }
 
 // TODO: Switch this to using a slab or similar structure, possibly using a less heavy-weight lock?
-lazy_static! {
-    static ref ERROR_MAP: Mutex<HashMap<CReturn, Error>> = Mutex::new(HashMap::new());
-}
+static ERROR_MAP: LazyLock<Mutex<HashMap<CReturn, Error>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn store_error(err: Error) -> CReturn {
     let mut err_map = ERROR_MAP.lock().unwrap();
