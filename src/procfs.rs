@@ -34,19 +34,12 @@ use std::{
     io::Error as IOError,
     os::unix::io::{AsFd, BorrowedFd, OwnedFd},
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
-// MSRV(1.70): Use OnceLock.
-// MSRV(1.80): Use LazyLock.
-lazy_static! {
-    /// A lazy-allocated `procfs` handle which is used globally by libpathrs.
-    ///
-    /// As creating `procfs` handles can be somewhat expensive, library users
-    /// are recommended to make use of this handle for `procfs` operations if
-    /// possible.
-    pub static ref GLOBAL_PROCFS_HANDLE: ProcfsHandle =
-        ProcfsHandle::new().expect("should be able to get some /proc handle");
-}
+/// A `procfs` handle to which is used globally by libpathrs.
+pub(crate) static GLOBAL_PROCFS_HANDLE: LazyLock<ProcfsHandle> =
+    LazyLock::new(|| ProcfsHandle::new().expect("should be able to get some /proc handle"));
 
 /// Indicate what base directory should be used when doing `/proc/...`
 /// operations with a [`ProcfsHandle`].

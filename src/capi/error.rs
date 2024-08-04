@@ -27,19 +27,15 @@ use std::{
     error::Error as StdError,
     ffi::CString,
     ptr,
-    sync::Mutex,
+    sync::{LazyLock, Mutex},
 };
 
 use libc::{c_char, c_int};
 use rand::{self, Rng};
 
-// TODO: Switch this to using a slab or similar structure, possibly using a less
-// heavy-weight lock? Maybe sharded-slab?
-// MSRV(1.70): Use OnceLock.
-// MSRV(1.80): Use LazyLock.
-lazy_static! {
-    static ref ERROR_MAP: Mutex<HashMap<CReturn, Error>> = Mutex::new(HashMap::new());
-}
+// TODO: Switch this to using a slab or similar structure, possibly using a less heavy-weight lock?
+static ERROR_MAP: LazyLock<Mutex<HashMap<CReturn, Error>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(crate) fn store_error(err: Error) -> CReturn {
     let mut err_map = ERROR_MAP.lock().unwrap();

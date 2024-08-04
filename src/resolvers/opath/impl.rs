@@ -58,6 +58,7 @@ use std::{
     },
     path::{Path, PathBuf},
     rc::Rc,
+    sync::LazyLock,
 };
 
 use itertools::Itertools;
@@ -130,17 +131,14 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     Ok(())
 }
 
-// MSRV(1.70): Use OnceLock.
-// MSRV(1.80): Use LazyLock.
-lazy_static! {
-    /// Cached copy of `fs.protected_symlinks` sysctl.
-    // TODO: In theory this value could change during the lifetime of the
-    // program, but there's no nice way of detecting that, and the overhead of
-    // checking this for every symlink lookup is more likely to be an issue.
-    static ref PROTECTED_SYMLINKS_SYSCTL: u32 =
-        utils::sysctl_read_parse(&GLOBAL_PROCFS_HANDLE, "fs.protected_symlinks")
-            .expect("should be able to parse fs.protected_symlinks");
-}
+/// Cached copy of `fs.protected_symlinks` sysctl.
+// TODO: In theory this value could change during the lifetime of the
+// program, but there's no nice way of detecting that, and the overhead of
+// checking this for every symlink lookup is more likely to be an issue.
+static PROTECTED_SYMLINKS_SYSCTL: LazyLock<u32> = LazyLock::new(|| {
+    utils::sysctl_read_parse(&GLOBAL_PROCFS_HANDLE, "fs.protected_symlinks")
+        .expect("should be able to parse fs.protected_symlinks")
+});
 
 /// Verify that we should follow the symlink as per `fs.protected_symlinks`.
 ///
