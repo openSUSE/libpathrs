@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -18,9 +18,17 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{error::Error, flags::ResolverFlags, syscalls, Handle};
+use crate::{
+    error::{Error, ErrorKind},
+    flags::ResolverFlags,
+    syscalls, Handle,
+};
 
-use std::{fs::File, path::Path};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 /// `O_PATH`-based userspace resolver.
 pub mod opath;
@@ -91,6 +99,91 @@ pub struct Resolver {
     pub flags: ResolverFlags,
 }
 
+/// Only used for internal resolver implementations.
+pub(crate) enum PartialLookup<H> {
+    Complete(H),
+    Partial {
+        handle: H,
+        remaining: PathBuf,
+        last_error: Error,
+    },
+}
+
+impl TryInto<Handle> for PartialLookup<Handle> {
+    type Error = Error;
+
+    fn try_into(self) -> Result<Handle, Self::Error> {
+        match self {
+            PartialLookup::Complete(handle) => Ok(handle),
+            PartialLookup::Partial { last_error, .. } => Err(last_error),
+        }
+    }
+}
+
+impl TryInto<Handle> for PartialLookup<Rc<File>> {
+    type Error = Error;
+
+    fn try_into(self) -> Result<Handle, Self::Error> {
+        PartialLookup::<Handle>::from(self).try_into()
+    }
+}
+
+impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Handle> {
+    type Error = Error;
+
+    fn try_into(self) -> Result<(Handle, Option<PathBuf>), Self::Error> {
+        match self {
+            PartialLookup::Complete(handle) => Ok((handle, None)),
+            PartialLookup::Partial {
+                handle,
+                remaining,
+                last_error,
+            } => match last_error.kind() {
+                ErrorKind::OsError(Some(libc::ENOENT)) => Ok((handle, Some(remaining))),
+                _ => Err(last_error),
+            },
+        }
+    }
+}
+
+impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Rc<File>> {
+    type Error = Error;
+
+    fn try_into(self) -> Result<(Handle, Option<PathBuf>), Self::Error> {
+        PartialLookup::<Handle>::from(self).try_into()
+    }
+}
+
+impl From<PartialLookup<Rc<File>>> for PartialLookup<Handle> {
+    fn from(result: PartialLookup<Rc<File>>) -> Self {
+        let (rc, partial) = match result {
+            PartialLookup::Complete(rc) => (rc, None),
+            PartialLookup::Partial {
+                handle,
+                remaining,
+                last_error,
+            } => (handle, Some((remaining, last_error))),
+        };
+
+        // We are now sure that there is only a single reference to whatever
+        // current points to. There is nowhere else we could've stashed a
+        // reference, and we only do Rc::clone for root (which we've dropped).
+        let handle = Handle::from_file_unchecked(
+            Rc::try_unwrap(rc)
+                .expect("current handle in lookup should only have a single Rc reference"),
+        );
+
+        match partial {
+            None => Self::Complete(handle),
+            Some((remaining, last_error)) => Self::Partial {
+                handle,
+                remaining,
+                last_error,
+            },
+        }
+    }
+}
+
 impl Resolver {
     /// Internal dispatcher to the relevant backend.
     #[inline]
@@ -106,6 +199,25 @@ impl Resolver {
             }
             ResolverBackend::EmulatedOpath => {
                 opath::resolve(root, path, self.flags, no_follow_trailing)
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn resolve_partial<P: AsRef<Path>>(
+        &self,
+        root: &File,
+        path: P,
+        no_follow_trailing: bool,
+    ) -> Result<PartialLookup<Handle>, Error> {
+        match self.backend {
+            ResolverBackend::KernelOpenat2 => {
+                openat2::resolve_partial(root, path.as_ref(), self.flags, no_follow_trailing)
+            }
+            ResolverBackend::EmulatedOpath => {
+                opath::resolve_partial(root, path.as_ref(), self.flags, no_follow_trailing)
+                    // Rc<File> -> Handle
+                    .map(Into::into)
             }
         }
     }

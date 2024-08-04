@@ -28,7 +28,10 @@
 //  * I figure out a nice way to implement GlobalBacktrace...
 
 #[doc(inline)]
-pub use crate::syscalls::{Error as SyscallError, FrozenFd};
+pub use crate::{
+    resolvers::opath::SymlinkStackError,
+    syscalls::{Error as SyscallError, FrozenFd},
+};
 
 use std::{backtrace::Backtrace, error::Error as StdError, io::Error as IOError};
 
@@ -86,6 +89,17 @@ pub enum Error {
     SafetyViolation {
         /// Description of safety requirement which was violated.
         description: String,
+        /// Backtrace captured at time of error.
+        backtrace: Option<Backtrace>,
+    },
+
+    /// There was a broken symlink stack during iteration.
+    #[snafu(display("broken symlink stack during iteration: {description}"))]
+    BadSymlinkStackError {
+        /// Description of state check which was violated.
+        description: String,
+        /// Underlying error.
+        source: SymlinkStackError,
         /// Backtrace captured at time of error.
         backtrace: Option<Backtrace>,
     },
@@ -148,6 +162,8 @@ pub(crate) enum ErrorKind {
     NotSupported,
     InvalidArgument,
     SafetyViolation,
+    BadSymlinkStack,
+    // TODO: We might want to use Option<std::io::ErrorKind>?
     OsError(Option<i32>),
 }
 
@@ -158,6 +174,7 @@ impl Error {
             Self::NotSupported { .. } => ErrorKind::NotSupported,
             Self::InvalidArgument { .. } => ErrorKind::InvalidArgument,
             Self::SafetyViolation { .. } => ErrorKind::SafetyViolation,
+            Self::BadSymlinkStackError { .. } => ErrorKind::BadSymlinkStack,
             Self::OsError { source, .. } => ErrorKind::OsError(source.raw_os_error()),
             Self::RawOsError { source, .. } => {
                 ErrorKind::OsError(source.root_cause().raw_os_error())

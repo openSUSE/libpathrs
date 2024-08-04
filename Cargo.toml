@@ -48,6 +48,7 @@ panic = "abort"
 
 [dependencies]
 bitflags = "^2"
+itertools = "^0.13"
 lazy_static = "^1"
 libc = "^0.2"
 memchr = "^2"
