@@ -234,124 +234,133 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         };
 
         // Get our next element.
-        let next = syscalls::openat(
+        match syscalls::openat(
             current.as_raw_fd(),
             &part,
             libc::O_PATH | libc::O_NOFOLLOW,
             0,
-        )
-        .context(error::RawOsSnafu {
-            operation: "open next component of resolution",
-        })?;
+        ) {
+            Err(err) => {
+                // TODO: Handle partial lookups.
+                return Err(err).context(error::RawOsSnafu {
+                    operation: "open next component of resolution",
+                });
+            }
+            Ok(next) => {
+                // Make sure that the path is what we expect. If not, there was
+                // a racing rename and we should bail out here -- otherwise we
+                // might be tricked into revealing information outside the
+                // rootfs through error or timing-related attacks.
+                //
+                // The safety argument for only needing to check ".." is
+                // identical to the kernel implementation (namely, walking down
+                // is safe by-definition). However, unlike the in-kernel version
+                // we don't have the luxury of only doing this check when there
+                // was a racing rename -- we have to do it every time.
+                if part.as_bytes() == b".." {
+                    check_current(&next, &root, &expected_path)
+                        .wrap("check next '..' component didn't escape")?;
+                }
 
-        // Make sure that the path is what we expect. If not, there was a racing
-        // rename and we should bail out here -- otherwise we might be tricked
-        // into revealing information outside the rootfs through error or
-        // timing-related attacks.
-        //
-        // The safety argument for only needing to check ".." is identical to
-        // the kernel implementation (namely, walking down is safe
-        // by-definition). However, unlike the in-kernel version we don't have
-        // the luxury of only doing this check when there was a racing rename --
-        // we have to do it every time.
-        if part.as_bytes() == b".." {
-            check_current(&next, &root, &expected_path)
-                .wrap("check next '..' component didn't escape")?;
-        }
+                // Is the next dirfd a symlink or an ordinary path? If we're an
+                // ordinary dirent, we just update current and move on to the
+                // next component. Nothing special here.
+                if !next
+                    // NOTE: File::metadata definitely does an fstat(2) here.
+                    .metadata()
+                    .context(error::OsSnafu {
+                        operation: "fstat of next component",
+                    })?
+                    .file_type()
+                    .is_symlink()
+                {
+                    current = next.into();
+                    continue;
+                } else {
+                    // If we hit the last component and we were told to not follow
+                    // the trailing symlink, just return the link we have.
+                    // TODO: Is this behaviour correct for "foo/" cases?
+                    if remaining_components.is_empty() && no_follow_trailing {
+                        current = next.into();
+                        break;
+                    }
 
-        // Is the next dirfd a symlink or an ordinary path? If we're an ordinary
-        // dirent, we just update current and move on to the next component.
-        // Nothing special here.
-        if !next
-            // NOTE: File::metadata definitely does an fstat(2) here.
-            .metadata()
-            .context(error::OsSnafu {
-                operation: "fstat of next component",
-            })?
-            .file_type()
-            .is_symlink()
-        {
-            current = next.into();
-            continue;
-        }
+                    // Don't continue walking if user asked for no symlinks.
+                    if flags.contains(ResolverFlags::NO_SYMLINKS) {
+                        return Err(IOError::from_raw_os_error(libc::ELOOP))
+                            .context(error::OsSnafu {
+                                operation: "emulated symlink resolution",
+                            })
+                            .with_wrap(|| {
+                                format!(
+                                "component {:?} is a symlink but symlink resolution is disabled",
+                                part
+                            )
+                            })?;
+                    }
 
-        // If we hit the last component and we were told to not follow the
-        // trailing symlink, just return the link we have.
-        // TODO: Is this behaviour correct for "foo/" cases?
-        if remaining_components.is_empty() && no_follow_trailing {
-            current = next.into();
-            break;
-        }
+                    // We need a limit on the number of symlinks we traverse to
+                    // avoid hitting filesystem loops and DoSing.
+                    symlink_traversals += 1;
+                    if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
+                        return Err(IOError::from_raw_os_error(libc::ELOOP)).context(
+                            error::OsSnafu {
+                                operation: "emulated symlink resolution",
+                            },
+                        )?;
+                    }
 
-        // Don't continue walking if user asked for no symlinks.
-        if flags.contains(ResolverFlags::NO_SYMLINKS) {
-            return Err(IOError::from_raw_os_error(libc::ELOOP))
-                .context(error::OsSnafu {
-                    operation: "emulated symlink resolution",
-                })
-                .with_wrap(|| {
-                    format!(
-                        "component {:?} is a symlink but symlink resolution is disabled",
-                        part
-                    )
-                })?;
-        }
+                    let link_target =
+                        syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
+                            operation: "readlink next symlink component",
+                        })?;
 
-        // We need a limit on the number of symlinks we traverse to
-        // avoid hitting filesystem loops and DoSing.
-        symlink_traversals += 1;
-        if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
-            return Err(IOError::from_raw_os_error(libc::ELOOP)).context(error::OsSnafu {
-                operation: "emulated symlink resolution",
-            })?;
-        }
+                    // Check if it's a good idea to walk this symlink. If we are on
+                    // a filesystem that supports magic-links and we've hit an
+                    // absolute symlink, it is incredibly likely that this component
+                    // is a magic-link and it makes no sense to try to resolve it in
+                    // userspace.
+                    //
+                    // NOTE: There are some pseudo-magic-links like /proc/self
+                    // (which dynamically generates the symlink contents but doesn't
+                    // use nd_jump_link). In the case of procfs, these are always
+                    // relative, and they are reasonable for us to walk.
+                    //
+                    // In procfs, all magic-links use d_path() to generate
+                    // readlink() and thus are all absolute paths. (Unfortunately,
+                    // apparmorfs uses nd_jump_link to make
+                    // /sys/kernel/security/apparmor/policy dynamic using actual
+                    // nd_jump_link() and their readlink give us a dummy relative
+                    // path like "apparmorfs:[123]". But in that case we will just
+                    // get an error.)
+                    if link_target.is_absolute()
+                        && next
+                            .is_magiclink_filesystem()
+                            .wrap("check if next is on a dangerous filesystem")?
+                    {
+                        return Err(IOError::from_raw_os_error(libc::ELOOP))
+                            .context(error::OsSnafu {
+                                operation: "emulated RESOLVE_NO_MAGICLINKS",
+                            })
+                            .wrap("walked into a potential magic-link")?;
+                    }
 
-        let link_target =
-            syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
-                operation: "readlink next symlink component",
-            })?;
+                    // Remove the link component from our expectex path.
+                    expected_path.pop();
 
-        // Check if it's a good idea to walk this symlink. If we are on a
-        // filesystem that supports magic-links and we've hit an absolute
-        // symlink, it is incredibly likely that this component is a magic-link
-        // and it makes no sense to try to resolve it in userspace.
-        //
-        // NOTE: There are some pseudo-magic-links like /proc/self (which
-        // dynamically generates the symlink contents but doesn't use
-        // nd_jump_link). In the case of procfs, these are always relative, and
-        // they are reasonable for us to walk.
-        //
-        // In procfs, all magic-links use d_path() to generate readlink() and
-        // thus are all absolute paths. (Unfortunately, apparmorfs uses
-        // nd_jump_link to make /sys/kernel/security/apparmor/policy dynamic
-        // using actual nd_jump_link() and their readlink give us a dummy
-        // relative path like "apparmorfs:[123]". But in that case we will just
-        // get an error.)
-        if link_target.is_absolute()
-            && next
-                .is_magiclink_filesystem()
-                .wrap("check if next is on a dangerous filesystem")?
-        {
-            return Err(IOError::from_raw_os_error(libc::ELOOP))
-                .context(error::OsSnafu {
-                    operation: "emulated RESOLVE_NO_MAGICLINKS",
-                })
-                .wrap("walked into a potential magic-link")?;
-        }
+                    // Add contents of the symlink to the set of components we are
+                    // looping over.
+                    link_target
+                        .raw_components()
+                        .prepend(&mut remaining_components);
 
-        // Remove the link component from our expectex path.
-        expected_path.pop();
-
-        // Add contents of the symlink to the set of components we are looping
-        // over.
-        link_target
-            .raw_components()
-            .prepend(&mut remaining_components);
-
-        // Absolute symlinks reset our current state back to /.
-        if link_target.is_absolute() {
-            current = RcFile::from_rc(&root);
-            expected_path = PathBuf::from("/");
+                    // Absolute symlinks reset our current state back to /.
+                    if link_target.is_absolute() {
+                        current = RcFile::from_rc(&root);
+                        expected_path = PathBuf::from("/");
+                    }
+                }
+            }
         }
     }
 
