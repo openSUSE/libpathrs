@@ -41,7 +41,7 @@ use crate::{
     procfs::PROCFS_HANDLE,
     resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls,
-    utils::{RawComponentsIter, RawFdExt},
+    utils::{PathIterExt, RawFdExt},
     Handle,
 };
 
