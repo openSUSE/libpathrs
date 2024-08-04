@@ -36,17 +36,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// MSRV(1.70): Use OnceLock.
+use once_cell::sync::Lazy;
+
+/// A `procfs` handle to which is used globally by libpathrs.
 // MSRV(1.80): Use LazyLock.
-lazy_static! {
-    /// A lazy-allocated `procfs` handle which is used globally by libpathrs.
-    ///
-    /// As creating `procfs` handles can be somewhat expensive, library users
-    /// are recommended to make use of this handle for `procfs` operations if
-    /// possible.
-    pub static ref GLOBAL_PROCFS_HANDLE: ProcfsHandle =
-        ProcfsHandle::new().expect("should be able to get some /proc handle");
-}
+pub(crate) static GLOBAL_PROCFS_HANDLE: Lazy<ProcfsHandle> =
+    Lazy::new(|| ProcfsHandle::new().expect("should be able to get some /proc handle"));
 
 /// Indicate what base directory should be used when doing `/proc/...`
 /// operations with a [`ProcfsHandle`].

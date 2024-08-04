@@ -33,6 +33,8 @@ use std::{
     rc::Rc,
 };
 
+use once_cell::sync::Lazy;
+
 /// `O_PATH`-based userspace resolver.
 pub(crate) mod opath;
 /// `openat2(2)`-based in-kernel resolver.
@@ -63,15 +65,14 @@ pub(crate) enum ResolverBackend {
     //       hyper-concerned users.
 }
 
-// MSRV(1.70): Use OnceLock.
 // MSRV(1.80): Use LazyLock.
-lazy_static! {
-    static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *syscalls::OPENAT2_IS_SUPPORTED {
+static DEFAULT_RESOLVER_TYPE: Lazy<ResolverBackend> = Lazy::new(|| {
+    if *syscalls::OPENAT2_IS_SUPPORTED {
         ResolverBackend::KernelOpenat2
     } else {
         ResolverBackend::EmulatedOpath
-    };
-}
+    }
+});
 
 impl Default for ResolverBackend {
     fn default() -> Self {
