@@ -66,9 +66,9 @@ pub(crate) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> 
     let ret = match ty {
         MountType::Tmpfs => unsafe {
             libc::mount(
-                CString::new("")?.as_ptr(),
+                c"".as_ptr(),
                 dst_path.as_ptr(),
-                CString::new("tmpfs")?.as_ptr(),
+                c"tmpfs".as_ptr(),
                 0,
                 ptr::null(),
             )

@@ -27,7 +27,6 @@ use crate::{
 };
 
 use std::{
-    convert::TryFrom,
     fs::File,
     os::fd::AsRawFd,
     os::unix::fs::MetadataExt,

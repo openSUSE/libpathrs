@@ -20,7 +20,6 @@ use crate::error::{self, Error};
 
 use std::{
     cmp,
-    convert::TryInto,
     ffi::{CStr, CString, OsStr},
     io::Error as IOError,
     os::unix::ffi::OsStrExt,
