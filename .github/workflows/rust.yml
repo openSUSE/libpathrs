@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --workspace --all-features
+      - run: cargo doc --document-private-items --workspace --all-features
       - name: upload docs
         uses: actions/upload-artifact@v4
         with:

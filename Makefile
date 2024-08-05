@@ -76,6 +76,10 @@ test: test-rust
 	$(CARGO_NIGHTLY) llvm-cov report
 	$(CARGO_NIGHTLY) llvm-cov report --open
 
+.PHONY: docs
+docs:
+	$(CARGO) doc --document-private-items --open
+
 .PHONY: install
 install: release
 	@echo "If you want to configure the install paths, use ./install.sh directly."

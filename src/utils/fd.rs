@@ -88,7 +88,7 @@ fn proc_subpath(fd: RawFd) -> Result<String, Error> {
 /// introduction of apparmorfs][kcommit-a481f4d917835].
 ///
 /// [kcommit-b5fb63c18315]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=b5fb63c18315c5510c1d0636179c057e0c761c77
-/// [kcommit-a481f4d91783]; https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a481f4d917835cad86701fc0d1e620c74bb5cd5f
+/// [kcommit-a481f4d91783]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a481f4d917835cad86701fc0d1e620c74bb5cd5f
 // TODO: Remove the explicit size once generic_arg_infer is stable.
 //       <https://github.com/rust-lang/rust/issues/85077>
 const DANGEROUS_FILESYSTEMS: [i64; 2] = [
