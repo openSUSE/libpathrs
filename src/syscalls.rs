@@ -36,15 +36,11 @@ use std::{
     },
     path::{Path, PathBuf},
     ptr,
+    sync::LazyLock,
 };
 
 use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
 use snafu::ResultExt;
-
-lazy_static! {
-    pub(crate) static ref OPENAT2_IS_SUPPORTED: bool =
-        openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
-}
 
 /// Representation of a file descriptor and its associated path at a given point
 /// in time.
@@ -639,21 +635,19 @@ pub(crate) fn renameat<P1: AsRef<Path>, P2: AsRef<Path>>(
     }
 }
 
-lazy_static! {
-    pub(crate) static ref RENAME_FLAGS_SUPPORTED: bool = {
-        match renameat2(
-            libc::AT_FDCWD,
-            ".",
-            libc::AT_FDCWD,
-            ".",
-            libc::RENAME_EXCHANGE,
-        ) {
-            Ok(_) => true,
-            // We expect EBUSY, but just to be safe we only check for ENOSYS.
-            Err(err) => err.root_cause().raw_os_error() != Some(libc::ENOSYS),
-        }
-    };
-}
+pub(crate) static RENAME_FLAGS_SUPPORTED: LazyLock<bool> = LazyLock::new(|| {
+    match renameat2(
+        libc::AT_FDCWD,
+        ".",
+        libc::AT_FDCWD,
+        ".",
+        libc::RENAME_EXCHANGE,
+    ) {
+        Ok(_) => true,
+        // We expect EBUSY, but just to be safe we only check for ENOSYS.
+        Err(err) => err.root_cause().raw_os_error() != Some(libc::ENOSYS),
+    }
+});
 
 /// Wrapper for `renameat2(2)`.
 ///
@@ -780,6 +774,9 @@ pub(crate) fn statx<P: AsRef<Path>>(
         })
     }
 }
+
+pub(crate) static OPENAT2_IS_SUPPORTED: LazyLock<bool> =
+    LazyLock::new(|| openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok());
 
 /// Arguments for how `openat2` should open the target path.
 // TODO: Maybe switch to libc::open_how?
