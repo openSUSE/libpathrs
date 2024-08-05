@@ -54,7 +54,7 @@ test-rust-doctest:
 
 .PHONY: test-rust-unpriv
 test-rust-unpriv:
-	$(CARGO_NIGHTLY) llvm-cov --no-report --branch nextest
+	$(CARGO_NIGHTLY) llvm-cov --no-report --branch nextest --no-fail-fast
 
 .PHONY: test-rust-root
 test-rust-root:
@@ -64,7 +64,7 @@ test-rust-root:
 #       support cfg(feature=...) for target runner configs.
 #       See <https://github.com/rust-lang/cargo/issues/14306>.
 	CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -E' \
-		$(CARGO_NIGHTLY) llvm-cov --no-report --branch --features _test_as_root nextest
+		$(CARGO_NIGHTLY) llvm-cov --no-report --branch --features _test_as_root nextest --no-fail-fast
 
 .PHONY: test-rust
 test-rust:
