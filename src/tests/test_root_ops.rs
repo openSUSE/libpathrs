@@ -147,6 +147,14 @@ macro_rules! root_op_tests {
         }
     };
 
+    (@impl mkdir_all $test_name:ident ($path:expr, $mode:expr) => $expected_result:expr) => {
+        root_op_tests! {
+            fn $test_name(root) {
+                utils::check_root_mkdir_all(&root, $path, Permissions::from_mode($mode), $expected_result)
+            }
+        }
+    };
+
     // root_tests!{
     //      ...
     // }
@@ -226,14 +234,63 @@ root_op_tests! {
     whiteout_plain: rename("a", "aa", RenameFlags::RENAME_WHITEOUT) => Ok(());
     exchange_plain: rename("a", "e", RenameFlags::RENAME_EXCHANGE) => Ok(());
     exchange_enoent: rename("a", "aa", RenameFlags::RENAME_EXCHANGE) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+
+    invalid_mode: mkdir_all("foo", libc::S_IFDIR | 0o777) => Err(ErrorKind::InvalidArgument);
+    existing: mkdir_all("a", 0o711) => Ok(());
+    basic: mkdir_all("a/b/c/d/e/f/g/h/i/j", 0o711) => Ok(());
+    dotdot_in_nonexisting: mkdir_all("a/b/c/d/e/f/g/h/i/j/k/../lmnop", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    dotdot_in_existing: mkdir_all("b/c/../c/./d/e/f/g/h", 0o711) => Ok(());
+    dotdot_after_symlink: mkdir_all("e/../dd/ee/ff", 0o711) => Ok(());
+    // Check that trying to create under a file fails.
+    nondir_trailing: mkdir_all("b/c/file", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    nondir_dotdot: mkdir_all("b/c/file/../d", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    nondir_subdir: mkdir_all("b/c/file/subdir", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    nondir_symlink_trailing: mkdir_all("b-file", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    nondir_symlink_dotdot: mkdir_all("b-file/../d", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    nondir_symlink_subdir: mkdir_all("b-file/subdir", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    // Dangling symlinks are not followed.
+    dangling1_trailing: mkdir_all("a-fake1", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling1_basic: mkdir_all("a-fake1/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling1_dotdot: mkdir_all("a-fake1/../bar/baz", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    dangling2_trailing: mkdir_all("a-fake2", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling2_basic: mkdir_all("a-fake2/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling2_dotdot: mkdir_all("a-fake2/../bar/baz", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    dangling3_trailing: mkdir_all("a-fake3", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling3_basic: mkdir_all("a-fake3/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling3_dotdot: mkdir_all("a-fake3/../bar/baz", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    // Non-lexical symlinks should work.
+    nonlexical_basic: mkdir_all("target/foo", 0o711) => Ok(());
+    nonlexical_level1_abs: mkdir_all("link1/target_abs/foo", 0o711) => Ok(());
+    nonlexical_level1_rel: mkdir_all("link1/target_rel/foo", 0o711) => Ok(());
+    nonlexical_level2_abs_abs: mkdir_all("link2/link1_abs/target_abs/foo", 0o711) => Ok(());
+    nonlexical_level2_abs_rel: mkdir_all("link2/link1_abs/target_rel/foo", 0o711) => Ok(());
+    nonlexical_level2_abs_open: mkdir_all("link2/link1_abs/../target/foo", 0o711) => Ok(());
+    nonlexical_level2_rel_abs: mkdir_all("link2/link1_rel/target_abs/foo", 0o711) => Ok(());
+    nonlexical_level2_rel_rel: mkdir_all("link2/link1_rel/target_rel/foo", 0o711) => Ok(());
+    nonlexical_level2_rel_open: mkdir_all("link2/link1_rel/../target/foo", 0o711) => Ok(());
+    nonlexical_level3_abs: mkdir_all("link3/target_abs/foo", 0o711) => Ok(());
+    nonlexical_level3_rel: mkdir_all("link3/target_rel/foo", 0o711) => Ok(());
+    // But really tricky dangling symlinks should fail.
+    dangling_tricky1_trailing: mkdir_all("link3/deep_dangling1", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling_tricky1_basic: mkdir_all("link3/deep_dangling1/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling_tricky1_dotdot: mkdir_all("link3/deep_dangling1/../bar", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    dangling_tricky2_trailing: mkdir_all("link3/deep_dangling2", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling_tricky2_basic: mkdir_all("link3/deep_dangling2/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling_tricky2_dotdot: mkdir_all("link3/deep_dangling2/../bar", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    // And trying to mkdir inside a loop should fail.
+    loop_trailing: mkdir_all("loop/link", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+    loop_basic: mkdir_all("loop/link/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+    loop_dotdot: mkdir_all("loop/link/../foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
 }
 
 mod utils {
     use crate::{
         error::{Error as PathrsError, ErrorExt, ErrorKind},
         flags::{OpenFlags, RenameFlags},
+        procfs::PROCFS_HANDLE,
+        resolvers::PartialLookup,
         syscalls,
-        utils::RawFdExt,
+        utils::{self, PathIterExt, RawFdExt},
         InodeType, Root,
     };
 
@@ -241,11 +298,12 @@ mod utils {
         fs::Permissions,
         os::fd::AsRawFd,
         os::unix::fs::{MetadataExt, PermissionsExt},
-        path::Path,
+        path::{Path, PathBuf},
     };
 
     use anyhow::Error;
     use libc::mode_t;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     fn root_roundtrip(root: &Root) -> Result<Root, Error> {
         let root_clone = root.try_clone()?;
@@ -517,6 +575,88 @@ mod utils {
                 "expected real path of handle to not change after failed rename"
             );
         }
+        Ok(())
+    }
+
+    pub(super) fn check_root_mkdir_all<P: AsRef<Path>>(
+        root: &Root,
+        unsafe_path: P,
+        perm: Permissions,
+        expected_result: Result<(), ErrorKind>,
+    ) -> Result<(), Error> {
+        let unsafe_path = unsafe_path.as_ref();
+
+        // Before trying to create the directory tree, figure out what
+        // components don't exist yet so we can check them later.
+        let before_partial_lookup =
+            root.resolver
+                .resolve_partial(root.as_file(), unsafe_path, false)?;
+
+        let expected_mode = match expected_result {
+            Ok(_) => Some(libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&PROCFS_HANDLE))?)),
+            Err(_) => None,
+        };
+
+        let res = root
+            .mkdir_all(unsafe_path, &perm)
+            .with_wrap(|| format!("mkdir_all {unsafe_path:?}"));
+        assert_eq!(
+            res.as_ref().err().map(PathrsError::kind),
+            expected_result.err(),
+            "unexpected result {:?}",
+            res.map_err(|err| err.to_string())
+        );
+
+        if let PartialLookup::Partial {
+            handle,
+            remaining,
+            last_error: _,
+        } = before_partial_lookup
+        {
+            let mut subpaths = remaining
+                .raw_components()
+                .filter(|part| !part.is_empty())
+                .fold(vec![PathBuf::from(".")], |mut subpaths, part| {
+                    subpaths.push(
+                        subpaths
+                            .iter()
+                            .last()
+                            .expect("must have at least one entry")
+                            .join(part),
+                    );
+                    subpaths
+                })
+                .into_iter();
+
+            // Skip the first "." component.
+            let _ = subpaths.next();
+
+            // Verify that the remaining paths match the mode we expect (either
+            // they don't exist or it matches the mode we requested).
+            for subpath in subpaths {
+                let got_mode = syscalls::fstatat(handle.as_file().as_raw_fd(), &subpath)
+                    .map(|st| st.st_mode)
+                    .ok();
+                match expected_mode {
+                    // We expect there to be a directory with the exact mode.
+                    Some(mode) => {
+                        assert_eq!(
+                            got_mode, Some(mode),
+                            "unexpected file mode for newly-created directory {subpath:?} for mkdir_all({unsafe_path:?})"
+                        );
+                    }
+                    // Make sure there isn't directory (even errors are fine!).
+                    None => {
+                        assert_ne!(
+                            got_mode,
+                            Some(libc::S_IFDIR),
+                            "unexpected directory {subpath:?} for mkdir_all({unsafe_path:?}) that failed"
+                        );
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
