@@ -16,359 +16,321 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{fs::File, path::Path};
+use std::path::Path;
 
 use crate::{
-    flags::ResolverFlags,
-    resolvers::{opath, openat2},
-    syscalls,
-    tests::common as tests_common,
-    Handle, ResolverBackend, Root,
+    error::ErrorKind, flags::ResolverFlags, tests::common as tests_common, ResolverBackend, Root,
 };
-use utils::ExpectedResult;
 
 use anyhow::Error;
 
-// TODO: See if we can adjust the logic from test_root_ops or test_procs to make
-//       this macro soup a little nicer.
-
 macro_rules! resolve_tests {
     // resolve_tests! {
-    //     abc("foo") => ExpectedResult::Err(..);
-    //     xyz("baz") => ExpectedResult::Ok{..};
+    //      [create_root_path] {
+    //          test_ok: resolve(...) => Ok(("path", libc::S_IF...))
+    //          test_err: resolve(...) => Err(ErrorKind::...)
+    //          test_ok: resolve_partial(...) => Ok(("path", Some("remaining", ErrorKind::...)), libc::S_IF...))
+    //          test_err: resolve_partial(...) => Err(ErrorKind::...)
+    //      }
     // }
-    ($(let $root_dir_var:ident = $root_dir:expr => @reopen_tests:$reopen_tests:ident { $($test_name:ident ( $unsafe_path:expr, $rflags:expr, $no_follow_trailing:expr ) => $expected:expr);+ $(;)? });* $(;)?) => {
+    ([$root_dir:expr] fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
         paste::paste! {
-            $( $(
-                #[test]
-                fn [<root_default_ $test_name>]() -> Result<(), Error> {
-                    let $root_dir_var = $root_dir;
-                    let mut root = Root::open(&$root_dir_var)?;
-                    root.resolver.flags = $rflags;
-                    let expected = $expected;
-                    let reopen_tests: bool = $reopen_tests;
-                    utils::check_resolve_in_root(
-                        &root,
-                        $unsafe_path,
-                        $no_follow_trailing,
-                        &expected,
-                        reopen_tests,
-                    )?;
+            #[test]
+            fn [<$test_name _default>]() -> Result<(), Error> {
+                let root_dir = $root_dir;
+                let mut $root_var = Root::open(&root_dir)?;
 
-                    // Make sure $root_dir_var is not dropped earlier.
-                    let _root_dir_var = $root_dir_var;
+                { $body }
 
-                    Ok(())
-                }
+                // Make sure root_dir is not dropped earlier.
+                let _root_dir = root_dir;
+                Ok(())
+            }
 
-                #[test]
-                fn [<root_opath_ $test_name>]() -> Result<(), Error> {
-                    let $root_dir_var = $root_dir;
-                    let mut root = Root::open(&$root_dir_var)?;
-                    root.resolver.flags = $rflags;
-                    root.resolver.backend = ResolverBackend::EmulatedOpath;
+            #[test]
+            fn [<$test_name _openat2>]() -> Result<(), Error> {
+                let root_dir = $root_dir;
+                let mut $root_var = Root::open(&root_dir)?;
+                $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
 
-                    let expected = $expected;
-                    let reopen_tests: bool = $reopen_tests;
-                    utils::check_resolve_in_root(
-                        &root,
-                        $unsafe_path,
-                        $no_follow_trailing,
-                        &expected,
-                        reopen_tests,
-                    )?;
+                { $body }
 
-                    // Make sure $root_dir_var is not dropped earlier.
-                    let _root_dir_var = $root_dir_var;
+                // Make sure root_dir is not dropped earlier.
+                let _root_dir = root_dir;
+                Ok(())
+            }
 
-                    Ok(())
-                }
+            #[test]
+            fn [<$test_name _opath>]() -> Result<(), Error> {
+                let root_dir = $root_dir;
+                let mut $root_var = Root::open(&root_dir)?;
+                $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
 
-                #[test]
-                fn [<root_openat2_ $test_name>]() -> Result<(), Error> {
-                    let $root_dir_var = $root_dir;
-                    let mut root = Root::open(&$root_dir_var)?;
-                    root.resolver.flags = $rflags;
-                    root.resolver.backend = ResolverBackend::KernelOpenat2;
+                { $body }
 
-                    if !root.resolver.backend.supported() {
-                        // skip test
-                        return Ok(());
-                    }
-
-                    let expected = $expected;
-                    let reopen_tests: bool = $reopen_tests;
-                    utils::check_resolve_in_root(
-                        &root,
-                        $unsafe_path,
-                        $no_follow_trailing,
-                        &expected,
-                        reopen_tests,
-                    )?;
-
-                    // Make sure $root_dir_var is not dropped earlier.
-                    let _root_dir_var = $root_dir_var;
-
-                    Ok(())
-                }
-
-                #[test]
-                fn [<opath_ $test_name>]() -> Result<(), Error> {
-                    let $root_dir_var = $root_dir;
-                    let root = File::open(&$root_dir_var)?;
-                    let rflags = $rflags;
-
-                    let expected = $expected;
-                    let reopen_tests: bool = $reopen_tests;
-                    utils::check_resolve_fn(
-                        |file, subpath| {
-                            opath::resolve(file, subpath, rflags, $no_follow_trailing)
-                                .map(Handle::into_file)
-                        },
-                        &root,
-                        $unsafe_path,
-                        &expected,
-                        reopen_tests,
-                    )?;
-
-                    // Make sure $root_dir_var is not dropped earlier.
-                    let _root_dir_var = $root_dir_var;
-
-                    Ok(())
-                }
-
-                #[test]
-                fn [<openat2_ $test_name>]() -> Result<(), Error> {
-                    if !*$crate::syscalls::OPENAT2_IS_SUPPORTED {
-                        // skip test
-                        return Ok(());
-                    }
-
-                    let $root_dir_var = $root_dir;
-                    let root = File::open(&$root_dir_var)?;
-                    let rflags = $rflags;
-
-                    let expected = $expected;
-                    let reopen_tests: bool = $reopen_tests;
-                    utils::check_resolve_fn(
-                        |file, subpath| {
-                            openat2::resolve(file, subpath, rflags, $no_follow_trailing)
-                                .map(Handle::into_file)
-                        },
-                        &root,
-                        $unsafe_path,
-                        &expected,
-                        reopen_tests,
-                    )?;
-
-                    // Make sure $root_dir_var is not dropped earlier.
-                    let _root_dir_var = $root_dir_var;
-
-                    Ok(())
-                }
-            )* )*
+                // Make sure root_dir is not dropped earlier.
+                let _root_dir = root_dir;
+                Ok(())
+            }
         }
+    };
+
+    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
+        paste::paste! {
+            resolve_tests! {
+                [$root_dir]
+                fn [<root_ $op_name _ $test_name>](mut root: Root) {
+                    root.resolver.flags = $rflags;
+                    if !root.resolver.backend.supported() {
+                        // Skip if not supported.
+                        return Ok(());
+                    }
+
+                    let expected = $expected;
+                    utils::[<check_root_ $op_name>](
+                        &root,
+                        $path,
+                        $no_follow_trailing,
+                        expected,
+                    )?;
+                } => $expected
+            }
+        }
+    };
+
+    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, rflags: $($rflag:ident)|+) => $expected:expr ) => {
+        resolve_tests! {
+            [$root_dir]
+            @impl $test_name $op_name($path, $(ResolverFlags::$rflag)|*, false) => $expected
+        }
+    };
+
+    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing: $no_follow_trailing:expr) => $expected:expr ) => {
+        resolve_tests! {
+            [$root_dir]
+            @impl $test_name $op_name($path, ResolverFlags::empty(), $no_follow_trailing) => $expected
+        }
+    };
+
+    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
+        resolve_tests! {
+            [$root_dir]
+            @impl $test_name $op_name($path, ResolverFlags::empty(), false) => $expected
+        }
+    };
+
+    ($([$root_dir:expr] { $($test_name:ident : $op_name:ident ($($args:tt)*) => $expected:expr);* $(;)? });* $(;)?) => {
+        $( $(
+            resolve_tests! {
+                [$root_dir]
+                @impl $test_name $op_name ($($args)*) => $expected
+            }
+        )* )*
     }
 }
 
 resolve_tests! {
-    let proc_root_dir = Path::new("/proc") => @reopen_tests:false {
-        proc_pseudo_magiclink("self/status", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
-        proc_pseudo_magiclink_nosym1("self", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
-        proc_pseudo_magiclink_nosym2("self/status", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
-        proc_pseudo_magiclink_nofollow1("self", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "self", file_type: libc::S_IFLNK };
-        proc_pseudo_magiclink_nofollow2("self/status", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: &format!("{}/status", syscalls::getpid()), file_type: libc::S_IFREG };
+    [Path::new("/proc")] {
+        proc_pseudo_magiclink: resolve("self/sched") => Ok(("{{/proc/self}}/sched", libc::S_IFREG));
+        proc_pseudo_magiclink_nosym1: resolve("self", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        proc_pseudo_magiclink_nosym2: resolve("self/sched", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        proc_pseudo_magiclink_nofollow1: resolve("self", no_follow_trailing: true) => Ok(("self", libc::S_IFLNK));
+        proc_pseudo_magiclink_nofollow2: resolve("self/sched", no_follow_trailing: true) => Ok(("{{/proc/self}}/sched", libc::S_IFREG));
 
-        proc_magiclink("self/exe", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
-        proc_magiclink_nofollow("self/exe", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: &format!("{}/exe", syscalls::getpid()), file_type: libc::S_IFLNK };
-        proc_magiclink_component_nofollow("self/root/etc/passwd", ResolverFlags::empty(), true) => ExpectedResult::Err(libc::ELOOP);
+        // Verify forced RESOLVE_NO_MAGICLINKS behaviour.
+        proc_magiclink: resolve("self/exe") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        proc_magiclink_nofollow: resolve("self/exe", no_follow_trailing: true) => Ok(("{{/proc/self}}/exe", libc::S_IFLNK));
+        proc_magiclink_component_nofollow: resolve("self/root/etc/passwd", no_follow_trailing: true) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     };
 
     // Complete lookups.
-    let root_dir = tests_common::create_basic_tree()? => @reopen_tests:true {
-        complete_root1("/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root2("/../../../../../..", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root_link1("root-link1", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root_link2("root-link2", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_root_link3("root-link3", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/", file_type: libc::S_IFDIR };
-        complete_dir1("a", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/a", file_type: libc::S_IFDIR };
-        complete_dir2("b/c/d/e/f", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };
-        complete_dir3("b///././c////.//d/./././///e////.//./f//././././", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/d/e/f", file_type: libc::S_IFDIR };
-        complete_file("b/c/file", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/file", file_type: libc::S_IFREG };
-        complete_file_link("b-file", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/c/file", file_type: libc::S_IFREG };
-        complete_fifo("b/fifo", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/fifo", file_type: libc::S_IFIFO };
-        complete_sock("b/sock", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/b/sock", file_type: libc::S_IFSOCK };
+    [tests_common::create_basic_tree()?] {
+        complete_root1: resolve("/") => Ok(("/", libc::S_IFDIR));
+        complete_root2: resolve("/../../../../../..") => Ok(("/", libc::S_IFDIR));
+        complete_root_link1: resolve("root-link1") => Ok(("/", libc::S_IFDIR));
+        complete_root_link2: resolve("root-link2") => Ok(("/", libc::S_IFDIR));
+        complete_root_link3: resolve("root-link3") => Ok(("/", libc::S_IFDIR));
+        complete_dir1: resolve("a") => Ok(("/a", libc::S_IFDIR));
+        complete_dir2: resolve("b/c/d/e/f") => Ok(("/b/c/d/e/f", libc::S_IFDIR));
+        complete_dir3: resolve("b///././c////.//d/./././///e////.//./f//././././") => Ok(("/b/c/d/e/f", libc::S_IFDIR));
+        complete_file: resolve("b/c/file") => Ok(("/b/c/file", libc::S_IFREG));
+        complete_file_link: resolve("b-file") => Ok(("/b/c/file", libc::S_IFREG));
+        complete_fifo: resolve("b/fifo") => Ok(("/b/fifo", libc::S_IFIFO));
+        complete_sock: resolve("b/sock") => Ok(("/b/sock", libc::S_IFSOCK));
         // Partial lookups.
-        partial_dir_basic("a/b/c/d/e/f/g/h", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        partial_dir_dotdot("a/foo/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        // Complete lookups of non_lexical symlinks.
-        nonlexical_basic_complete("target", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_basic_complete1("target/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_basic_complete2("target//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_basic_partial("target/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_basic_partial_dotdot("target/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_abs_complete1("link1/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_abs_complete2("link1/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_abs_complete3("link1/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_abs_partial("link1/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_abs_partial_dotdot("link1/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_rel_complete1("link1/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_rel_complete2("link1/target_rel/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_rel_complete3("link1/target_rel//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level1_rel_partial("link1/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level1_rel_partial_dotdot("link1/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_abs_complete1("link2/link1_abs/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_abs_complete2("link2/link1_abs/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_abs_complete3("link2/link1_abs/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_abs_partial("link2/link1_abs/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_abs_partial_dotdot("link2/link1_abs/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_rel_complete1("link2/link1_abs/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_rel_complete2("link2/link1_abs/target_rel/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_rel_complete3("link2/link1_abs/target_rel//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_rel_partial("link2/link1_abs/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_rel_partial_dotdot("link2/link1_abs/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_open_complete1("link2/link1_abs/../target", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_open_complete2("link2/link1_abs/../target/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_open_complete3("link2/link1_abs/../target//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_abs_open_partial("link2/link1_abs/../target/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_abs_open_partial_dotdot("link2/link1_abs/../target/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_abs_complete1("link2/link1_rel/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_abs_complete2("link2/link1_rel/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_abs_complete3("link2/link1_rel/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_abs_partial("link2/link1_rel/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_abs_partial_dotdot("link2/link1_rel/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_rel_complete1("link2/link1_rel/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_rel_complete2("link2/link1_rel/target_rel/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_rel_complete3("link2/link1_rel/target_rel//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_rel_partial("link2/link1_rel/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_rel_partial_dotdot("link2/link1_rel/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_open_complete1("link2/link1_rel/../target", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_open_complete2("link2/link1_rel/../target/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_open_complete3("link2/link1_rel/../target//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level2_rel_open_partial("link2/link1_rel/../target/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level2_rel_open_partial_dotdot("link2/link1_rel/../target/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_abs_complete1("link3/target_abs", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_abs_complete2("link3/target_abs/", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_abs_complete3("link3/target_abs//", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_abs_partial("link3/target_abs/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_abs_partial_dotdot("link3/target_abs/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_rel_complete("link3/target_rel", ResolverFlags::empty(), false) => ExpectedResult::Ok { real_path: "/target", file_type: libc::S_IFDIR };
-        nonlexical_level3_rel_partial("link3/target_rel/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        nonlexical_level3_rel_partial_dotdot("link3/target_rel/../target/foo/bar/../baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        partial_dir_basic: resolve("a/b/c/d/e/f/g/h") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        partial_dir_dotdot: resolve("a/foo/../bar/baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        // Non-lexical symlinks.
+        nonlexical_basic_complete: resolve("target") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_basic_complete1: resolve("target/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_basic_complete2: resolve("target//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_basic_partial: resolve("target/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_basic_partial_dotdot: resolve("target/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level1_abs_complete1: resolve("link1/target_abs") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level1_abs_complete2: resolve("link1/target_abs/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level1_abs_complete3: resolve("link1/target_abs//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level1_abs_partial: resolve("link1/target_abs/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level1_abs_partial_dotdot: resolve("link1/target_abs/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level1_rel_complete1: resolve("link1/target_rel") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level1_rel_complete2: resolve("link1/target_rel/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level1_rel_complete3: resolve("link1/target_rel//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level1_rel_partial: resolve("link1/target_rel/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level1_rel_partial_dotdot: resolve("link1/target_rel/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_abs_abs_complete1: resolve("link2/link1_abs/target_abs") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_abs_complete2: resolve("link2/link1_abs/target_abs/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_abs_complete3: resolve("link2/link1_abs/target_abs//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_abs_partial: resolve("link2/link1_abs/target_abs/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_abs_abs_partial_dotdot: resolve("link2/link1_abs/target_abs/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_abs_rel_complete1: resolve("link2/link1_abs/target_rel") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_rel_complete2: resolve("link2/link1_abs/target_rel/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_rel_complete3: resolve("link2/link1_abs/target_rel//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_rel_partial: resolve("link2/link1_abs/target_rel/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_abs_rel_partial_dotdot: resolve("link2/link1_abs/target_rel/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_abs_open_complete1: resolve("link2/link1_abs/../target") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_open_complete2: resolve("link2/link1_abs/../target/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_open_complete3: resolve("link2/link1_abs/../target//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_abs_open_partial: resolve("link2/link1_abs/../target/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_abs_open_partial_dotdot: resolve("link2/link1_abs/../target/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_rel_abs_complete1: resolve("link2/link1_rel/target_abs") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_abs_complete2: resolve("link2/link1_rel/target_abs/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_abs_complete3: resolve("link2/link1_rel/target_abs//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_abs_partial: resolve("link2/link1_rel/target_abs/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_rel_abs_partial_dotdot: resolve("link2/link1_rel/target_abs/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_rel_rel_complete1: resolve("link2/link1_rel/target_rel") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_rel_complete2: resolve("link2/link1_rel/target_rel/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_rel_complete3: resolve("link2/link1_rel/target_rel//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_rel_partial: resolve("link2/link1_rel/target_rel/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_rel_rel_partial_dotdot: resolve("link2/link1_rel/target_rel/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_rel_open_complete1: resolve("link2/link1_rel/../target") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_open_complete2: resolve("link2/link1_rel/../target/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_open_complete3: resolve("link2/link1_rel/../target//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level2_rel_open_partial: resolve("link2/link1_rel/../target/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level2_rel_open_partial_dotdot: resolve("link2/link1_rel/../target/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level3_abs_complete1: resolve("link3/target_abs") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level3_abs_complete2: resolve("link3/target_abs/") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level3_abs_complete3: resolve("link3/target_abs//") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level3_abs_partial: resolve("link3/target_abs/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level3_abs_partial_dotdot: resolve("link3/target_abs/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level3_rel_complete: resolve("link3/target_rel") => Ok(("/target", libc::S_IFDIR));
+        nonlexical_level3_rel_partial: resolve("link3/target_rel/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        nonlexical_level3_rel_partial_dotdot: resolve("link3/target_rel/../target/foo/bar/../baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
         // Partial lookups due to hitting a non_directory.
-        partial_nondir_slash1("b/c/file/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_slash2("b/c/file//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_dot("b/c/file/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_dotdot1("b/c/file/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_dotdot2("b/c/file/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_slash1("b-file/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_slash2("b-file//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_dot("b-file/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_dotdot1("b-file/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_nondir_symlink_dotdot2("b-file/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_slash1("b/fifo/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_slash2("b/fifo//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_dot("b/fifo/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_dotdot1("b/fifo/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_fifo_dotdot2("b/fifo/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_slash1("b/sock/", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_slash2("b/sock//", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_dot("b/sock/.", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_dotdot1("b/sock/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        partial_sock_dotdot2("b/sock/../foo/bar", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        partial_nondir_slash1: resolve("b/c/file/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_slash2: resolve("b/c/file//") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_dot: resolve("b/c/file/.") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_dotdot1: resolve("b/c/file/..") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_dotdot2: resolve("b/c/file/../foo/bar") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_symlink_slash1: resolve("b-file/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_symlink_slash2: resolve("b-file//") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_symlink_dot: resolve("b-file/.") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_symlink_dotdot1: resolve("b-file/..") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_nondir_symlink_dotdot2: resolve("b-file/../foo/bar") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_fifo_slash1: resolve("b/fifo/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_fifo_slash2: resolve("b/fifo//") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_fifo_dot: resolve("b/fifo/.") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_fifo_dotdot1: resolve("b/fifo/..") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_fifo_dotdot2: resolve("b/fifo/../foo/bar") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_sock_slash1: resolve("b/sock/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_sock_slash2: resolve("b/sock//") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_sock_dot: resolve("b/sock/.") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_sock_dotdot1: resolve("b/sock/..") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        partial_sock_dotdot2: resolve("b/sock/../foo/bar") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        // O_NOFOLLOW doesn't matter for trailing-slash paths.
+        partial_symlink_nofollow_slash1: resolve("link3/target_abs/", no_follow_trailing: true) => Ok(("/target", libc::S_IFDIR));
+        partial_symlink_nofollow_slash2: resolve("link3/target_abs//", no_follow_trailing: true) => Ok(("/target", libc::S_IFDIR));
+        partial_symlink_nofollow_dot: resolve("link3/target_abs/.", no_follow_trailing: true) => Ok(("/target", libc::S_IFDIR));
         // Dangling symlinks are treated as though they are non_existent.
-        dangling1_inroot_trailing("a-fake1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_inroot_partial("a-fake1/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_inroot_partial_dotdot("a-fake1/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_sub_trailing("c/a-fake1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_sub_partial("c/a-fake1/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling1_sub_partial_dotdot("c/a-fake1/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_inroot_trailing("a-fake2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_inroot_partial("a-fake2/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_inroot_partial_dotdot("a-fake2/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_sub_trailing("c/a-fake2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_sub_partial("c/a-fake2/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling2_sub_partial_dotdot("c/a-fake2/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_inroot_trailing("a-fake3", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_inroot_partial("a-fake3/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_inroot_partial_dotdot("a-fake3/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_sub_trailing("c/a-fake3", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_sub_partial("c/a-fake3/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling3_sub_partial_dotdot("c/a-fake3/../bar/baz", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling1_inroot_trailing: resolve("a-fake1") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling1_inroot_partial: resolve("a-fake1/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling1_inroot_partial_dotdot: resolve("a-fake1/../bar/baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling1_sub_trailing: resolve("c/a-fake1") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling1_sub_partial: resolve("c/a-fake1/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling1_sub_partial_dotdot: resolve("c/a-fake1/../bar/baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling2_inroot_trailing: resolve("a-fake2") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling2_inroot_partial: resolve("a-fake2/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling2_inroot_partial_dotdot: resolve("a-fake2/../bar/baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling2_sub_trailing: resolve("c/a-fake2") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling2_sub_partial: resolve("c/a-fake2/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling2_sub_partial_dotdot: resolve("c/a-fake2/../bar/baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling3_inroot_trailing: resolve("a-fake3") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling3_inroot_partial: resolve("a-fake3/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling3_inroot_partial_dotdot: resolve("a-fake3/../bar/baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling3_sub_trailing: resolve("c/a-fake3") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling3_sub_partial: resolve("c/a-fake3/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling3_sub_partial_dotdot: resolve("c/a-fake3/../bar/baz") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
         // Tricky dangling symlinks.
-        dangling_tricky1_trailing("link3/deep_dangling1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky1_partial("link3/deep_dangling1/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky1_partial_dotdot("link3/deep_dangling1/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky2_trailing("link3/deep_dangling2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky2_partial("link3/deep_dangling2/foo", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        dangling_tricky2_partial_dotdot("link3/deep_dangling2/..", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
+        dangling_tricky1_trailing: resolve("link3/deep_dangling1") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling_tricky1_partial: resolve("link3/deep_dangling1/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling_tricky1_partial_dotdot: resolve("link3/deep_dangling1/..") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling_tricky2_trailing: resolve("link3/deep_dangling2") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling_tricky2_partial: resolve("link3/deep_dangling2/foo") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        dangling_tricky2_partial_dotdot: resolve("link3/deep_dangling2/..") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
         // Really deep dangling links.
-        deep_dangling1("dangling/a", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling2("dangling/b/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling3("dangling/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling4("dangling/d/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling5("dangling/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling6("dangling/g", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOENT);
-        deep_dangling_fileasdir1("dangling-file/a", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir2("dangling-file/b/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir3("dangling-file/c", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir4("dangling-file/d/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir5("dangling-file/e", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
-        deep_dangling_fileasdir6("dangling-file/g", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ENOTDIR);
+        deep_dangling1: resolve("dangling/a") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        deep_dangling2: resolve("dangling/b/c") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        deep_dangling3: resolve("dangling/c") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        deep_dangling4: resolve("dangling/d/e") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        deep_dangling5: resolve("dangling/e") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        deep_dangling6: resolve("dangling/g") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+        deep_dangling_fileasdir1: resolve("dangling-file/a") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        deep_dangling_fileasdir2: resolve("dangling-file/b/c") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        deep_dangling_fileasdir3: resolve("dangling-file/c") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        deep_dangling_fileasdir4: resolve("dangling-file/d/e") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        deep_dangling_fileasdir5: resolve("dangling-file/e") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+        deep_dangling_fileasdir6: resolve("dangling-file/g") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
         // Symlink loops.
-        loop1("loop/link", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
-        loop_basic1("loop/basic-loop1", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
-        loop_basic2("loop/basic-loop2", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
-        loop_basic3("loop/basic-loop3", ResolverFlags::empty(), false) => ExpectedResult::Err(libc::ELOOP);
+        loop1: resolve("loop/link") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        loop_basic1: resolve("loop/basic-loop1") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        loop_basic2: resolve("loop/basic-loop2") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        loop_basic3: resolve("loop/basic-loop3") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
         // NO_FOLLOW.
-        symlink_nofollow("link3/target_abs", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "link3/target_abs", file_type: libc::S_IFLNK };
-        symlink_component_nofollow1("e/f", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "b/c/d/e/f", file_type: libc::S_IFDIR };
-        symlink_component_nofollow2("link2/link1_abs/target_rel", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "link1/target_rel", file_type: libc::S_IFLNK };
-        loop_nofollow("loop/link", ResolverFlags::empty(), true) => ExpectedResult::Ok { real_path: "loop/link", file_type: libc::S_IFLNK };
+        symlink_nofollow: resolve("link3/target_abs", no_follow_trailing: true) => Ok(("link3/target_abs", libc::S_IFLNK));
+        symlink_component_nofollow1: resolve("e/f", no_follow_trailing: true) => Ok(("b/c/d/e/f", libc::S_IFDIR));
+        symlink_component_nofollow2: resolve("link2/link1_abs/target_rel", no_follow_trailing: true) => Ok(("link1/target_rel", libc::S_IFLNK));
+        loop_nofollow: resolve("loop/link", no_follow_trailing: true) => Ok(("loop/link", libc::S_IFLNK));
         // RESOLVE_NO_SYMLINKS.
-        dir_nosym("b/c/d/e", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Ok { real_path: "b/c/d/e", file_type: libc::S_IFDIR };
-        symlink_nosym("link3/target_abs", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
-        symlink_component_nosym1("e/f", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
-        symlink_component_nosym2("link2/link1_abs/target_rel", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
-        loop_nosym("loop/link", ResolverFlags::NO_SYMLINKS, false) => ExpectedResult::Err(libc::ELOOP);
+        dir_nosym: resolve("b/c/d/e", rflags: NO_SYMLINKS) => Ok(("b/c/d/e", libc::S_IFDIR));
+        symlink_nosym: resolve("link3/target_abs", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        symlink_component_nosym1: resolve("e/f", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        symlink_component_nosym2: resolve("link2/link1_abs/target_rel", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        loop_nosym: resolve("loop/link", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     }
 }
 
 mod utils {
-    use std::{fs::File, io, os::linux::fs::MetadataExt, path::Path};
+    use std::{os::linux::fs::MetadataExt, path::Path};
 
-    use crate::{error::Error as PathrsError, flags::OpenFlags, utils::RawFdExt, Handle, Root};
+    use crate::{error::ErrorKind, flags::OpenFlags, syscalls, utils::RawFdExt, Handle, Root};
 
     use anyhow::Error;
     use errno::Errno;
+    use pretty_assertions::assert_eq;
 
-    // TODO: Remove when raw_os_error_ty is stabilised.
-    //       <https://github.com/rust-lang/rust/issues/107792>
-    pub(super) type RawOsError = i32;
-
-    fn errno_description(err: RawOsError) -> String {
-        format!("{:?} ({})", err, Errno(err))
+    fn errno_description(err: ErrorKind) -> String {
+        match err {
+            ErrorKind::OsError(Some(errno)) => format!("{err:?} ({})", Errno(errno)),
+            _ => format!("{err:?}"),
+        }
     }
 
-    pub(super) fn check_reopen(
+    fn check_reopen(
         handle: &Handle,
         flags: OpenFlags,
-        expected_error: Option<RawOsError>,
+        expected_error: Option<i32>,
     ) -> Result<(), Error> {
+        let expected_error = expected_error.map(|errno| ErrorKind::OsError(Some(errno)));
         let file = match (handle.reopen(flags), expected_error) {
             (Ok(f), None) => f,
             (Err(e), None) => anyhow::bail!("unexpected error '{}'", e),
-            (Ok(f), Some(expected)) => anyhow::bail!(
+            (Ok(f), Some(want_err)) => anyhow::bail!(
                 "expected to get io::Error {} but instead got file {}",
-                errno_description(expected),
+                errno_description(want_err),
                 f.as_unsafe_path_unchecked()?.display(),
             ),
             (Err(err), Some(want_err)) => {
                 assert_eq!(
-                    err.root_cause()
-                        .downcast_ref::<io::Error>()
-                        .and_then(io::Error::raw_os_error),
-                    Some(want_err),
+                    err.kind(),
+                    want_err,
                     "expected io::Error {}, got '{}'",
                     errno_description(want_err),
                     err,
@@ -398,65 +360,58 @@ mod utils {
         Ok(())
     }
 
-    pub(super) enum ExpectedResult<'a> {
-        Ok {
-            real_path: &'a str,
-            file_type: libc::mode_t,
-        },
-        Err(RawOsError),
-    }
+    pub(super) fn check_root_resolve<P: AsRef<Path>>(
+        root: &Root,
+        unsafe_path: P,
+        no_follow_trailing: bool,
+        expected: Result<(&str, libc::mode_t), ErrorKind>,
+    ) -> Result<(), Error> {
+        let root_dir = root.as_file().as_unsafe_path_unchecked()?;
 
-    fn check_resolve<R, P, Q, F>(
-        lookup: F,
-        root: R,
-        root_dir: P,
-        unsafe_path: Q,
-        expected: &ExpectedResult,
-        reopen_tests: bool,
-    ) -> Result<(), Error>
-    where
-        P: AsRef<Path>,
-        Q: AsRef<Path>,
-        F: FnOnce(R, Q) -> Result<Handle, PathrsError>,
-    {
-        let (handle, expected_path, expected_file_type) =
-            match (lookup(root, unsafe_path), expected) {
-                (
-                    Ok(h),
-                    ExpectedResult::Ok {
-                        real_path,
-                        file_type,
-                    },
-                ) => (h, *real_path, *file_type),
+        let result = if no_follow_trailing {
+            root.resolve_nofollow(unsafe_path)
+        } else {
+            root.resolve(unsafe_path)
+        };
 
-                (Err(e), ExpectedResult::Ok { real_path, .. }) => {
-                    anyhow::bail!("unexpected error '{}', expected file {}", e, real_path)
-                }
-                (Ok(h), ExpectedResult::Err(want_err)) => anyhow::bail!(
-                    "expected to get io::Error {} but instead got file {}",
-                    errno_description(*want_err),
-                    h.as_file().as_unsafe_path_unchecked()?.display(),
-                ),
+        let (handle, expected_path, expected_file_type) = match (result, expected) {
+            (Ok(handle), Ok((expected_path, file_type))) => (
+                handle,
+                expected_path.replace("{{/proc/self}}", &format!("{}", syscalls::getpid())),
+                file_type,
+            ),
 
-                (Err(err), ExpectedResult::Err(want_err)) => {
-                    assert_eq!(
-                        err.root_cause()
-                            .downcast_ref::<io::Error>()
-                            .and_then(io::Error::raw_os_error),
-                        Some(*want_err),
-                        "expected io::Error {}, got '{}'",
-                        errno_description(*want_err),
-                        err,
-                    );
-                    return Ok(());
-                }
-            };
+            (Err(err), Ok((expected_path, _))) => {
+                anyhow::bail!(
+                    "unexpected error '{}', expected file {}",
+                    err,
+                    expected_path
+                )
+            }
+
+            (Ok(handle), Err(want_err)) => anyhow::bail!(
+                "expected to get io::Error {} but instead got file {}",
+                errno_description(want_err),
+                handle.as_file().as_unsafe_path_unchecked()?.display(),
+            ),
+
+            (Err(err), Err(want_err)) => {
+                assert_eq!(
+                    err.kind(),
+                    want_err,
+                    "expected io::Error {}, got '{}'",
+                    errno_description(want_err),
+                    err,
+                );
+                return Ok(());
+            }
+        };
 
         let expected_path = expected_path.trim_start_matches('/');
         let real_handle_path = handle.as_file().as_unsafe_path_unchecked()?;
         assert_eq!(
             real_handle_path,
-            root_dir.as_ref().join(expected_path),
+            root_dir.join(expected_path),
             "handle path mismatch",
         );
 
@@ -464,78 +419,25 @@ mod utils {
         let real_file_type = meta.st_mode() & libc::S_IFMT;
         assert_eq!(real_file_type, expected_file_type, "file type mismatch",);
 
-        if reopen_tests {
-            match real_file_type {
-                libc::S_IFDIR => {
-                    check_reopen(&handle, OpenFlags::O_RDONLY, None)?;
-                    check_reopen(&handle, OpenFlags::O_DIRECTORY, None)?;
-                }
-                libc::S_IFREG => {
-                    check_reopen(&handle, OpenFlags::O_RDWR, None)?;
-                    check_reopen(&handle, OpenFlags::O_DIRECTORY, Some(libc::ENOTDIR))?;
-                }
-                _ => {
-                    check_reopen(&handle, OpenFlags::O_PATH, None)?;
-                    check_reopen(
-                        &handle,
-                        OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
-                        Some(libc::ENOTDIR),
-                    )?;
-                }
+        match real_file_type {
+            libc::S_IFDIR => {
+                check_reopen(&handle, OpenFlags::O_RDONLY, None)?;
+                check_reopen(&handle, OpenFlags::O_DIRECTORY, None)?;
+            }
+            libc::S_IFREG => {
+                check_reopen(&handle, OpenFlags::O_RDWR, None)?;
+                check_reopen(&handle, OpenFlags::O_DIRECTORY, Some(libc::ENOTDIR))?;
+            }
+            _ => {
+                check_reopen(&handle, OpenFlags::O_PATH, None)?;
+                check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
+                    Some(libc::ENOTDIR),
+                )?;
             }
         }
 
         Ok(())
-    }
-
-    pub(super) fn check_resolve_fn<P, F>(
-        lookup: F,
-        root: &File,
-        unsafe_path: P,
-        expected: &ExpectedResult,
-        reopen_tests: bool,
-    ) -> Result<(), Error>
-    where
-        P: AsRef<Path>,
-        F: FnOnce(&File, P) -> Result<File, PathrsError>,
-    {
-        check_resolve(
-            |root: &File, unsafe_path: P| {
-                lookup(root, unsafe_path)
-                    .map(Handle::from_file_unchecked)
-                    .map_err(Into::into)
-            },
-            root,
-            root.as_unsafe_path_unchecked()?,
-            unsafe_path,
-            expected,
-            reopen_tests,
-        )
-    }
-
-    pub(super) fn check_resolve_in_root<P>(
-        root: &Root,
-        unsafe_path: P,
-        no_follow_trailing: bool,
-        expected: &ExpectedResult,
-        reopen_tests: bool,
-    ) -> Result<(), Error>
-    where
-        P: AsRef<Path>,
-    {
-        check_resolve(
-            |root: &Root, unsafe_path: P| {
-                if no_follow_trailing {
-                    root.resolve_nofollow(unsafe_path).map_err(Into::into)
-                } else {
-                    root.resolve(unsafe_path).map_err(Into::into)
-                }
-            },
-            root,
-            root.as_file().as_unsafe_path_unchecked()?,
-            unsafe_path,
-            expected,
-            reopen_tests,
-        )
     }
 }
