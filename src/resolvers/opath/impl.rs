@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -39,7 +39,7 @@ use crate::{
     error::{self, Error, ErrorExt},
     flags::ResolverFlags,
     procfs::PROCFS_HANDLE,
-    resolvers::MAX_SYMLINK_TRAVERSALS,
+    resolvers::{opath::SymlinkStack, PartialLookup, MAX_SYMLINK_TRAVERSALS},
     syscalls,
     utils::{PathIterExt, RawFdExt},
     Handle,
@@ -47,15 +47,16 @@ use crate::{
 
 use std::{
     collections::VecDeque,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs::File,
     io::Error as IOError,
     iter,
-    os::unix::{ffi::OsStrExt, io::AsRawFd},
+    os::{fd::AsRawFd, unix::ffi::OsStrExt},
     path::{Path, PathBuf},
     rc::Rc,
 };
 
+use itertools::Itertools;
 use snafu::ResultExt;
 
 /// Ensure that the expected path within the root matches the current fd.
@@ -123,15 +124,17 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     Ok(())
 }
 
-/// Resolve `path` within `root` through user-space emulation.
-pub(crate) fn resolve<P: AsRef<Path>>(
+/// Common implementation used by `resolve_partial()` and `resolve()`. The main
+/// difference is that if `symlink_stack` is `true`, the returned paths
+// TODO: Make (flags, no_follow_trailing, symlink_stack) a single struct to
+//       avoid possible issues with passing a bool to the wrong argument.
+fn do_resolve<P: AsRef<Path>>(
     root: &File,
     path: P,
     flags: ResolverFlags,
     no_follow_trailing: bool,
-) -> Result<Handle, Error> {
-    let path = path.as_ref();
-
+    mut symlink_stack: Option<&mut SymlinkStack<File>>,
+) -> Result<PartialLookup<Rc<File>>, Error> {
     // What is the final path we expect to get after we do the final open? This
     // allows us to track any attacker moving path components around and we can
     // sanity-check at the very end. This does not include rootpath.
@@ -154,29 +157,37 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         .collect::<VecDeque<_>>();
 
     let mut symlink_traversals = 0;
-    while let Some(part) = remaining_components
-        .pop_front()
-        // If we hit an empty component, we need to treat it as though it is
-        // "." so that trailing "/" and "//" components on a non-directory
-        // correctly return the right error code.
-        .map(|part| if part.is_empty() { ".".into() } else { part })
-    {
-        // Ensure that we only got the components we wanted, and generate a
-        // tentative expected_path.
-        match part.as_bytes() {
-            b"" => unreachable!(),
+    while let Some(part) = remaining_components.pop_front() {
+        // Stash a copy of the real remaining path. We can't just use
+        // ::collect<PathBuf> because we might have "" components, which
+        // std::path::PathBuf don't like.
+        let remaining: PathBuf = Itertools::intersperse(
+            iter::once(&part)
+                .chain(remaining_components.iter())
+                .map(OsString::as_os_str),
+            OsStr::new("/"),
+        )
+        .collect::<OsString>()
+        .into();
+
+        let part = match part.as_bytes() {
+            // If we hit an empty component, we need to treat it as though it is
+            // "." so that trailing "/" and "//" components on a non-directory
+            // correctly return the right error code.
+            b"" => ".".into(),
             // For "." component we don't touch expected_path, but we do try to
             // do the open (to return the correct openat2-compliant error if the
             // current path is a not directory).
-            b"." => {}
+            b"." => part,
             b".." => {
                 // All of expected_path is non-symlinks, so we can treat ".."
-                // lexically. If pop() fails, then we are at the root and we
-                // must ignore this ".." component.
+                // lexically. If pop() fails, then we are at the root.
+                // should .
                 if !expected_path.pop() {
                     current = Rc::clone(&root);
                     continue;
                 }
+                part
             }
             _ => {
                 // This part might be a symlink, but we clean that up later.
@@ -192,6 +203,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                         description: "component of path resolution contains '/'",
                     }
                 );
+
+                part
             }
         };
 
@@ -201,11 +214,15 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             &part,
             libc::O_PATH | libc::O_NOFOLLOW,
             0,
-        ) {
+        )
+        .context(error::RawOsSnafu {
+            operation: "open next component of resolution",
+        }) {
             Err(err) => {
-                // TODO: Handle partial lookups.
-                return Err(err).context(error::RawOsSnafu {
-                    operation: "open next component of resolution",
+                return Ok(PartialLookup::Partial {
+                    handle: current,
+                    remaining,
+                    last_error: err,
                 });
             }
             Ok(next) => {
@@ -236,12 +253,21 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                     .file_type()
                     .is_symlink()
                 {
+                    // We hit a non-symlink component, so clear it from the
+                    // symlink stack.
+                    if let Some(ref mut stack) = symlink_stack {
+                        stack
+                            .pop_part(&part)
+                            .with_context(|_| error::BadSymlinkStackSnafu {
+                                description: format!("walking into component {part:?}"),
+                            })?;
+                    }
+                    // Just keep walking.
                     current = next.into();
                     continue;
                 } else {
                     // If we hit the last component and we were told to not follow
                     // the trailing symlink, just return the link we have.
-                    // TODO: Is this behaviour correct for "foo/" cases?
                     if remaining_components.is_empty() && no_follow_trailing {
                         current = next.into();
                         break;
@@ -249,7 +275,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 
                     // Don't continue walking if user asked for no symlinks.
                     if flags.contains(ResolverFlags::NO_SYMLINKS) {
-                        return Err(IOError::from_raw_os_error(libc::ELOOP))
+                        // XXX: Ugly hack to create an Error for PartialLookup.
+                        let last_error = Err::<(), _>(IOError::from_raw_os_error(libc::ELOOP))
                             .context(error::OsSnafu {
                                 operation: "emulated symlink resolution",
                             })
@@ -258,18 +285,30 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                                 "component {:?} is a symlink but symlink resolution is disabled",
                                 part
                             )
-                            })?;
+                            })
+                            .expect_err("Err(err).err() must always be Some(err)");
+                        return Ok(PartialLookup::Partial {
+                            handle: current,
+                            remaining,
+                            last_error,
+                        });
                     }
 
                     // We need a limit on the number of symlinks we traverse to
                     // avoid hitting filesystem loops and DoSing.
                     symlink_traversals += 1;
                     if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
-                        return Err(IOError::from_raw_os_error(libc::ELOOP)).context(
-                            error::OsSnafu {
+                        // XXX: Ugly hack to create an Error for PartialLookup.
+                        let last_error = Err::<(), _>(IOError::from_raw_os_error(libc::ELOOP))
+                            .context(error::OsSnafu {
                                 operation: "emulated symlink resolution",
-                            },
-                        )?;
+                            })
+                            .expect_err("Err(err).err() must always be Some(err)");
+                        return Ok(PartialLookup::Partial {
+                            handle: current,
+                            remaining,
+                            last_error,
+                        });
                     }
 
                     let link_target =
@@ -307,6 +346,16 @@ pub(crate) fn resolve<P: AsRef<Path>>(
                             .wrap("walked into a potential magic-link")?;
                     }
 
+                    // Swap out the symlink component in the symlink stack with
+                    // a new entry for the link target.
+                    if let Some(ref mut stack) = symlink_stack {
+                        stack
+                            .swap_link(&part, (&current, remaining), link_target.clone())
+                            .with_context(|_| error::BadSymlinkStackSnafu {
+                                description: format!("walking into symlink {part:?}"),
+                            })?;
+                    }
+
                     // Remove the link component from our expectex path.
                     expected_path.pop();
 
@@ -329,14 +378,70 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // Make sure that the path is what we expect...
     check_current(&current, &root, &expected_path).wrap("check final handle didn't escape")?;
 
-    // Drop root in case current is a reference to it.
-    std::mem::drop(root);
-    // We are now sure that there is only a single reference to whatever current
-    // points to. There is nowhere else we could've stashed a reference, and we
-    // only do Rc::clone for root (which we've dropped).
-    let current = Rc::into_inner(current)
-        .expect("current handle in lookup should only have a single Rc reference");
+    // We finished the lookup with no remaining components.
+    Ok(PartialLookup::Complete(current))
+}
 
-    // Everything is Kosher here -- convert to a handle.
-    Ok(Handle::from_file_unchecked(current))
+/// Resolve as many components as possible in `path` within `root` through
+/// user-space emulation.
+pub(crate) fn resolve_partial<P: AsRef<Path>>(
+    root: &File,
+    path: P,
+    flags: ResolverFlags,
+    no_follow_trailing: bool,
+) -> Result<PartialLookup<Rc<File>>, Error> {
+    // For partial lookups, we need to use a SymlinkStack to match openat2.
+    let mut symlink_stack: SymlinkStack<File> = SymlinkStack::new();
+
+    match do_resolve(
+        root,
+        path,
+        flags,
+        no_follow_trailing,
+        Some(&mut symlink_stack),
+    ) {
+        // For complete and error paths, just return what we got.
+        ret @ Ok(PartialLookup::Complete(_)) => ret,
+        err @ Err(_) => err,
+
+        // If the lookup failed part-way through, modify the (handle, remaining)
+        // based on the symlink stack if applicable.
+        Ok(PartialLookup::Partial {
+            handle,
+            remaining,
+            last_error,
+        }) => match symlink_stack.pop_top_symlink() {
+            // We were in the middle of symlink resolution, so return the error
+            // from the context of the top symlink in the resolution, to match
+            // openat2(2).
+            Some((handle, remaining)) => Ok(PartialLookup::Partial {
+                handle,
+                remaining,
+                last_error,
+            }),
+            // Nothing in the symlink stack, return what we got.
+            None => Ok(PartialLookup::Partial {
+                handle,
+                remaining,
+                last_error,
+            }),
+        },
+    }
+}
+
+/// Resolve `path` within `root` through user-space emulation.
+pub(crate) fn resolve<P: AsRef<Path>>(
+    root: &File,
+    path: P,
+    flags: ResolverFlags,
+    no_follow_trailing: bool,
+) -> Result<Handle, Error> {
+    match do_resolve(root, path, flags, no_follow_trailing, None) {
+        Ok(PartialLookup::Complete(handle)) => Ok(Handle::from_file_unchecked(
+            Rc::into_inner(handle)
+                .expect("current handle after lookup should only have a single Rc reference"),
+        )),
+        Ok(PartialLookup::Partial { last_error, .. }) => Err(last_error),
+        Err(err) => Err(err),
+    }
 }
