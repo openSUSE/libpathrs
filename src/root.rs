@@ -22,12 +22,15 @@ use crate::{
     error::{self, Error, ErrorExt},
     flags::{OpenFlags, RenameFlags},
     resolvers::Resolver,
-    syscalls, utils, Handle,
+    syscalls::{self, FrozenFd},
+    utils::{self, PathIterExt},
+    Handle,
 };
 
 use std::{
     fs::{File, Permissions},
-    os::unix::{fs::PermissionsExt, io::AsRawFd},
+    io::Error as IOError,
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd},
     path::{Path, PathBuf},
 };
 
@@ -536,7 +539,83 @@ impl Root {
         )
     }
 
-    // TODO: mkdir_all()
+    pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
+        ensure!(
+            perm.mode() & !0o7777 == 0,
+            error::InvalidArgumentSnafu {
+                name: "perm",
+                description: "mode cannot contain non-0o7777 bits"
+            }
+        );
+
+        let (handle, remaining) = self
+            .resolver
+            .resolve_partial(&self.inner, path.as_ref(), false)
+            .and_then(TryInto::try_into)?;
+
+        // Re-open the handle with O_DIRECTORY to make sure it's a directory we
+        // can use as well as to make sure we return
+        // directoriy
+        let mut current = handle.reopen(OpenFlags::O_DIRECTORY).with_wrap(|| {
+            format!(
+                "cannot create directories in {}",
+                FrozenFd::from(handle.as_file().as_raw_fd())
+            )
+        })?;
+
+        // For the remaining
+        let remaining_parts = remaining
+            .iter()
+            .flat_map(PathIterExt::raw_components)
+            .map(|p| p.to_os_string())
+            // Skip over no-op entries.
+            .filter(|part| !part.is_empty() && part.as_bytes() != b".")
+            .collect::<Vec<_>>();
+
+        // If the path contained ".." components after the end of the "real"
+        // components, we simply error out. We could try to safely resolve ".."
+        // here but that would add a bunch of extra logic for something that
+        // it's not clear even needs to be supported.
+        //
+        // We also can't just do something like filepath.Clean(), because ".."
+        // could erase dangling symlinks and produce a path that doesn't match
+        // what the user asked for.
+        if remaining_parts.iter().any(|part| part.as_bytes() == b"..") {
+            return Err(IOError::from_raw_os_error(libc::ENOENT))
+                .context(error::OsSnafu {
+                    operation: "mkdir_all components",
+                })
+                .with_wrap(|| {
+                    format!("yet-to-be-created path {remaining:?} contains '..' components")
+                })?;
+        }
+
+        // For the remaining components, create a each component one-by-one.
+        for part in remaining_parts {
+            // NOTE: mkdirat(2) does not follow trailing symlinks (even if it is
+            // a dangling symlink with only a trailing component missing), so we
+            // can safely create the final component without worrying about
+            // symlink-exchange attacks.
+            syscalls::mkdirat(current.as_raw_fd(), &part, perm.mode()).context(
+                error::RawOsSnafu {
+                    operation: "create next directory component",
+                },
+            )?;
+
+            let next = self
+                .resolver
+                .resolve(&current, &part, true)
+                .wrap("open newly-created directory")?
+                .reopen(OpenFlags::O_DIRECTORY)
+                .wrap("failed to reopen newly-created directory with O_DIRECTORY")?;
+
+            // TODO: Verify the next handle.
+
+            current = next;
+        }
+
+        Ok(Handle::from_file_unchecked(current))
+    }
 
     // TODO: remove_all()
 
