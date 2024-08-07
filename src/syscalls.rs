@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as pub(crate)lished by the Free
@@ -848,6 +848,16 @@ pub fn getpid() -> libc::pid_t {
 pub fn gettid() -> libc::pid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::gettid() }
+}
+
+pub fn geteuid() -> libc::uid_t {
+    // SAFETY: Obviously safe libc function.
+    unsafe { libc::geteuid() }
+}
+
+pub fn getegid() -> libc::gid_t {
+    // SAFETY: Obviously safe libc function.
+    unsafe { libc::getegid() }
 }
 
 #[cfg(test)]
