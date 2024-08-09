@@ -75,33 +75,15 @@ pub(crate) fn path_strip_trailing_slash(path: &Path) -> (&Path, bool) {
 /// Helper to split a Path into its parent directory and trailing path. The
 /// trailing component is guaranteed to not contain a directory separator.
 pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>), Error> {
-    let path_bytes = path.as_os_str().as_bytes();
-    // Find the last /.
-    let idx = match memchr::memrchr(b'/', path_bytes) {
-        Some(idx) => idx,
-        None => {
-            return Ok((
-                Path::new("."),
-                if !path_bytes.is_empty() {
-                    Some(path)
-                } else {
-                    None
-                },
-            ));
-        }
-    };
-    // Split the path. A trailing / gives a None base.
-    let (dir_bytes, base_bytes) = match path_bytes.split_at(idx) {
-        // TODO: There must be a way to simplify this.
-        (b"", b"/") => (&b"/"[..], None),
-        (dir, b"/") => (dir, None),
-        (b"", base) => (&b"/"[..], Some(&base[1..])),
-        (dir, base) => (dir, Some(&base[1..])),
-    };
+    let (dir, base) = path
+        .partial_ancestors()
+        .next()
+        .expect("partial_ancestors iterator must return at least one entry");
 
     // It's critical we are only touching the final component in the path.
     // If there are any other path components we must bail.
-    if let Some(base_bytes) = base_bytes {
+    if let Some(base) = base {
+        let base_bytes = base.as_os_str().as_bytes();
         ensure!(
             base_bytes != b"",
             error::SafetyViolationSnafu {
@@ -116,10 +98,7 @@ pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>),
         );
     }
 
-    Ok((
-        Path::new(OsStr::from_bytes(dir_bytes)),
-        base_bytes.map(OsStr::from_bytes).map(Path::new),
-    ))
+    Ok((dir, base))
 }
 
 /// RawComponents is like [`std::path::Components`] execpt that no normalisation
@@ -128,6 +107,7 @@ pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>),
 ///
 /// [`std::path::Components`]: https://doc.rust-lang.org/std/path/struct.Components.html
 /// [`std::ffi::OsStr`]: https://doc.rust-lang.org/std/ffi/struct.OsStr.html
+#[derive(Debug)]
 pub(crate) struct RawComponents<'a> {
     inner: Option<&'a OsStr>,
 }
@@ -195,15 +175,101 @@ impl RawComponents<'_> {
     }
 }
 
-pub(crate) trait RawComponentsIter {
-    fn raw_components(&self) -> RawComponents<'_>;
+#[derive(Debug)]
+enum AncestorsIterState {
+    Start,
+    Middle(usize),
+    End,
 }
 
-impl<P: AsRef<Path>> RawComponentsIter for P {
+#[derive(Debug)]
+pub(crate) struct Ancestors<'p> {
+    state: AncestorsIterState,
+    inner: &'p Path,
+}
+
+impl<'p> Iterator for Ancestors<'p> {
+    // (ancestor, remaining_path)
+    type Item = (&'p Path, Option<&'p Path>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let inner_bytes = self.inner.as_os_str().as_bytes();
+        // Search for "/" in the remaining path.
+        let found_idx = match self.state {
+            AncestorsIterState::End => return None,
+            AncestorsIterState::Start => memchr::memrchr(b'/', inner_bytes),
+            AncestorsIterState::Middle(idx) => memchr::memrchr(b'/', &inner_bytes[..idx]),
+        };
+        let next_idx = match found_idx {
+            None => {
+                self.state = AncestorsIterState::End;
+                return Some((
+                    Path::new("."),
+                    if inner_bytes.is_empty() {
+                        None
+                    } else {
+                        Some(self.inner)
+                    },
+                ));
+            }
+            Some(idx) => idx,
+        };
+
+        // TODO: Skip over mutiple "//" components.
+
+        // Split the path.
+        // TODO: We probably want to move some of the None handling here to split_path()...
+        let (ancestor_bytes, remaining_bytes) = match inner_bytes.split_at(next_idx) {
+            (b"", b"/") => (&b"/"[..], None),
+            (dir, b"/") => (dir, None),
+            (b"", base) => (&b"/"[..], Some(&base[1..])),
+            (dir, base) => (dir, Some(&base[1..])),
+        };
+
+        // Update the state.
+        self.state = match ancestor_bytes {
+            b"" | b"." | b"/" => AncestorsIterState::End,
+            _ => AncestorsIterState::Middle(next_idx),
+        };
+
+        // Not quite sure why we need to annotate ::<OsStr> since
+        // OsStrExt::from_bytes() returns a plain OsStr. Oh well.
+        Some((
+            Path::new::<OsStr>(OsStrExt::from_bytes(ancestor_bytes)),
+            remaining_bytes
+                .map(OsStrExt::from_bytes)
+                .map(Path::new::<OsStr>),
+        ))
+    }
+}
+
+pub(crate) trait PathIterExt {
+    fn raw_components(&self) -> RawComponents<'_>;
+    fn partial_ancestors(&self) -> Ancestors<'_>;
+}
+
+impl PathIterExt for Path {
     fn raw_components(&self) -> RawComponents<'_> {
         RawComponents {
-            inner: Some(self.as_ref().as_ref()),
+            inner: Some(self.as_os_str()),
         }
+    }
+
+    fn partial_ancestors(&self) -> Ancestors<'_> {
+        Ancestors {
+            state: AncestorsIterState::Start,
+            inner: self,
+        }
+    }
+}
+
+impl<P: AsRef<Path>> PathIterExt for P {
+    fn raw_components(&self) -> RawComponents<'_> {
+        self.as_ref().raw_components()
+    }
+
+    fn partial_ancestors(&self) -> Ancestors<'_> {
+        self.as_ref().partial_ancestors()
     }
 }
 
@@ -212,7 +278,7 @@ mod tests {
     use crate::{
         procfs::PROCFS_HANDLE,
         syscalls,
-        utils::{path_split, path_strip_trailing_slash, RawFdExt},
+        utils::{path_split, path_strip_trailing_slash, PathIterExt, RawFdExt},
     };
 
     use std::{
@@ -222,6 +288,7 @@ mod tests {
     };
 
     use anyhow::{Context, Error};
+    use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
     fn check_as_unsafe_path<P: AsRef<Path>>(fd: RawFd, want_path: P) -> Result<(), Error> {
@@ -385,5 +452,126 @@ mod tests {
         complex1("foo//././bar/baz//./xyz" => "foo//././bar/baz//.", Some("xyz"));
         complex2("//a/.///b/../../xyz" => "//a/.///b/../..", Some("xyz"));
         complex3("../foo/bar/.///baz" => "../foo/bar/.//", Some("baz"));
+    }
+
+    macro_rules! path_ancestor_tests {
+        ($($test_name:ident ($path:expr => { $(($ancestor:expr, $remaining:expr)),* }));* $(;)? ) => {
+            paste::paste! {
+                $(
+                    #[test]
+                    fn [<path_partial_ancestors_ $test_name>]() {
+                        let path = PathBuf::from($path);
+                        let expected: Vec<(&Path, Option<&Path>)> = vec![
+                            $({
+                                let ancestor: &str = $ancestor;
+                                let remaining: Option<&str> = $remaining;
+                                (Path::new(ancestor), remaining.map(Path::new))
+                            }),*
+                        ];
+
+                        let got = path.partial_ancestors().collect::<Vec<_>>();
+                        assert_eq!(got, expected, "unexpected results from partial_ancestors");
+                    }
+                )*
+            }
+        }
+    }
+
+    path_ancestor_tests! {
+        empty("" => { (".", None) });
+        root("/" => { ("/", None) });
+
+        single1("single" => { (".", Some("single")) });
+        single2("./single" => { (".", Some("single")) });
+        single_root1("/single" => { ("/", Some("single")) });
+
+        multi1("foo/bar" => {
+            ("foo", Some("bar")),
+            (".", Some("foo/bar"))
+        });
+        multi2("foo/bar/baz" => {
+            ("foo/bar", Some("baz")),
+            ("foo", Some("bar/baz")),
+            (".", Some("foo/bar/baz"))
+        });
+        multi3("./foo/bar/baz" => {
+            ("./foo/bar", Some("baz")),
+            ("./foo", Some("bar/baz")),
+            (".", Some("foo/bar/baz"))
+        });
+        multi_root1("/foo/bar" => {
+            ("/foo", Some("bar")),
+            ("/", Some("foo/bar"))
+        });
+        multi_root2("/foo/bar/baz" => {
+            ("/foo/bar", Some("baz")),
+            ("/foo", Some("bar/baz")),
+            ("/", Some("foo/bar/baz"))
+        });
+
+        trailing_dot1("/foo/." => {
+            ("/foo/", Some(".")),
+            ("/", Some("foo/."))
+        });
+        trailing_dot2("foo/../bar/../." => {
+            ("foo/../bar/..", Some(".")),
+            ("foo/../bar", Some("../.")),
+            ("foo/..", Some("bar/../.")),
+            ("foo", Some("../bar/../.")),
+            (".", Some("foo/../bar/../."))
+        });
+
+
+        trailing_slash1("/foo/" => {
+            ("/foo", None),
+            ("/", Some("foo"))
+        });
+        // TODO: This should probably be fixed so we skip over "//" components.
+        trailing_slash2("foo/bar///" => {
+            ("foo/bar//", None),
+            ("foo/bar/", Some("/")),
+            ("foo/bar", Some("//")),
+            ("foo", Some("bar///")),
+            (".", Some("foo/bar///"))
+        });
+        trailing_slash3("./" => {
+            (".", None)
+        });
+        trailing_slash4("//" => {
+            ("/", None)
+        });
+
+        // TODO: This should probably be fixed so we skip over "//" components.
+        complex1("foo//././bar/baz//./xyz" => {
+            ("foo//././bar/baz//.", Some("xyz")),
+            ("foo//././bar/baz/", Some("./xyz")),
+            ("foo//././bar/baz", Some("/./xyz")),
+            ("foo//././bar", Some("baz//./xyz")),
+            ("foo//./.", Some("bar/baz//./xyz")),
+            ("foo//.", Some("./bar/baz//./xyz")),
+            ("foo/", Some("././bar/baz//./xyz")),
+            ("foo", Some("/././bar/baz//./xyz")),
+            (".", Some("foo//././bar/baz//./xyz"))
+        });
+        complex2("//a/.///b/../../xyz" => {
+            ("//a/.///b/../..", Some("xyz")),
+            ("//a/.///b/..", Some("../xyz")),
+            ("//a/.///b", Some("../../xyz")),
+            ("//a/.//", Some("b/../../xyz")),
+            ("//a/./", Some("/b/../../xyz")),
+            ("//a/.", Some("//b/../../xyz")),
+            ("//a", Some(".///b/../../xyz")),
+            //("//", Some("a/.///b/../../xyz")),
+            ("/", Some("a/.///b/../../xyz"))
+        });
+        complex3("../foo/bar/.///baz" => {
+            ("../foo/bar/.//", Some("baz")),
+            ("../foo/bar/./", Some("/baz")),
+            ("../foo/bar/.", Some("//baz")),
+            ("../foo/bar", Some(".///baz")),
+            ("../foo", Some("bar/.///baz")),
+            ("..", Some("foo/bar/.///baz")),
+            (".", Some("../foo/bar/.///baz"))
+        });
     }
 }
