@@ -143,7 +143,6 @@ pub enum Error {
 // TODO: Export this?
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[non_exhaustive]
-#[cfg(test)]
 pub(crate) enum ErrorKind {
     NotImplemented,
     NotSupported,
@@ -153,7 +152,6 @@ pub(crate) enum ErrorKind {
 }
 
 impl Error {
-    #[cfg(test)]
     pub(crate) fn kind(&self) -> ErrorKind {
         match self {
             Self::NotImplemented { .. } => ErrorKind::NotImplemented,
@@ -224,12 +222,5 @@ impl Error {
         Chain {
             current: Some(self),
         }
-    }
-
-    /// Shorthand for `self.iter_chain_hotfix().last()`.
-    pub(crate) fn root_cause(&self) -> &(dyn StdError + 'static) {
-        self.iter_chain_hotfix()
-            .last()
-            .expect("Error::iter_chain_hotfix() should have at least one result")
     }
 }

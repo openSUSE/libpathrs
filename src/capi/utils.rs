@@ -16,12 +16,11 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{self, Error};
+use crate::error::{self, Error, ErrorKind};
 
 use std::{
     cmp,
     ffi::{CStr, CString, OsStr},
-    io::Error as IOError,
     os::unix::ffi::OsStrExt,
     path::Path,
     ptr,
@@ -161,8 +160,8 @@ impl From<&Error> for CError {
         let desc =
             CString::new(desc).expect("CString::new(description) failed in CError generation");
 
-        let errno = match err.root_cause().downcast_ref::<IOError>() {
-            Some(err) => err.raw_os_error().unwrap_or(0).abs(),
+        let errno = match err.kind() {
+            ErrorKind::OsError(Some(err)) => err.abs(),
             _ => 0,
         };
 
