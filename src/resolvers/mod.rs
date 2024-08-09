@@ -100,12 +100,13 @@ pub struct Resolver {
 }
 
 /// Only used for internal resolver implementations.
-pub(crate) enum PartialLookup<H> {
+#[derive(Debug)]
+pub(crate) enum PartialLookup<H, E = Error> {
     Complete(H),
     Partial {
         handle: H,
         remaining: PathBuf,
-        last_error: Error,
+        last_error: E,
     },
 }
 
