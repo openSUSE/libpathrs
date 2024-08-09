@@ -100,13 +100,52 @@ pub struct Resolver {
 }
 
 /// Only used for internal resolver implementations.
-pub(crate) enum PartialLookup<H> {
+#[derive(Debug)]
+pub(crate) enum PartialLookup<H, E = Error> {
     Complete(H),
     Partial {
         handle: H,
         remaining: PathBuf,
-        last_error: Error,
+        last_error: E,
     },
+}
+
+impl<H, E> PartialEq for PartialLookup<H, E>
+where
+    H: PartialEq,
+    E: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Complete(left), Self::Complete(right)) => left == right,
+            (
+                Self::Partial {
+                    handle: left_handle,
+                    remaining: left_remaining,
+                    last_error: left_last_error,
+                },
+                Self::Partial {
+                    handle: right_handle,
+                    remaining: right_remaining,
+                    last_error: right_last_error,
+                },
+            ) => {
+                left_handle == right_handle
+                    && left_remaining == right_remaining
+                    && left_last_error == right_last_error
+            }
+            _ => false,
+        }
+    }
+}
+
+impl<H> AsRef<H> for PartialLookup<H> {
+    fn as_ref(&self) -> &H {
+        match self {
+            PartialLookup::Complete(handle) => handle,
+            PartialLookup::Partial { handle, .. } => handle,
+        }
+    }
 }
 
 impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Handle> {
