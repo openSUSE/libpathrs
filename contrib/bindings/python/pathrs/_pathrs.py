@@ -344,6 +344,13 @@ class Root(WrappedFd):
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
+	def mkdir_all(self, path, mode):
+		path = _cstr(path)
+		fd = libpathrs_so.pathrs_mkdir_all(self.fileno(), path, mode)
+		if fd < 0:
+			raise Error._fetch(fd) or INTERNAL_ERROR
+		return Handle(fd)
+
 	def mknod(self, path, mode, dev=0):
 		path = _cstr(path)
 		err = libpathrs_so.pathrs_mknod(self.fileno(), path, mode, dev)

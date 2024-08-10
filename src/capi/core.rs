@@ -288,6 +288,27 @@ pub extern "C" fn pathrs_mkdir(root_fd: RawFd, path: *const c_char, mode: c_uint
     pathrs_mknod(root_fd, path, libc::S_IFDIR | mode, 0)
 }
 
+/// Create a new directory (and any of its path components if they don't exist)
+/// within the rootfs referenced by root_fd.
+///
+/// # Return Value
+///
+/// On success, this function returns an O_DIRECTORY file descriptor to the
+/// newly created directory.
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub extern "C" fn pathrs_mkdir_all(root_fd: RawFd, path: *const c_char, mode: c_uint) -> RawFd {
+    ret::with_fd(root_fd, |root: &mut Root| {
+        let mode = mode & !libc::S_IFMT;
+        let perm = Permissions::from_mode(mode);
+        root.mkdir_all(utils::parse_path(path)?, &perm)
+    })
+}
+
 /// Create a inode within the rootfs referenced by root_fd. The type of inode to
 /// be created is configured using the S_IFMT bits in mode (a-la mknod(2)).
 ///
