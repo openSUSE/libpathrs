@@ -3,17 +3,18 @@
  * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
  * Copyright (C) 2019-2021 SUSE LLC
  *
- * This program is free software: you can redistribute it and/or modify it under
- * the terms of the GNU Lesser General Public License as published by the Free
- * Software Foundation, either version 3 of the License, or (at your option) any
- * later version.
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+ * for more details.
  *
- * You should have received a copy of the GNU Lesser General Public License along
- * with this program. If not, see <https://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
 #![forbid(unsafe_code)]
@@ -63,9 +64,8 @@ impl Handle {
     /// You can correct these yourself if these defaults are not ideal for you:
     ///
     /// 1. `fcntl(fd, F_SETFD, 0)` will let you unset `O_CLOEXEC`.
-    /// 2. `ioctl(fd, TIOCSCTTY, 0)` will set the fd as the controlling
-    ///    terminal (if you don't have one already, and the fd references a
-    ///    TTY).
+    /// 2. `ioctl(fd, TIOCSCTTY, 0)` will set the fd as the controlling terminal
+    ///    (if you don't have one already, and the fd references a TTY).
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create

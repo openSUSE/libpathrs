@@ -3,17 +3,18 @@
  * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
  * Copyright (C) 2019-2024 SUSE LLC
  *
- * This program is free software: you can redistribute it and/or modify it under
- * the terms of the GNU Lesser General Public License as published by the Free
- * Software Foundation, either version 3 of the License, or (at your option) any
- * later version.
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+ * for more details.
  *
- * You should have received a copy of the GNU Lesser General Public License along
- * with this program. If not, see <https://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
 use crate::{
@@ -82,10 +83,11 @@ fn proc_subpath(fd: RawFd) -> Result<String, Error> {
 /// there's no real way of being sure since `nd_jump_link()` can be used by any
 /// non-mainline filesystem.
 ///
-/// This list is correct from the [introduction of `nd_jump_link()` in Linux 3.6][kcommit-b5fb63c18315]
-/// up to Linux 6.11. Before Linux 3.6, the logic that became `nd_jump_link()`
-/// only existed in procfs. AppArmor [started using it in Linux 4.13 with the
-/// introduction of apparmorfs][kcommit-a481f4d917835].
+/// This list is correct from the [introduction of `nd_jump_link()` in Linux
+/// 3.6][kcommit-b5fb63c18315] up to Linux 6.11. Before Linux 3.6, the logic
+/// that became `nd_jump_link()` only existed in procfs. AppArmor [started using
+/// it in Linux 4.13 with the introduction of
+/// apparmorfs][kcommit-a481f4d917835].
 ///
 /// [kcommit-b5fb63c18315]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=b5fb63c18315c5510c1d0636179c057e0c761c77
 /// [kcommit-a481f4d91783]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a481f4d917835cad86701fc0d1e620c74bb5cd5f
