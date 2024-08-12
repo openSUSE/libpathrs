@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -21,17 +21,25 @@
 use crate::{
     error::{self, Error, ErrorExt},
     flags::{OpenFlags, RenameFlags},
+    procfs::PROCFS_HANDLE,
     resolvers::Resolver,
-    syscalls, utils, Handle,
+    syscalls::{self, FrozenFd},
+    utils::{self, PathIterExt},
+    Handle,
 };
 
 use std::{
     fs::{File, Permissions},
-    os::unix::{fs::PermissionsExt, io::AsRawFd},
+    io::Error as IOError,
+    os::{
+        linux::fs::MetadataExt,
+        unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd},
+    },
     path::{Path, PathBuf},
 };
 
 use libc::dev_t;
+use rustix::fs::{self, Dir, SeekFrom};
 use snafu::{OptionExt, ResultExt};
 
 /// An inode type to be created with [`Root::create`].
@@ -418,6 +426,214 @@ impl Root {
         Ok(Handle::from_file_unchecked(file))
     }
 
+    /// Within the [`Root`]'s tree, create a directory and any of its parent
+    /// component if they are missing. This is effectively equivalent to
+    /// [`fs::create_dir_all`], Go's [`os.MkdirAll`], or Unix's `mkdir -p`.
+    ///
+    /// The provided set of [`Permissions`] only applies to path components
+    /// created by this function, existing components will not have their
+    /// permissions modified. In addition, if the provided path already exists
+    /// and is a directory, this function will return successfully.
+    ///
+    /// The returned [`Handle`] is an `O_DIRECTORY` handle referencing the
+    /// created directory (due to kernel limitations, we cannot guarantee that
+    /// the handle is the exact directory created and not a similar-looking
+    /// directory that was swapped in by an attacker, but we do as much
+    /// validation as possible to make sure the directory is functionally
+    /// identical to the directory we would've created).
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if any of the path components in the
+    /// provided path were invalid (non-directory components or dangling symlink
+    /// components) or if certain exchange attacks were detected.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Handle`]: struct.Handle.html
+    /// [`Permissions`]: https://doc.rust-lang.org/stable/std/fs/struct.Permissions.html
+    /// [`fs::create_dir_all`]: https://doc.rust-lang.org/stable/std/fs/fn.create_dir_all.html
+    /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
+    pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
+        ensure!(
+            perm.mode() & !0o7777 == 0,
+            error::InvalidArgumentSnafu {
+                name: "perm",
+                description: "mode cannot contain non-0o7777 bits"
+            }
+        );
+
+        let (handle, remaining) = self
+            .resolver
+            .resolve_partial(&self.inner, path.as_ref(), false)
+            .and_then(TryInto::try_into)?;
+
+        // Re-open the handle with O_DIRECTORY to make sure it's a directory we
+        // can use as well as to make sure we return
+        // directoriy
+        let mut current = handle.reopen(OpenFlags::O_DIRECTORY).with_wrap(|| {
+            format!(
+                "cannot create directories in {}",
+                FrozenFd::from(handle.as_file().as_raw_fd())
+            )
+        })?;
+
+        // For the remaining
+        let remaining_parts = remaining
+            .iter()
+            .flat_map(PathIterExt::raw_components)
+            .map(|p| p.to_os_string())
+            // Skip over no-op entries.
+            .filter(|part| !part.is_empty() && part.as_bytes() != b".")
+            .collect::<Vec<_>>();
+
+        // If the path contained ".." components after the end of the "real"
+        // components, we simply error out. We could try to safely resolve ".."
+        // here but that would add a bunch of extra logic for something that
+        // it's not clear even needs to be supported.
+        //
+        // We also can't just do something like filepath.Clean(), because ".."
+        // could erase dangling symlinks and produce a path that doesn't match
+        // what the user asked for.
+        if remaining_parts.iter().any(|part| part.as_bytes() == b"..") {
+            return Err(IOError::from_raw_os_error(libc::ENOENT))
+                .context(error::OsSnafu {
+                    operation: "mkdir_all components",
+                })
+                .with_wrap(|| {
+                    format!("yet-to-be-created path {remaining:?} contains '..' components")
+                })?;
+        }
+
+        // Calculate what properties we expect each newly created directory to
+        // have. Note that we need to manually calculate the effect of the umask
+        // (we default to 0o022 since that's what almost everyone uses in
+        // practice).
+        //
+        // NOTE: Another thread (or process with CLONE_FS) could change our
+        // umask after this check. This would at worst result in spurious
+        // errors, but it seems to me that a multithreaded program setting its
+        // own umask() is probably not safe in general anyway. umask() is meant
+        // to be used for shells when spawning subprocesses.
+        let (want_uid, want_gid) = (syscalls::geteuid(), syscalls::getegid());
+        let want_mode = libc::S_IFDIR
+            | (perm.mode() & !utils::get_umask(Some(&PROCFS_HANDLE)).unwrap_or(0o022));
+
+        // For the remaining components, create a each component one-by-one.
+        for part in remaining_parts {
+            // NOTE: mkdirat(2) does not follow trailing symlinks (even if it is
+            // a dangling symlink with only a trailing component missing), so we
+            // can safely create the final component without worrying about
+            // symlink-exchange attacks.
+            syscalls::mkdirat(current.as_raw_fd(), &part, perm.mode()).context(
+                error::RawOsSnafu {
+                    operation: "create next directory component",
+                },
+            )?;
+
+            // Get a handle to the directory we just created. Unfortunately we
+            // can't do an atomic create+open (a-la O_CREAT) with mkdirat(), so
+            // a separate O_NOFOLLOW is the best we can do.
+            let next = self
+                .resolver
+                .resolve(&current, &part, true)
+                .and_then(|handle| handle.reopen(OpenFlags::O_DIRECTORY))
+                .wrap("failed to open newly-created directory with O_DIRECTORY")?;
+
+            // Do some extra verification that the next handle looks like the
+            // directory we just created. There is no way to be absolutely sure
+            // it wasn't a swapped directory, but we can try to make sure that
+            // it looks as-close-to-identical-as-you-can-get.
+            //
+            // These protections probably don't protect against serious attacks
+            // in practice, but it's better to be safe than sorry. The main goal
+            // is to ensure that a less-privileged process cannot trick us into
+            // creating directories inside directories we don't expect. In
+            // fairness, the semantics of mkdir_all are kind of loose in general
+            // so it's not really clear how necessary this is.
+
+            // Verify that the (uid, gid, mode) match what we expect.
+            let meta = next.metadata().context(error::OsSnafu {
+                operation: "fstat next directory component",
+            })?;
+
+            let (got_uid, got_gid) = (meta.st_uid(), meta.st_gid());
+            let got_mode = meta.st_mode();
+            ensure!(
+                (got_uid, got_gid, got_mode) == (want_uid, want_gid, want_mode),
+                error::SafetyViolationSnafu {
+                    description: format!("newly-created directory {part:?} appears to have been swapped (expected {want_uid}:{want_gid} {want_mode:o}, got {got_uid}:{got_gid} {got_mode:o})"),
+                }
+            );
+
+            // Make sure the directory is empty. Obviously, an attacker could
+            // create entries in the directory after this call (if they have
+            // sufficient privileges) but if the attacker can create entries in
+            // this directory (that has the same owner and permission bits as
+            // the directory we created) then they could've done so in the
+            // directory we created as well.
+            let has_children = {
+                // NOTE: Unfortunately, this creates a new internal copy of the
+                // file for fs::Dir. At the moment we can't use fs::RawDir
+                // (which can take a BorrowedFd) because it doesn't implement
+                // Iterator and so filtering out the "." and ".." entries will
+                // be quite ugly.
+                // TODO: Switch back to RawDir once they fix that issue, or
+                // create our own wrapper that implements Iterator.
+                // Unfortunately because RawDir takes AsFd, it seems likely we
+                // won't be able to express the right lifetime bounds...
+                let mut dir = Dir::read_from(&next)
+                    .map_err(IOError::from)
+                    .with_context(|_| error::OsSnafu {
+                        operation: format!(
+                            "create directory iterator for newly-created directory {part:?}"
+                        ),
+                    })?;
+
+                // Is there is any entry in the directory?
+                dir
+                    // Get the first non-"."/".." entry.
+                    .find(|res| {
+                        !matches!(
+                            res.as_ref().map(|dentry| dentry.file_name().to_bytes()),
+                            Ok(b".") | Ok(b"..")
+                        )
+                    })
+                    // Handle errors.
+                    // TODO: Use try_find() once it's stabilised.
+                    // <https://github.com/rust-lang/rust/issues/63178>
+                    .transpose()
+                    .map_err(IOError::from)
+                    .with_context(|_| error::OsSnafu {
+                        operation: format!("readdir on newly-created directory {part:?}"),
+                    })?
+                    // We only care if there was an entry, not its details.
+                    .is_some()
+            };
+            ensure!(
+                !has_children,
+                error::SafetyViolationSnafu {
+                    description: format!(
+                        "newly-created directory {part:?} is not an empty directory"
+                    )
+                }
+            );
+            // Rewind the directory so that the caller doesn't end up with a
+            // half-read directory iterator. We have to do this manually rather
+            // than using Dir::rewind() because Dir::rewind() just marks the
+            // iterator so it is rewinded when the next iteration happens.
+            fs::seek(&next, SeekFrom::Start(0))
+                .map_err(IOError::from)
+                .context(error::OsSnafu {
+                    operation: "reset offset of directory handle",
+                })?;
+
+            // Keep walking.
+            current = next;
+        }
+
+        Ok(Handle::from_file_unchecked(current))
+    }
+
     /// Within the [`Root`]'s tree, remove the inode at `path`.
     ///
     /// Any existing [`Handle`]s to `path` will continue to work as before,
@@ -535,8 +751,6 @@ impl Root {
             },
         )
     }
-
-    // TODO: mkdir_all()
 
     // TODO: remove_all()
 

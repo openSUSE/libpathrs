@@ -147,6 +147,30 @@ func (r *Root) Mkdir(path string, mode os.FileMode) error {
 	return err
 }
 
+// MkdirAll creates a directory (and any parent path components if they don't
+// exist) within a Root's directory tree. The provided mode is used for any
+// directories created by this function (the process's umask applies).
+//
+// This is effectively equivalent to os.MkdirAll.
+func (r *Root) MkdirAll(path string, mode os.FileMode) (*Handle, error) {
+	unixMode, err := toUnixMode(mode)
+	if err != nil {
+		return nil, err
+	}
+
+	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
+		handleFd, err := pathrsMkdirAll(rootFd, path, unixMode)
+		if err != nil {
+			return nil, err
+		}
+		handleFile, err := mkFile(uintptr(handleFd))
+		if err != nil {
+			return nil, err
+		}
+		return &Handle{inner: handleFile}, err
+	})
+}
+
 // Mknod creates a new device inode of the given type within a Root's directory
 // tree. The provided mode is used for the new directory (the process's umask
 // applies).

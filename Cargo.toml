@@ -48,10 +48,13 @@ panic = "abort"
 
 [dependencies]
 bitflags = "^2"
+itertools = "^0.13"
 lazy_static = "^1"
 libc = "^0.2"
 memchr = "^2"
 rand = "^0.8"
+regex = "^1"
+rustix = { version = "^0.38", features = ["fs"] }
 snafu = "^0.8"
 
 [dev-dependencies]

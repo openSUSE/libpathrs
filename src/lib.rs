@@ -132,6 +132,7 @@ extern crate bitflags;
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
+extern crate regex;
 #[macro_use]
 extern crate snafu;
 

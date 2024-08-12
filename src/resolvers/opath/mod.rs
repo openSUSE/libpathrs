@@ -16,13 +16,9 @@
  * with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-#![forbid(unsafe_code)]
+mod r#impl;
+pub(crate) use r#impl::*;
 
-mod path;
-pub(crate) use path::*;
-
-mod fd;
-pub(crate) use fd::*;
-
-mod umask;
-pub(crate) use umask::*;
+mod symlink_stack;
+pub(crate) use symlink_stack::SymlinkStack;
+pub use symlink_stack::SymlinkStackError;

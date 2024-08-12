@@ -130,6 +130,14 @@ func pathrsMkdir(rootFd uintptr, path string, mode uint32) error {
 	return fetchError(err)
 }
 
+func pathrsMkdirAll(rootFd uintptr, path string, mode uint32) (uintptr, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	fd := C.pathrs_mkdir_all(C.int(rootFd), cPath, C.uint(mode))
+	return uintptr(fd), fetchError(fd)
+}
+
 func pathrsMknod(rootFd uintptr, path string, mode uint32, dev uint64) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))

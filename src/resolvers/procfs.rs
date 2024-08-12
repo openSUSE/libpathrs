@@ -34,7 +34,7 @@ use crate::{
     flags::{OpenFlags, ResolverFlags},
     resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls::{self, OpenHow},
-    utils::{self, RawComponentsIter},
+    utils::{self, PathIterExt},
 };
 
 use std::{

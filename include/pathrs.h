@@ -275,6 +275,22 @@ int pathrs_creat(int root_fd, const char *path, int flags, unsigned int mode);
 int pathrs_mkdir(int root_fd, const char *path, unsigned int mode);
 
 /**
+ * Create a new directory (and any of its path components if they don't exist)
+ * within the rootfs referenced by root_fd.
+ *
+ * # Return Value
+ *
+ * On success, this function returns an O_DIRECTORY file descriptor to the
+ * newly created directory.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_mkdir_all(int root_fd, const char *path, unsigned int mode);
+
+/**
  * Create a inode within the rootfs referenced by root_fd. The type of inode to
  * be created is configured using the S_IFMT bits in mode (a-la mknod(2)).
  *

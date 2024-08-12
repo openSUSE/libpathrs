@@ -1,7 +1,7 @@
 /*
  * libpathrs: safe path resolution on Linux
- * Copyright (C) 2019-2021 Aleksa Sarai <cyphar@cyphar.com>
- * Copyright (C) 2019-2021 SUSE LLC
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
@@ -19,11 +19,17 @@
 use crate::{
     error::{self, Error},
     flags::{OpenFlags, ResolverFlags},
+    resolvers::PartialLookup,
     syscalls::{self, OpenHow},
+    utils::PathIterExt,
     Handle,
 };
 
-use std::{fs::File, os::unix::io::AsRawFd, path::Path};
+use std::{
+    fs::File,
+    os::unix::io::AsRawFd,
+    path::{Path, PathBuf},
+};
 
 use snafu::ResultExt;
 
@@ -80,4 +86,51 @@ pub(crate) fn resolve<P: AsRef<Path>>(
         description: "racing filesystem changes caused openat2 to abort",
     }
     .fail()
+}
+
+/// Resolve as many components as possible in `path` within `root` using
+/// `openat2(2)`.
+pub(crate) fn resolve_partial(
+    root: &File,
+    path: &Path,
+    rflags: ResolverFlags,
+    no_follow_trailing: bool,
+) -> Result<PartialLookup<Handle>, Error> {
+    let mut last_error = match resolve(root, path, rflags, no_follow_trailing) {
+        Ok(handle) => return Ok(PartialLookup::Complete(handle)),
+        Err(err) => err,
+    };
+
+    // TODO: We probably want to do a git-bisect-like binary-search here. For
+    //       paths with a large number of components this could make a
+    //       significant difference, though in practice you'll only see.
+    //       really large paths this could make a significant difference.
+    for (path, remaining) in path.partial_ancestors() {
+        match resolve(root, path, rflags, no_follow_trailing) {
+            Ok(handle) => {
+                return Ok(PartialLookup::Partial {
+                    handle,
+                    remaining: remaining.map(PathBuf::from).unwrap_or("".into()),
+                    last_error,
+                })
+            }
+            Err(err) => last_error = err,
+        }
+    }
+
+    // Fall back to returning (root, path) if there was no path found.
+    //
+    // TODO: In theory you should never hit this case because
+    // partial_ancestors() always returns a "root" value. This should probably
+    // be unreachable!()...
+    Ok(PartialLookup::Partial {
+        handle: root
+            .try_clone()
+            .map(Handle::from_file_unchecked)
+            .context(error::OsSnafu {
+                operation: "clone root",
+            })?,
+        remaining: path.into(),
+        last_error,
+    })
 }
