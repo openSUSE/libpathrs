@@ -42,6 +42,8 @@ use std::{
 use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
 use snafu::ResultExt;
 
+// MSRV(1.70): Use OnceLock.
+// MSRV(1.80): Use LazyLock.
 lazy_static! {
     pub(crate) static ref OPENAT2_IS_SUPPORTED: bool =
         openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
@@ -640,6 +642,8 @@ pub(crate) fn renameat<P1: AsRef<Path>, P2: AsRef<Path>>(
     }
 }
 
+// MSRV(1.70): Use OnceLock.
+// MSRV(1.80): Use LazyLock.
 lazy_static! {
     pub(crate) static ref RENAME_FLAGS_SUPPORTED: bool = {
         match renameat2(
@@ -863,18 +867,10 @@ pub fn getegid() -> libc::gid_t {
 
 #[cfg(test)]
 pub fn getcwd() -> Result<PathBuf, anyhow::Error> {
-    use std::ffi::CStr;
+    use rustix::process;
 
-    let mut buffer = [0_u8; libc::PATH_MAX as usize];
-    // SAFETY: Obviously safe libc function.
-    let ret = unsafe { libc::getcwd(buffer.as_mut_ptr() as *mut libc::c_char, buffer.len()) };
-
-    if ret.is_null() {
-        Err(IOError::last_os_error().into())
-    } else {
-        let cwd = OsStr::from_bytes(CStr::from_bytes_until_nul(&buffer[..])?.to_bytes());
-        Ok(PathBuf::from(cwd))
-    }
+    let buffer = Vec::with_capacity(libc::PATH_MAX as usize);
+    Ok(OsStr::from_bytes(process::getcwd(buffer)?.to_bytes()).into())
 }
 
 bitflags! {
@@ -905,8 +901,8 @@ enum FsconfigCmd {
     SetPath = 0x3,      // FSCONFIG_SET_PATH
     SetPathEmpty = 0x4, // FSCONFIG_SET_PATH_EMPTY
     SetFd = 0x5,        // FSCONFIG_SET_FD
-    Create = 0x6,       // FSCONFIG_SET_FD
-    Reconfigure = 0x7,  // FSCONFIG_SET_FD
+    Create = 0x6,       // FSCONFIG_CREATE
+    Reconfigure = 0x7,  // FSCONFIG_RECONFIGURE
 }
 
 pub fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<File, Error> {

@@ -60,6 +60,8 @@ pub enum ResolverBackend {
     //       hyper-concerned users.
 }
 
+// MSRV(1.70): Use OnceLock.
+// MSRV(1.80): Use LazyLock.
 lazy_static! {
     static ref DEFAULT_RESOLVER_TYPE: ResolverBackend = if *syscalls::OPENAT2_IS_SUPPORTED {
         ResolverBackend::KernelOpenat2
@@ -171,6 +173,7 @@ impl From<PartialLookup<Rc<File>>> for PartialLookup<Handle> {
         // current points to. There is nowhere else we could've stashed a
         // reference, and we only do Rc::clone for root (which we've dropped).
         let handle = Handle::from_file_unchecked(
+            // MSRV(1.70): Use Rc::into_inner().
             Rc::try_unwrap(rc)
                 .expect("current handle in lookup should only have a single Rc reference"),
         );

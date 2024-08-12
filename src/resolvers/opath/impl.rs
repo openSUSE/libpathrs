@@ -52,7 +52,7 @@ use std::{
     fs::File,
     io::Error as IOError,
     iter,
-    os::{fd::AsRawFd, unix::ffi::OsStrExt},
+    os::unix::{ffi::OsStrExt, io::AsRawFd},
     path::{Path, PathBuf},
     rc::Rc,
 };

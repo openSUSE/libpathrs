@@ -40,7 +40,10 @@ pub(super) trait IntoCReturn {
     fn into_c_return(self) -> CReturn;
 }
 
-// TODO: Switch this to using a slab or similar structure, possibly using a less heavy-weight lock?
+// TODO: Switch this to using a slab or similar structure, possibly using a less
+// heavy-weight lock? Maybe sharded-slab?
+// MSRV(1.70): Use OnceLock.
+// MSRV(1.80): Use LazyLock.
 lazy_static! {
     static ref ERROR_MAP: Mutex<HashMap<CReturn, Error>> = Mutex::new(HashMap::new());
 }

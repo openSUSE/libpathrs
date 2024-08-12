@@ -53,7 +53,8 @@ pub(crate) fn copy_path_into_buffer<P: AsRef<Path>>(
     // If the linkbuf is null, we just return the number of bytes we
     // would've written.
     if !buf.is_null() && bufsize > 0 {
-        let to_copy = cmp::min(path.count_bytes(), bufsize);
+        // MSRV(1.79): Switch to .count_bytes().
+        let to_copy = cmp::min(path.to_bytes().len(), bufsize);
         // SAFETY: The C caller guarantees that buf is safe to write to
         // up to bufsize bytes.
         unsafe {
@@ -61,7 +62,8 @@ pub(crate) fn copy_path_into_buffer<P: AsRef<Path>>(
         }
     }
 
-    Ok(path.count_bytes() as c_int)
+    // MSRV(1.79): Switch to .count_bytes().
+    Ok(path.to_bytes().len() as c_int)
 }
 
 pub(crate) trait Leakable {

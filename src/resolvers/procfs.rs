@@ -39,8 +39,11 @@ use crate::{
 };
 
 use std::{
-    collections::VecDeque, fs::File, io::Error as IOError, os::fd::AsRawFd,
-    os::unix::ffi::OsStrExt, path::Path,
+    collections::VecDeque,
+    fs::File,
+    io::Error as IOError,
+    os::unix::{ffi::OsStrExt, io::AsRawFd},
+    path::Path,
 };
 
 use snafu::ResultExt;

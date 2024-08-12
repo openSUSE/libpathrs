@@ -26,13 +26,26 @@ on:
 
 name: rust-ci
 
+env:
+  RUST_MSRV: "1.65"
+
 jobs:
   check:
-    name: cargo check
+    name: cargo check (stable)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --workspace --all-features --all-targets
+
+  check-msrv:
+    name: cargo check (msrv)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_MSRV }}
       - run: cargo check --workspace --all-features --all-targets
 
   rustdoc:
@@ -90,7 +103,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install stable
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -101,7 +113,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install stable
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

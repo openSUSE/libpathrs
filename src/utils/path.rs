@@ -285,7 +285,7 @@ mod tests {
 
     use std::{
         fs::File,
-        os::fd::{AsRawFd, RawFd},
+        os::unix::io::{AsRawFd, RawFd},
         path::{Path, PathBuf},
     };
 

@@ -27,7 +27,7 @@ use crate::{
 use std::{
     env,
     io::{BufRead, BufReader},
-    os::fd::AsRawFd,
+    os::unix::io::AsRawFd,
 };
 
 use libc::mode_t;
@@ -41,6 +41,8 @@ use snafu::ResultExt;
 //NOTE: While the umask is shared between threads, it unshared with `CLONE_FS`
 //      so a single thread could have a different umask to other threads.
 fn get_umask_procfs(procfs: &ProcfsHandle) -> Result<Option<mode_t>, Error> {
+    // MSRV(1.70): Use OnceLock.
+    // MSRV(1.80): Use LazyLock.
     lazy_static! {
         static ref RE: Regex = Regex::new(r"^Umask:\s*(0[0-7]+)$").unwrap();
     }

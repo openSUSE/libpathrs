@@ -29,13 +29,14 @@ use crate::{
 
 use std::{
     fs::File,
-    os::fd::AsRawFd,
-    os::unix::fs::MetadataExt,
+    os::unix::{fs::MetadataExt, io::AsRawFd},
     path::{Path, PathBuf},
 };
 
 use snafu::{OptionExt, ResultExt};
 
+// MSRV(1.70): Use OnceLock.
+// MSRV(1.80): Use LazyLock.
 lazy_static! {
     /// A `procfs` handle to which is used globally by libpathrs.
     pub(crate) static ref PROCFS_HANDLE: ProcfsHandle =

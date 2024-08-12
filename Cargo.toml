@@ -27,6 +27,7 @@ readme = "README.md"
 keywords = ["file", "fs", "security", "linux"]
 categories = ["filesystem"]
 edition = "2021"
+rust-version = "1.65"
 
 [badges]
 maintenance = { status = "experimental" }
@@ -49,6 +50,8 @@ panic = "abort"
 [dependencies]
 bitflags = "^2"
 itertools = "^0.13"
+# MSRV(1.70): Use OnceLock.
+# MSRV(1.80): Use LazyLock.
 lazy_static = "^1"
 libc = "^0.2"
 memchr = "^2"
@@ -59,11 +62,13 @@ snafu = "^0.8"
 
 [dev-dependencies]
 anyhow = "^1"
-clap = { version = "^4", features = ["cargo"] }
+clap = { version = "4.2.*", features = ["cargo"] }
 errno = "^0.3"
 tempfile = "^3"
 paste = "^1"
 pretty_assertions = "^1"
+# Enable the "process" feature for getcwd() in our tests.
+rustix = { version = "^0.38", features = ["process"] }
 
 [lints.rust]
 # We have special handling for coverage runs (which set cfg(coverage)).

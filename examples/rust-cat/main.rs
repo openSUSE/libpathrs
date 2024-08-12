@@ -33,7 +33,8 @@ use clap::{Arg, Command};
 
 fn main() -> Result<(), Error> {
     let m = Command::new("cat")
-        .author(clap::crate_authors!("\n"))
+        // MSRV(1.67): Use clap::crate_authors!.
+        .author("Aleksa Sarai <cyphar@cyphar.com>")
         .version(clap::crate_version!())
         .arg(Arg::new("root").value_name("ROOT"))
         .arg(Arg::new("unsafe-path").value_name("PATH"))
