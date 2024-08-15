@@ -27,7 +27,7 @@ on:
 name: rust-ci
 
 env:
-  RUST_MSRV: "1.65"
+  RUST_MSRV: "1.63"
 
 jobs:
   check:

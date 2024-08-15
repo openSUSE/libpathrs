@@ -34,6 +34,7 @@ use std::{borrow::Cow, error::Error as StdError, io::Error as IOError};
 // TODO: Add a backtrace to Error. We would just need to add an automatic
 //       Backtrace::capture() in From. But it's not clear whether we want to
 //       export the crate types here without std::backtrace::Backtrace.
+// MSRV(1.65): Use std::backtrace::Backtrace.
 
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]

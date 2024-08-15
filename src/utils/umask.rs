@@ -42,6 +42,8 @@ use regex::Regex;
 fn get_umask_procfs(procfs: &ProcfsHandle) -> Result<Option<mode_t>, Error> {
     // MSRV(1.70): Use OnceLock.
     // MSRV(1.80): Use LazyLock.
+    // TODO: Figure out if we even need to use a regex for this. Surely there's
+    //       something like sscanf which works properly in Rust...
     lazy_static! {
         static ref RE: Regex = Regex::new(r"^Umask:\s*(0[0-7]+)$").unwrap();
     }
@@ -53,12 +55,12 @@ fn get_umask_procfs(procfs: &ProcfsHandle) -> Result<Option<mode_t>, Error> {
             operation: "read lines from /proc/self/status".into(),
             source: err,
         })?;
-        let Some((_, [umask])) = RE.captures(&line).map(|caps| caps.extract()) else {
-            continue;
-        };
-        return Ok(Some(
-            mode_t::from_str_radix(umask, 8).expect("parsing 0[0-7]+ octal should work"),
-        ));
+        // MSRV(1.65): Use let-else here.
+        if let Some((_, [umask])) = RE.captures(&line).map(|caps| caps.extract()) {
+            return Ok(Some(
+                mode_t::from_str_radix(umask, 8).expect("parsing 0[0-7]+ octal should work"),
+            ));
+        }
     }
     Ok(None)
 }

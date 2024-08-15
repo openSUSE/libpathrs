@@ -45,6 +45,7 @@ use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
 //       wants to be able to derive an Error for Backtrace?). We could add a
 //       backtrace to error::Error but if we also add a backtrace to
 //       syscalls::Error this might get a little complicated.
+// MSRV(1.65): Use std::backtrace::Backtrace.
 
 // MSRV(1.70): Use OnceLock.
 // MSRV(1.80): Use LazyLock.
