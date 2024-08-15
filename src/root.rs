@@ -20,7 +20,7 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    error::{self, Error, ErrorExt},
+    error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
     procfs::PROCFS_HANDLE,
     resolvers::Resolver,
@@ -41,7 +41,6 @@ use std::{
 
 use libc::dev_t;
 use rustix::fs::{self, Dir, SeekFrom};
-use snafu::{OptionExt, ResultExt};
 
 /// An inode type to be created with [`Root::create`].
 ///
@@ -162,8 +161,9 @@ impl Root {
     /// [`Resolver`]: struct.Resolver.html
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
-            .context(error::RawOsSnafu {
-                operation: "open root handle",
+            .map_err(|err| ErrorImpl::RawOsError {
+                operation: "open root handle".into(),
+                source: err,
             })?;
         Ok(Root::from_file_unchecked(file))
     }
@@ -176,9 +176,13 @@ impl Root {
     /// [`Root`]: struct.Root.html
     pub fn try_clone(&self) -> Result<Self, Error> {
         Ok(Self {
-            inner: self.as_file().try_clone().context(error::OsSnafu {
-                operation: "clone underlying root file",
-            })?,
+            inner: self
+                .as_file()
+                .try_clone()
+                .map_err(|err| ErrorImpl::OsError {
+                    operation: "clone underlying root file".into(),
+                    source: err,
+                })?,
             resolver: self.resolver,
         })
     }
@@ -290,8 +294,12 @@ impl Root {
         let link = self
             .resolve_nofollow(path)
             .wrap("resolve symlink O_NOFOLLOW for readlink")?;
-        syscalls::readlinkat(link.as_file().as_raw_fd(), "").context(error::RawOsSnafu {
-            operation: "readlink resolve symlink",
+        syscalls::readlinkat(link.as_file().as_raw_fd(), "").map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "readlink resolve symlink".into(),
+                source: err,
+            }
+            .into()
         })
     }
 
@@ -310,9 +318,9 @@ impl Root {
         // the parent.
         let (parent, name) =
             utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
-        let name = name.context(error::InvalidArgumentSnafu {
-            name: "path",
-            description: "create path has trailing slash",
+        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
+            name: "path".into(),
+            description: "create path has trailing slash".into(),
         })?;
 
         let dir = self
@@ -337,9 +345,9 @@ impl Root {
             InodeType::Hardlink(target) => {
                 let (oldparent, oldname) = utils::path_split(target)
                     .wrap("split hardlink source path into (parent, name)")?;
-                let oldname = oldname.context(error::InvalidArgumentSnafu {
-                    name: "target",
-                    description: "hardlink target has trailing slash",
+                let oldname = oldname.ok_or_else(|| ErrorImpl::InvalidArgument {
+                    name: "target".into(),
+                    description: "hardlink target has trailing slash".into(),
                 })?;
                 let olddir = self
                     .resolve(oldparent)
@@ -361,8 +369,12 @@ impl Root {
                 syscalls::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev)
             }
         }
-        .context(error::RawOsSnafu {
-            operation: "pathrs create",
+        .map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "pathrs create".into(),
+                source: err,
+            }
+            .into()
         })
     }
 
@@ -404,9 +416,9 @@ impl Root {
         // the parent.
         let (parent, name) =
             utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
-        let name = name.context(error::InvalidArgumentSnafu {
-            name: "path",
-            description: "create_file path has trailing slash",
+        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
+            name: "path".into(),
+            description: "create_file path has trailing slash".into(),
         })?;
         let dir = self
             .resolve(parent)
@@ -418,11 +430,12 @@ impl Root {
         // O_NOFOLLOW. We might want to expose that here, though because it
         // can't be done with the emulated backend that might be a bad idea.
         flags.insert(OpenFlags::O_CREAT);
-        let file = syscalls::openat(dirfd, name, flags.bits(), perm.mode()).context(
-            error::RawOsSnafu {
-                operation: "pathrs create_file",
-            },
-        )?;
+        let file = syscalls::openat(dirfd, name, flags.bits(), perm.mode()).map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "pathrs create_file".into(),
+                source: err,
+            }
+        })?;
 
         Ok(Handle::from_file_unchecked(file))
     }
@@ -455,13 +468,12 @@ impl Root {
     /// [`fs::create_dir_all`]: https://doc.rust-lang.org/stable/std/fs/fn.create_dir_all.html
     /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
     pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
-        ensure!(
-            perm.mode() & !0o7777 == 0,
-            error::InvalidArgumentSnafu {
-                name: "perm",
-                description: "mode cannot contain non-0o7777 bits"
-            }
-        );
+        if perm.mode() & !0o7777 != 0 {
+            Err(ErrorImpl::InvalidArgument {
+                name: "perm".into(),
+                description: "mode cannot contain non-0o7777 bits".into(),
+            })?
+        }
 
         let (handle, remaining) = self
             .resolver
@@ -496,13 +508,13 @@ impl Root {
         // could erase dangling symlinks and produce a path that doesn't match
         // what the user asked for.
         if remaining_parts.iter().any(|part| part.as_bytes() == b"..") {
-            return Err(IOError::from_raw_os_error(libc::ENOENT))
-                .context(error::OsSnafu {
-                    operation: "mkdir_all components",
-                })
-                .with_wrap(|| {
-                    format!("yet-to-be-created path {remaining:?} contains '..' components")
-                })?;
+            Err(ErrorImpl::OsError {
+                operation: "mkdir_all remaining components".into(),
+                source: IOError::from_raw_os_error(libc::ENOENT),
+            })
+            .with_wrap(|| {
+                format!("yet-to-be-created path {remaining:?} contains '..' components")
+            })?
         }
 
         // Calculate what properties we expect each newly created directory to
@@ -525,11 +537,12 @@ impl Root {
             // a dangling symlink with only a trailing component missing), so we
             // can safely create the final component without worrying about
             // symlink-exchange attacks.
-            syscalls::mkdirat(current.as_raw_fd(), &part, perm.mode()).context(
-                error::RawOsSnafu {
-                    operation: "create next directory component",
-                },
-            )?;
+            syscalls::mkdirat(current.as_raw_fd(), &part, perm.mode()).map_err(|err| {
+                ErrorImpl::RawOsError {
+                    operation: "create next directory component".into(),
+                    source: err,
+                }
+            })?;
 
             // Get a handle to the directory we just created. Unfortunately we
             // can't do an atomic create+open (a-la O_CREAT) with mkdirat(), so
@@ -553,18 +566,18 @@ impl Root {
             // so it's not really clear how necessary this is.
 
             // Verify that the (uid, gid, mode) match what we expect.
-            let meta = next.metadata().context(error::OsSnafu {
-                operation: "fstat next directory component",
+            let meta = next.metadata().map_err(|err| ErrorImpl::OsError {
+                operation: "fstat next directory component".into(),
+                source: err,
             })?;
 
             let (got_uid, got_gid) = (meta.st_uid(), meta.st_gid());
             let got_mode = meta.st_mode();
-            ensure!(
-                (got_uid, got_gid, got_mode) == (want_uid, want_gid, want_mode),
-                error::SafetyViolationSnafu {
-                    description: format!("newly-created directory {part:?} appears to have been swapped (expected {want_uid}:{want_gid} {want_mode:o}, got {got_uid}:{got_gid} {got_mode:o})"),
-                }
-            );
+            if (got_uid, got_gid, got_mode) != (want_uid, want_gid, want_mode) {
+                Err(ErrorImpl::SafetyViolation {
+                    description: format!("newly-created directory {part:?} appears to have been swapped (expected owner {want_uid}:{want_gid} mode 0o{want_mode:o}, got owner {got_uid}:{got_gid} mode 0o{got_mode:o})").into(),
+                })?
+            }
 
             // Make sure the directory is empty. Obviously, an attacker could
             // create entries in the directory after this call (if they have
@@ -583,12 +596,11 @@ impl Root {
                 // Unfortunately because RawDir takes AsFd, it seems likely we
                 // won't be able to express the right lifetime bounds...
                 let mut dir = Dir::read_from(&next)
-                    .map_err(IOError::from)
-                    .with_context(|_| error::OsSnafu {
-                        operation: format!(
-                            "create directory iterator for newly-created directory {part:?}"
-                        ),
-                    })?;
+                    .map_err(|err| ErrorImpl::OsError {
+                        operation: "create directory iterator".into(),
+                        source: err.into(),
+                    })
+                    .with_wrap(|| format!("scan newly-created directory {part:?}"))?;
 
                 // Is there is any entry in the directory?
                 dir
@@ -603,30 +615,30 @@ impl Root {
                     // TODO: Use try_find() once it's stabilised.
                     // <https://github.com/rust-lang/rust/issues/63178>
                     .transpose()
-                    .map_err(IOError::from)
-                    .with_context(|_| error::OsSnafu {
-                        operation: format!("readdir on newly-created directory {part:?}"),
-                    })?
+                    .map_err(|err| ErrorImpl::OsError {
+                        operation: "readdir".into(),
+                        source: err.into(),
+                    })
+                    .with_wrap(|| format!("scan newly-created directory {part:?}"))?
                     // We only care if there was an entry, not its details.
                     .is_some()
             };
-            ensure!(
-                !has_children,
-                error::SafetyViolationSnafu {
+            if has_children {
+                Err(ErrorImpl::SafetyViolation {
                     description: format!(
                         "newly-created directory {part:?} is not an empty directory"
                     )
-                }
-            );
+                    .into(),
+                })?
+            }
             // Rewind the directory so that the caller doesn't end up with a
             // half-read directory iterator. We have to do this manually rather
             // than using Dir::rewind() because Dir::rewind() just marks the
             // iterator so it is rewinded when the next iteration happens.
-            fs::seek(&next, SeekFrom::Start(0))
-                .map_err(IOError::from)
-                .context(error::OsSnafu {
-                    operation: "reset offset of directory handle",
-                })?;
+            fs::seek(&next, SeekFrom::Start(0)).map_err(|err| ErrorImpl::OsError {
+                operation: "reset offset of directory handle".into(),
+                source: err.into(),
+            })?;
 
             // Keep walking.
             current = next;
@@ -656,9 +668,9 @@ impl Root {
         // the parent.
         let (parent, name) =
             utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
-        let name = name.context(error::InvalidArgumentSnafu {
-            name: "path",
-            description: "remove path has trailing slash",
+        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
+            name: "path".into(),
+            description: "remove path has trailing slash".into(),
         })?;
         let dir = self
             .resolve(parent)
@@ -698,12 +710,11 @@ impl Root {
             }
         }
 
-        // If we ever are here, then last_error must be Some.
-        Err(last_error.expect("unlinkat loop failed so last_error must exist")).context(
-            error::RawOsSnafu {
-                operation: "pathrs remove",
-            },
-        )
+        Err(ErrorImpl::RawOsError {
+            operation: "pathrs remove".into(),
+            // If we ever are here, then last_error must be Some.
+            source: last_error.expect("unlinkat loop failed so last_error must exist"),
+        })?
     }
 
     /// Within the [`Root`]'s tree, perform a rename with the given `source` and
@@ -724,15 +735,15 @@ impl Root {
     ) -> Result<(), Error> {
         let (src_parent, src_name) =
             utils::path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
-        let src_name = src_name.context(error::InvalidArgumentSnafu {
-            name: "source",
-            description: "rename source path has trailing slash",
+        let src_name = src_name.ok_or_else(|| ErrorImpl::InvalidArgument {
+            name: "source".into(),
+            description: "rename source path has trailing slash".into(),
         })?;
         let (dst_parent, dst_name) = utils::path_split(destination.as_ref())
             .wrap("split target path into (parent, name)")?;
-        let dst_name = dst_name.context(error::InvalidArgumentSnafu {
-            name: "source",
-            description: "rename destination path has trailing slash",
+        let dst_name = dst_name.ok_or_else(|| ErrorImpl::InvalidArgument {
+            name: "source".into(),
+            description: "rename destination path has trailing slash".into(),
         })?;
 
         let src_dir = self
@@ -746,9 +757,13 @@ impl Root {
             .into_file();
         let dst_dirfd = dst_dir.as_raw_fd();
 
-        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, rflags.bits()).context(
-            error::RawOsSnafu {
-                operation: "pathrs rename",
+        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, rflags.bits()).map_err(
+            |err| {
+                ErrorImpl::RawOsError {
+                    operation: "pathrs rename".into(),
+                    source: err,
+                }
+                .into()
             },
         )
     }

@@ -4,9 +4,9 @@
  * Copyright (C) 2019-2024 SUSE LLC
  *
  * This program is free software: you can redistribute it and/or modify it
- * under the terms of the GNU Lesser General Public License as
- * pub(crate)lished by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
+ * under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version.
  *
  * This program is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
@@ -26,7 +26,6 @@ use crate::{
 };
 
 use std::{
-    backtrace::Backtrace,
     ffi::{CString, OsStr},
     fmt,
     fs::File,
@@ -40,7 +39,12 @@ use std::{
 };
 
 use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
-use snafu::ResultExt;
+
+// TODO: Figure out how we can put a backtrace here (it seems we can't use
+//       thiserror's backtrace support without nightly Rust because thiserror
+//       wants to be able to derive an Error for Backtrace?). We could add a
+//       backtrace to error::Error but if we also add a backtrace to
+//       syscalls::Error this might get a little complicated.
 
 // MSRV(1.70): Use OnceLock.
 // MSRV(1.80): Use LazyLock.
@@ -58,9 +62,8 @@ lazy_static! {
 /// # Caveats
 /// Note that the file descriptor value is very unlikely to reference a live
 /// file descriptor. Its value is only used for informational purposes.
-// TODO: Should probably be #[doc(hidden)].
 #[derive(Clone, Debug)]
-pub struct FrozenFd(c_int, Option<PathBuf>);
+pub(crate) struct FrozenFd(c_int, Option<PathBuf>);
 
 // TODO: Should probably be a pub(crate) impl.
 impl From<RawFd> for FrozenFd {
@@ -78,7 +81,7 @@ impl fmt::Display for FrozenFd {
             fd => write!(f, "[{}]", fd)?,
         };
         match &self.1 {
-            Some(path) => write!(f, "{:?}", path)?,
+            Some(path) => write!(f, "{path:?}")?,
             None => write!(f, "<unknown>")?,
         };
         Ok(())
@@ -93,83 +96,52 @@ impl fmt::Display for FrozenFd {
 /// use of the top-level [`Error`] type.
 ///
 /// [`Error`]: enum.Error.html
-#[derive(Debug, Snafu)]
-pub enum Error {
-    #[snafu(display("fcntl({}, F_DUPFD_CLOEXEC, 0): {}", fd, source))]
-    FcntlDup {
-        fd: FrozenFd,
-        source: IOError,
-        backtrace: Option<Backtrace>,
-    },
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum Error {
+    #[error("fcntl({fd}, F_GETFD)")]
+    FcntlGetFlags { fd: FrozenFd, source: IOError },
 
-    #[snafu(display("fcntl({}, F_GETFD): {}", fd, source))]
-    FcntlGetFlags {
-        fd: FrozenFd,
-        source: IOError,
-        backtrace: Option<Backtrace>,
-    },
-
-    #[snafu(display("fcntl({}, F_SETFD, 0x{:x}): {}", fd, flags, source))]
+    #[error("fcntl({fd}, F_SETFD, 0x{flags:x})")]
     FcntlSetFlags {
         fd: FrozenFd,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display(
-        "openat({}, {:?}, 0x{:x}, 0o{:o}): {}",
-        dirfd,
-        path,
-        flags,
-        mode,
-        source
-    ))]
+    #[error("openat({dirfd}, {path}, 0x{flags:x}, 0o{mode:o})")]
     Openat {
         dirfd: FrozenFd,
         path: PathBuf,
         flags: OpenFlags,
         mode: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("openat2({}, {:?}, {}, {}): {}", dirfd, path, how, size, source))]
+    #[error("openat2({dirfd}, {path}, {how}, {size})")]
     Openat2 {
         dirfd: FrozenFd,
         path: PathBuf,
         how: OpenHow,
         size: usize,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("readlinkat({}, {:?}): {}", dirfd, path, source))]
+    #[error("readlinkat({dirfd}, {path})")]
     Readlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("mkdirat({}, {:?}, 0o{:o}): {}", dirfd, path, mode, source))]
+    #[error("mkdirat({dirfd}, {path}, 0o{mode:o})")]
     Mkdirat {
         dirfd: FrozenFd,
         path: PathBuf,
         mode: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display(
-        "mknodat({}, {:?}, 0o{:o}, {}:{}): {}",
-        dirfd,
-        path,
-        mode,
-        major,
-        minor,
-        source
-    ))]
+    #[error("mknodat({dirfd}, {path}, 0o{mode:o}, {major}:{minor})")]
     Mknodat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -177,27 +149,17 @@ pub enum Error {
         major: u32,
         minor: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("unlinkat({}, {:?}, 0x{:x}): {}", dirfd, path, flags, source))]
+    #[error("unlinkat({dirfd}, {path}, 0x{flags:x})")]
     Unlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display(
-        "linkat({}, {:?}, {}, {:?}, 0x{:x}): {}",
-        olddirfd,
-        oldpath,
-        newdirfd,
-        newpath,
-        flags,
-        source
-    ))]
+    #[error("linkat({olddirfd}, {oldpath}, {newdirfd}, {newpath}, 0x{flags:x})")]
     Linkat {
         olddirfd: FrozenFd,
         oldpath: PathBuf,
@@ -205,44 +167,26 @@ pub enum Error {
         newpath: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("symlinkat({:?}, {}, {:?}): {}", target, dirfd, path, source))]
+    #[error("symlinkat({dirfd}, {path}, {target})")]
     Symlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
         target: PathBuf,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display(
-        "renameat({}, {:?}, {}, {:?}): {}",
-        olddirfd,
-        oldpath,
-        newdirfd,
-        newpath,
-        source
-    ))]
+    #[error("renameat({olddirfd}, {oldpath}, {newdirfd}, {newpath})")]
     Renameat {
         olddirfd: FrozenFd,
         oldpath: PathBuf,
         newdirfd: FrozenFd,
         newpath: PathBuf,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display(
-        "renameat2({}, {:?}, {}, {:?}, 0x{:x}): {}",
-        olddirfd,
-        oldpath,
-        newdirfd,
-        newpath,
-        flags,
-        source
-    ))]
+    #[error("renameat2({olddirfd}, {oldpath}, {newdirfd}, {newpath}, 0x{flags:x})")]
     Renameat2 {
         olddirfd: FrozenFd,
         oldpath: PathBuf,
@@ -250,82 +194,60 @@ pub enum Error {
         newpath: PathBuf,
         flags: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fstatfs({}): {}", fd, source))]
-    Fstatfs {
-        fd: FrozenFd,
-        source: IOError,
-        backtrace: Option<Backtrace>,
-    },
+    #[error("fstatfs({fd})")]
+    Fstatfs { fd: FrozenFd, source: IOError },
 
-    #[snafu(display("fstatat({}, {:?}, 0x{:x}): {}", dirfd, path, flags, source))]
+    #[error("fstatat({dirfd}, {path}, 0x{flags:x})")]
     Fstatat {
         dirfd: FrozenFd,
         path: PathBuf,
         flags: i32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display(
-        "statx({}, {:?}, 0x{:x}, 0x{:x}): {}",
-        dirfd,
-        path,
-        flags,
-        mask,
-        source
-    ))]
+    #[error("statx({dirfd}, {path}, flags=0x{flags:x}, mask=0x{mask:x})")]
     Statx {
         dirfd: FrozenFd,
         path: PathBuf,
         flags: i32,
         mask: u32,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fsopen({:?}, {:?})", fstype, flags))]
+    #[error("fsopen({fstype}, {flags:?})")]
     Fsopen {
         fstype: String,
         flags: FsopenFlags,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fsconfig({}, FSCONFIG_CMD_CREATE)", sfd))]
-    FsconfigCreate {
-        sfd: FrozenFd,
-        source: IOError,
-        backtrace: Option<Backtrace>,
-    },
+    #[error("fsconfig({sfd}, FSCONFIG_CMD_CREATE)")]
+    FsconfigCreate { sfd: FrozenFd, source: IOError },
 
-    #[snafu(display("fsconfig({}, FSCONFIG_SET_STRING, {:?}, {:?})", sfd, key, value))]
+    #[error("fsconfig({sfd}, FSCONFIG_SET_STRING, {key:?}, {value:?})")]
     FsconfigSetString {
         sfd: FrozenFd,
         key: String,
         value: String,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("fsmount({}, {:?}, 0x{:x})", sfd, flags, mount_attrs))]
+    #[error("fsmount({sfd}, {flags:?}, 0x{mount_attrs:x})")]
     Fsmount {
         sfd: FrozenFd,
         flags: FsmountFlags,
         mount_attrs: u64,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("open_tree({}, {:?}, {:?})", dirfd, path, flags))]
+    #[error("open_tree({dirfd}, {path}, {flags:?})")]
     OpenTree {
         dirfd: FrozenFd,
         path: PathBuf,
         flags: OpenTreeFlags,
         source: IOError,
-        backtrace: Option<Backtrace>,
     },
 }
 
@@ -333,7 +255,6 @@ impl Error {
     pub(crate) fn root_cause(&self) -> &IOError {
         // XXX: This should probably be a macro...
         match self {
-            Error::FcntlDup { source, .. } => source,
             Error::FcntlGetFlags { source, .. } => source,
             Error::FcntlSetFlags { source, .. } => source,
             Error::Openat { source, .. } => source,
@@ -375,7 +296,10 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     let err = IOError::last_os_error();
 
     if old < 0 {
-        return Err(err).context(FcntlGetFlagsSnafu { fd });
+        Err(Error::FcntlGetFlags {
+            fd: fd.into(),
+            source: err,
+        })?
     }
 
     let new = old & !libc::FD_CLOEXEC;
@@ -390,7 +314,11 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(FcntlSetFlagsSnafu { fd, flags: new })
+        Err(Error::FcntlSetFlags {
+            fd: fd.into(),
+            flags: new,
+            source: err,
+        })
     }
 }
 
@@ -415,11 +343,12 @@ pub(crate) fn openat_follow<P: AsRef<Path>>(
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(err).context(OpenatSnafu {
-            dirfd,
-            path,
+        Err(Error::Openat {
+            dirfd: dirfd.into(),
+            path: path.into(),
             flags: OpenFlags::from_bits_retain(flags),
             mode,
+            source: err,
         })
     }
 }
@@ -464,7 +393,11 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
         if maybe_truncated {
             err = IOError::from_raw_os_error(libc::ENAMETOOLONG);
         }
-        Err(err).context(ReadlinkatSnafu { dirfd, path })
+        Err(Error::Readlinkat {
+            dirfd: dirfd.into(),
+            path: path.into(),
+            source: err,
+        })
     } else {
         let content = OsStr::from_bytes(&buffer[..(len as usize)]);
         Ok(PathBuf::from(content))
@@ -484,7 +417,12 @@ pub(crate) fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Re
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(MkdiratSnafu { dirfd, path, mode })
+        Err(Error::Mkdirat {
+            dirfd: dirfd.into(),
+            path: path.into(),
+            mode,
+            source: err,
+        })
     }
 }
 
@@ -512,12 +450,13 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
         Ok(())
     } else {
         let (major, minor) = devmajorminor(dev);
-        Err(err).context(MknodatSnafu {
-            dirfd,
-            path,
+        Err(Error::Mknodat {
+            dirfd: dirfd.into(),
+            path: path.into(),
             mode,
             major,
             minor,
+            source: err,
         })
     }
 }
@@ -535,7 +474,12 @@ pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> R
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(UnlinkatSnafu { dirfd, path, flags })
+        Err(Error::Unlinkat {
+            dirfd: dirfd.into(),
+            path: path.into(),
+            flags,
+            source: err,
+        })
     }
 }
 
@@ -566,12 +510,13 @@ pub(crate) fn linkat<P1: AsRef<Path>, P2: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(LinkatSnafu {
-            olddirfd,
-            oldpath,
-            newdirfd,
-            newpath,
+        Err(Error::Linkat {
+            olddirfd: olddirfd.into(),
+            oldpath: oldpath.into(),
+            newdirfd: newdirfd.into(),
+            newpath: newpath.into(),
             flags,
+            source: err,
         })
     }
 }
@@ -600,10 +545,11 @@ pub(crate) fn symlinkat<P1: AsRef<Path>, P2: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(SymlinkatSnafu {
-            dirfd,
-            path,
-            target,
+        Err(Error::Symlinkat {
+            dirfd: dirfd.into(),
+            path: path.into(),
+            target: target.into(),
+            source: err,
         })
     }
 }
@@ -633,11 +579,12 @@ pub(crate) fn renameat<P1: AsRef<Path>, P2: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(RenameatSnafu {
-            olddirfd,
-            oldpath,
-            newdirfd,
-            newpath,
+        Err(Error::Renameat {
+            olddirfd: olddirfd.into(),
+            oldpath: oldpath.into(),
+            newdirfd: newdirfd.into(),
+            newpath: newpath.into(),
+            source: err,
         })
     }
 }
@@ -694,12 +641,13 @@ pub(crate) fn renameat2<P1: AsRef<Path>, P2: AsRef<Path>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(Renameat2Snafu {
-            olddirfd,
-            oldpath,
-            newdirfd,
-            newpath,
+        Err(Error::Renameat2 {
+            olddirfd: olddirfd.into(),
+            oldpath: oldpath.into(),
+            newdirfd: newdirfd.into(),
+            newpath: newpath.into(),
             flags,
+            source: err,
         })
     }
 }
@@ -718,7 +666,10 @@ pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
     if ret >= 0 {
         Ok(buf)
     } else {
-        Err(err).context(FstatfsSnafu { fd })
+        Err(Error::Fstatfs {
+            fd: fd.into(),
+            source: err,
+        })
     }
 }
 
@@ -747,7 +698,12 @@ pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Err
     if ret >= 0 {
         Ok(buf)
     } else {
-        Err(err).context(FstatatSnafu { dirfd, path, flags })
+        Err(Error::Fstatat {
+            dirfd: dirfd.into(),
+            path: path.into(),
+            flags,
+            source: err,
+        })
     }
 }
 
@@ -777,11 +733,12 @@ pub(crate) fn statx<P: AsRef<Path>>(
     if ret >= 0 {
         Ok(buf)
     } else {
-        Err(err).context(StatxSnafu {
-            dirfd,
-            path,
+        Err(Error::Statx {
+            dirfd: dirfd.into(),
+            path: path.into(),
             flags,
             mask,
+            source: err,
         })
     }
 }
@@ -811,7 +768,7 @@ impl fmt::Display for OpenHow {
     }
 }
 
-pub fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<File, Error> {
+pub(crate) fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<File, Error> {
     let path = path.as_ref();
 
     // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
@@ -835,38 +792,39 @@ pub fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<F
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(err).context(Openat2Snafu {
-            dirfd,
-            path,
+        Err(Error::Openat2 {
+            dirfd: dirfd.into(),
+            path: path.into(),
             how,
             size: std::mem::size_of::<OpenHow>(),
+            source: err,
         })
     }
 }
 
 #[cfg(test)]
-pub fn getpid() -> libc::pid_t {
+pub(crate) fn getpid() -> libc::pid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::getpid() }
 }
 
-pub fn gettid() -> libc::pid_t {
+pub(crate) fn gettid() -> libc::pid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::gettid() }
 }
 
-pub fn geteuid() -> libc::uid_t {
+pub(crate) fn geteuid() -> libc::uid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::geteuid() }
 }
 
-pub fn getegid() -> libc::gid_t {
+pub(crate) fn getegid() -> libc::gid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::getegid() }
 }
 
 #[cfg(test)]
-pub fn getcwd() -> Result<PathBuf, anyhow::Error> {
+pub(crate) fn getcwd() -> Result<PathBuf, anyhow::Error> {
     use rustix::process;
 
     let buffer = Vec::with_capacity(libc::PATH_MAX as usize);
@@ -905,7 +863,7 @@ enum FsconfigCmd {
     Reconfigure = 0x7,  // FSCONFIG_RECONFIGURE
 }
 
-pub fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<File, Error> {
+pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<File, Error> {
     let fstype = fstype.as_ref();
     let c_fstype = CString::new(fstype).expect("fsopen argument should be valid C string");
 
@@ -917,11 +875,15 @@ pub fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<File, Erro
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(err).context(FsopenSnafu { fstype, flags })
+        Err(Error::Fsopen {
+            fstype: fstype.into(),
+            flags,
+            source: err,
+        })
     }
 }
 
-pub fn fsconfig_set_string<K: AsRef<str>, V: AsRef<str>>(
+pub(crate) fn fsconfig_set_string<K: AsRef<str>, V: AsRef<str>>(
     sfd: RawFd,
     key: K,
     value: V,
@@ -947,14 +909,19 @@ pub fn fsconfig_set_string<K: AsRef<str>, V: AsRef<str>>(
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(FsconfigCreateSnafu { sfd })
+        Err(Error::FsconfigSetString {
+            sfd: sfd.into(),
+            key: key.into(),
+            value: value.into(),
+            source: err,
+        })
     }
 }
 
 // clippy doesn't understand that we need to specify a type for ptr::null() here
 // because libc::syscall() is variadic.
 #[allow(clippy::unnecessary_cast)]
-pub fn fsconfig_create(sfd: RawFd) -> Result<(), Error> {
+pub(crate) fn fsconfig_create(sfd: RawFd) -> Result<(), Error> {
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::syscall(
@@ -971,11 +938,14 @@ pub fn fsconfig_create(sfd: RawFd) -> Result<(), Error> {
     if ret >= 0 {
         Ok(())
     } else {
-        Err(err).context(FsconfigCreateSnafu { sfd })
+        Err(Error::FsconfigCreate {
+            sfd: sfd.into(),
+            source: err,
+        })
     }
 }
 
-pub fn fsmount(sfd: RawFd, flags: FsmountFlags, mount_attrs: u64) -> Result<File, Error> {
+pub(crate) fn fsmount(sfd: RawFd, flags: FsmountFlags, mount_attrs: u64) -> Result<File, Error> {
     // SAFETY: Obviously safe-to-use Linux syscall.
     let fd = unsafe { libc::syscall(libc::SYS_fsmount, sfd, flags.bits(), mount_attrs) as RawFd };
     let err = IOError::last_os_error();
@@ -984,15 +954,16 @@ pub fn fsmount(sfd: RawFd, flags: FsmountFlags, mount_attrs: u64) -> Result<File
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(err).context(FsmountSnafu {
-            sfd,
+        Err(Error::Fsmount {
+            sfd: sfd.into(),
             flags,
             mount_attrs,
+            source: err,
         })
     }
 }
 
-pub fn open_tree<P: AsRef<Path>>(
+pub(crate) fn open_tree<P: AsRef<Path>>(
     dirfd: RawFd,
     path: P,
     flags: OpenTreeFlags,
@@ -1010,6 +981,11 @@ pub fn open_tree<P: AsRef<Path>>(
         // SAFETY: We know it's a real file descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     } else {
-        Err(err).context(OpenTreeSnafu { dirfd, path, flags })
+        Err(Error::OpenTree {
+            dirfd: dirfd.into(),
+            path: path.into(),
+            flags,
+            source: err,
+        })
     }
 }

@@ -31,7 +31,7 @@
 // them somehow?
 
 use crate::{
-    error::{self, Error, ErrorExt},
+    error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, ResolverFlags},
     resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls::{self, OpenHow},
@@ -45,8 +45,6 @@ use std::{
     os::unix::{ffi::OsStrExt, io::AsRawFd},
     path::Path,
 };
-
-use snafu::ResultExt;
 
 /// Used internally for tests to force the usage of a specific resolver. You
 /// should always use the default.
@@ -78,16 +76,16 @@ impl ProcfsResolver {
         // confusing errors during lookup. O_TMPFILE contains multiple flags
         // (including O_DIRECTORY!) so we have to check it separately.
         let invalid_flags = OpenFlags::O_CREAT | OpenFlags::O_EXCL;
-        ensure!(
-            oflags.intersection(invalid_flags).is_empty() && !oflags.contains(OpenFlags::O_TMPFILE),
-            error::InvalidArgumentSnafu {
-                name: "flags",
+        if !oflags.intersection(invalid_flags).is_empty() || oflags.contains(OpenFlags::O_TMPFILE) {
+            Err(ErrorImpl::InvalidArgument {
+                name: "flags".into(),
                 description: format!(
                     "invalid flags {:?} specified",
                     oflags.intersection(invalid_flags)
-                ),
-            },
-        );
+                )
+                .into(),
+            })?
+        }
 
         match *self {
             Self::Openat2 => openat2_resolve(root, path, oflags, rflags),
@@ -102,10 +100,11 @@ fn openat2_resolve<P: AsRef<Path>>(
     oflags: OpenFlags,
     rflags: ResolverFlags,
 ) -> Result<File, Error> {
-    ensure!(
-        *syscalls::OPENAT2_IS_SUPPORTED,
-        error::NotSupportedSnafu { feature: "openat2" }
-    );
+    if !*syscalls::OPENAT2_IS_SUPPORTED {
+        Err(ErrorImpl::NotSupported {
+            feature: "openat2".into(),
+        })?
+    }
 
     // Copy the O_NOFOLLOW and RESOLVE_NO_SYMLINKS bits from rflags.
     let oflags = oflags.bits() as u64;
@@ -121,24 +120,25 @@ fn openat2_resolve<P: AsRef<Path>>(
             ..Default::default()
         },
     )
-    .context(error::RawOsSnafu {
-        operation: "open subpath in procfs",
+    .map_err(|err| {
+        ErrorImpl::RawOsError {
+            operation: "open subpath in procfs".into(),
+            source: err,
+        }
+        .into()
     })
 }
 
 fn check_mnt_id(root_mnt_id: Option<u64>, file: &File) -> Result<(), Error> {
     let got_mnt_id = utils::fetch_mnt_id(file, "")?;
     if got_mnt_id != root_mnt_id {
-        Err(IOError::from_raw_os_error(libc::EXDEV))
-            .context(error::OsSnafu {
-                operation: "emulated RESOLVE_NO_XDEV",
-            })
-            .with_wrap(|| {
-                format!(
-                "mount id mismatch in restricted procfs resolver (mnt_id is {:?}, not procfs {:?})",
-                got_mnt_id, root_mnt_id
-            )
-            })?;
+        Err(ErrorImpl::OsError {
+            operation: "emulated RESOLVE_NO_XDEV".into(),
+            source: IOError::from_raw_os_error(libc::EXDEV),
+        })
+        .wrap(format!(
+            "mount id mismatch in restricted procfs resolver (mnt_id is {got_mnt_id:?}, not procfs {root_mnt_id:?})",
+        ))?
     }
     Ok(())
 }
@@ -153,8 +153,9 @@ fn opath_resolve<P: AsRef<Path>>(
 
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one.
-    let mut current = root.try_clone().context(error::OsSnafu {
-        operation: "dup root handle as starting point of resolution",
+    let mut current = root.try_clone().map_err(|err| ErrorImpl::OsError {
+        operation: "dup root handle as starting point of resolution".into(),
+        source: err,
     })?;
 
     // Get initial set of components from the passed path. We remove components
@@ -177,11 +178,11 @@ fn opath_resolve<P: AsRef<Path>>(
         // We cannot walk into ".." without checking if there was a breakout
         // with /proc (a-la opath::resolve) so return an error if we hit "..".
         if part.as_bytes() == b".." {
-            return Err(IOError::from_raw_os_error(libc::EXDEV))
-                .context(error::OsSnafu {
-                    operation: "step into '..'",
-                })
-                .wrap("cannot walk into '..' with restricted procfs resolver")?;
+            Err(ErrorImpl::OsError {
+                operation: "step into '..'".into(),
+                source: IOError::from_raw_os_error(libc::EXDEV),
+            })
+            .wrap("cannot walk into '..' with restricted procfs resolver")?
         }
 
         // Get our next element.
@@ -191,20 +192,22 @@ fn opath_resolve<P: AsRef<Path>>(
             libc::O_PATH | libc::O_NOFOLLOW,
             0,
         )
-        .context(error::RawOsSnafu {
-            operation: "open next component of resolution",
+        .map_err(|err| ErrorImpl::RawOsError {
+            operation: "open next component of resolution".into(),
+            source: err,
         })?;
 
         // Check that the next component is on the same mountpoint.
         // NOTE: If the root is the host /proc mount, this is only safe if there
         // are no racing mounts.
-        check_mnt_id(root_mnt_id, &next).with_wrap(|| format!("open next component {:?}", part))?;
+        check_mnt_id(root_mnt_id, &next).with_wrap(|| format!("open next component {part:?}"))?;
 
         let next_type = next
             // NOTE: File::metadata definitely does an fstat(2) here.
             .metadata()
-            .context(error::OsSnafu {
-                operation: "fstat of next component",
+            .map_err(|err| ErrorImpl::OsError {
+                operation: "fstat of next component".into(),
+                source: err,
             })?
             .file_type();
 
@@ -294,12 +297,11 @@ fn opath_resolve<P: AsRef<Path>>(
                         || err.root_cause().raw_os_error() != Some(libc::ENOTDIR)
                         || !next_type.is_symlink()
                     {
-                        return Err(err).context(error::RawOsSnafu {
-                            operation: format!(
-                                "open last component of resolution with {:?}",
-                                oflags
-                            ),
-                        })?;
+                        Err(ErrorImpl::RawOsError {
+                            operation: format!("open last component of resolution with {oflags:?}")
+                                .into(),
+                            source: err,
+                        })?
                     }
                 }
             }
@@ -315,16 +317,13 @@ fn opath_resolve<P: AsRef<Path>>(
 
         // Don't continue walking if user asked for no symlinks.
         if rflags.contains(ResolverFlags::NO_SYMLINKS) {
-            return Err(IOError::from_raw_os_error(libc::ELOOP))
-                .context(error::OsSnafu {
-                    operation: "emulated symlink resolution",
-                })
-                .with_wrap(|| {
-                    format!(
-                        "component {:?} is a symlink but symlink resolution is disabled",
-                        part
-                    )
-                })?;
+            Err(ErrorImpl::OsError {
+                operation: "emulated symlink resolution".into(),
+                source: IOError::from_raw_os_error(libc::ELOOP),
+            })
+            .wrap(format!(
+                "component {part:?} is a symlink but symlink resolution is disabled",
+            ))?
         }
 
         // We need a limit on the number of symlinks we traverse to avoid
@@ -335,14 +334,17 @@ fn opath_resolve<P: AsRef<Path>>(
         // regular symlink loops). But for procfs can
         symlink_traversals += 1;
         if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
-            return Err(IOError::from_raw_os_error(libc::ELOOP)).context(error::OsSnafu {
-                operation: "emulated symlink resolution",
-            })?;
+            Err(ErrorImpl::OsError {
+                operation: "emulated symlink resolution".into(),
+                source: IOError::from_raw_os_error(libc::ELOOP),
+            })
+            .wrap("exceeded symlink limit")?
         }
 
         let link_target =
-            syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
-                operation: "readlink next symlink component",
+            syscalls::readlinkat(next.as_raw_fd(), "").map_err(|err| ErrorImpl::RawOsError {
+                operation: "readlink next symlink component".into(),
+                source: err,
             })?;
 
         // The hardened resolver is called using a root that is a subdir of
@@ -351,11 +353,12 @@ fn opath_resolve<P: AsRef<Path>>(
         // into an absolute symlink (which is almost certainly a magic-link --
         // though we can't detect that directly without openat2).
         if link_target.is_absolute() {
-            return Err(IOError::from_raw_os_error(libc::ELOOP))
-                .context(error::OsSnafu {
-                    operation: format!("step into absolute symlink {:?}", link_target),
-                })
-                .wrap("cannot walk into absolute symlinks with restricted procfs resolver")?;
+            Err(ErrorImpl::OsError {
+                operation: "emulated RESOLVE_NO_MAGICLINKS".into(),
+                source: IOError::from_raw_os_error(libc::ELOOP),
+            })
+            .wrap(format!("step into absolute symlink {link_target:?}"))
+            .wrap("cannot walk into absolute symlinks with restricted procfs resolver")?
         }
 
         link_target

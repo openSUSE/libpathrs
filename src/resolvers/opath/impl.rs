@@ -37,7 +37,7 @@
 //! attempts.
 
 use crate::{
-    error::{self, Error, ErrorExt},
+    error::{Error, ErrorExt, ErrorImpl},
     flags::ResolverFlags,
     procfs::PROCFS_HANDLE,
     resolvers::{opath::SymlinkStack, PartialLookup, MAX_SYMLINK_TRAVERSALS},
@@ -58,7 +58,6 @@ use std::{
 };
 
 use itertools::Itertools;
-use snafu::ResultExt;
 
 /// Ensure that the expected path within the root matches the current fd.
 fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Result<(), Error> {
@@ -96,16 +95,16 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
         .wrap("check fd against expected path")?;
 
     // The paths should be identical.
-    ensure!(
-        current_path == full_path,
-        error::SafetyViolationSnafu {
+    if current_path != full_path {
+        Err(ErrorImpl::SafetyViolation {
             description: format!(
                 "fd doesn't match expected path ({} != {})",
                 current_path.display(),
                 full_path.display()
             )
-        }
-    );
+            .into(),
+        })?
+    }
 
     // And the root should not have moved. Note that this check could (in
     // theory) be bypassed by an attacker -- so it important that users be aware
@@ -115,12 +114,11 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
     let new_root_path = root
         .as_unsafe_path(&PROCFS_HANDLE)
         .wrap("get root path to double-check it hasn't moved")?;
-    ensure!(
-        root_path == new_root_path,
-        error::SafetyViolationSnafu {
-            description: "root moved during lookup"
-        }
-    );
+    if root_path != new_root_path {
+        Err(ErrorImpl::SafetyViolation {
+            description: "root moved during lookup".into(),
+        })?
+    }
 
     Ok(())
 }
@@ -144,8 +142,9 @@ fn do_resolve<P: AsRef<Path>>(
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let root = Rc::new(root.try_clone().context(error::OsSnafu {
-        operation: "dup root handle as starting point of resolution",
+    let root = Rc::new(root.try_clone().map_err(|err| ErrorImpl::OsError {
+        operation: "dup root handle as starting point of resolution".into(),
+        source: err,
     })?);
     let mut current = Rc::clone(&root);
 
@@ -198,12 +197,11 @@ fn do_resolve<P: AsRef<Path>>(
                 // are only touching the final component in the path. If there
                 // are any other path components we must bail. This shouldn't
                 // ever happen, but it's better to be safe.
-                ensure!(
-                    !part.as_bytes().contains(&b'/'),
-                    error::SafetyViolationSnafu {
-                        description: "component of path resolution contains '/'",
-                    }
-                );
+                if part.as_bytes().contains(&b'/') {
+                    Err(ErrorImpl::SafetyViolation {
+                        description: "component of path resolution contains '/'".into(),
+                    })?
+                }
 
                 part
             }
@@ -216,8 +214,12 @@ fn do_resolve<P: AsRef<Path>>(
             libc::O_PATH | libc::O_NOFOLLOW,
             0,
         )
-        .context(error::RawOsSnafu {
-            operation: "open next component of resolution",
+        .map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "open next component of resolution".into(),
+                source: err,
+            }
+            .into()
         }) {
             Err(err) => {
                 return Ok(PartialLookup::Partial {
@@ -248,8 +250,9 @@ fn do_resolve<P: AsRef<Path>>(
                 if !next
                     // NOTE: File::metadata definitely does an fstat(2) here.
                     .metadata()
-                    .context(error::OsSnafu {
-                        operation: "fstat of next component",
+                    .map_err(|err| ErrorImpl::OsError {
+                        operation: "fstat of next component".into(),
+                        source: err,
                     })?
                     .file_type()
                     .is_symlink()
@@ -257,9 +260,12 @@ fn do_resolve<P: AsRef<Path>>(
                     // We hit a non-symlink component, so clear it from the
                     // symlink stack.
                     if let Some(ref mut stack) = symlink_stack {
-                        stack.pop_part(&part).context(error::BadSymlinkStackSnafu {
-                            description: "walking into component",
-                        })?;
+                        stack
+                            .pop_part(&part)
+                            .map_err(|err| ErrorImpl::BadSymlinkStackError {
+                                description: "walking into component".into(),
+                                source: err,
+                            })?;
                     }
                     // Just keep walking.
                     current = next.into();
@@ -274,22 +280,18 @@ fn do_resolve<P: AsRef<Path>>(
 
                     // Don't continue walking if user asked for no symlinks.
                     if flags.contains(ResolverFlags::NO_SYMLINKS) {
-                        // XXX: Ugly hack to create an Error for PartialLookup.
-                        let last_error = Err::<(), _>(IOError::from_raw_os_error(libc::ELOOP))
-                            .context(error::OsSnafu {
-                                operation: "emulated symlink resolution",
-                            })
-                            .with_wrap(|| {
-                                format!(
-                                "component {:?} is a symlink but symlink resolution is disabled",
-                                part
-                            )
-                            })
-                            .expect_err("Err(err).err() must always be Some(err)");
                         return Ok(PartialLookup::Partial {
                             handle: current,
                             remaining,
-                            last_error,
+                            // Construct a fake OS error containing ELOOP.
+                            last_error: ErrorImpl::OsError {
+                                operation: "emulated symlink resolution".into(),
+                                source: IOError::from_raw_os_error(libc::ELOOP),
+                            }
+                            .wrap(format!(
+                                "component {part:?} is a symlink but symlink resolution is disabled",
+                            ))
+                            .into(),
                         });
                     }
 
@@ -297,22 +299,25 @@ fn do_resolve<P: AsRef<Path>>(
                     // avoid hitting filesystem loops and DoSing.
                     symlink_traversals += 1;
                     if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
-                        // XXX: Ugly hack to create an Error for PartialLookup.
-                        let last_error = Err::<(), _>(IOError::from_raw_os_error(libc::ELOOP))
-                            .context(error::OsSnafu {
-                                operation: "emulated symlink resolution",
-                            })
-                            .expect_err("Err(err).err() must always be Some(err)");
                         return Ok(PartialLookup::Partial {
                             handle: current,
                             remaining,
-                            last_error,
+                            // Construct a fake OS error containing ELOOP.
+                            last_error: ErrorImpl::OsError {
+                                operation: "emulated symlink resolution".into(),
+                                source: IOError::from_raw_os_error(libc::ELOOP),
+                            }
+                            .wrap("exceeded symlink limit")
+                            .into(),
                         });
                     }
 
                     let link_target =
-                        syscalls::readlinkat(next.as_raw_fd(), "").context(error::RawOsSnafu {
-                            operation: "readlink next symlink component",
+                        syscalls::readlinkat(next.as_raw_fd(), "").map_err(|err| {
+                            ErrorImpl::RawOsError {
+                                operation: "readlink next symlink component".into(),
+                                source: err,
+                            }
                         })?;
 
                     // Check if it's a good idea to walk this symlink. If we are on
@@ -338,11 +343,11 @@ fn do_resolve<P: AsRef<Path>>(
                             .is_magiclink_filesystem()
                             .wrap("check if next is on a dangerous filesystem")?
                     {
-                        return Err(IOError::from_raw_os_error(libc::ELOOP))
-                            .context(error::OsSnafu {
-                                operation: "emulated RESOLVE_NO_MAGICLINKS",
-                            })
-                            .wrap("walked into a potential magic-link")?;
+                        Err(ErrorImpl::OsError {
+                            operation: "emulated RESOLVE_NO_MAGICLINKS".into(),
+                            source: IOError::from_raw_os_error(libc::ELOOP),
+                        })
+                        .wrap("walked into a potential magic-link")?
                     }
 
                     // Swap out the symlink component in the symlink stack with
@@ -350,8 +355,9 @@ fn do_resolve<P: AsRef<Path>>(
                     if let Some(ref mut stack) = symlink_stack {
                         stack
                             .swap_link(&part, (&current, remaining), link_target.clone())
-                            .context(error::BadSymlinkStackSnafu {
-                                description: "walking into symlink",
+                            .map_err(|err| ErrorImpl::BadSymlinkStackError {
+                                description: "walking into symlink".into(),
+                                source: err,
                             })?;
                     }
 

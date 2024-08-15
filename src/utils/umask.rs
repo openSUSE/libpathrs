@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    error::{self, Error},
+    error::{Error, ErrorImpl},
     flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
     syscalls,
@@ -32,7 +32,6 @@ use std::{
 
 use libc::mode_t;
 use regex::Regex;
-use snafu::ResultExt;
 
 /// Get the current process's umask from `/proc/thread-self/status`.
 // There has been a Umask: field in /proc/self/status since Linux 4.7.
@@ -50,8 +49,9 @@ fn get_umask_procfs(procfs: &ProcfsHandle) -> Result<Option<mode_t>, Error> {
     let status_file = procfs.open(ProcfsBase::ProcThreadSelf, "status", OpenFlags::O_RDONLY)?;
     let reader = BufReader::new(status_file);
     for line in reader.lines() {
-        let line = line.context(error::OsSnafu {
-            operation: "read lines from /proc/self/status",
+        let line = line.map_err(|err| ErrorImpl::OsError {
+            operation: "read lines from /proc/self/status".into(),
+            source: err,
         })?;
         let Some((_, [umask])) = RE.captures(&line).map(|caps| caps.extract()) else {
             continue;
@@ -74,8 +74,9 @@ fn get_umask_tmpfile() -> Result<mode_t, Error> {
         libc::O_TMPFILE | libc::O_RDWR,
         0o777,
     )
-    .context(error::RawOsSnafu {
-        operation: "create O_TMPFILE",
+    .map_err(|err| ErrorImpl::RawOsError {
+        operation: "create O_TMPFILE".into(),
+        source: err,
     })?;
     // TODO: Use tempfile to create a named temporary file as a backup. This
     // would let us support pre-3.11 kernels. Ideally setting permissions with
@@ -83,8 +84,9 @@ fn get_umask_tmpfile() -> Result<mode_t, Error> {
     // <https://github.com/Stebalien/tempfile/issues/292>
 
     let actual_mode = syscalls::fstatat(file.as_raw_fd(), "")
-        .context(error::RawOsSnafu {
-            operation: "fstat temporary file",
+        .map_err(|err| ErrorImpl::RawOsError {
+            operation: "fstat temporary file".into(),
+            source: err,
         })?
         .st_mode;
 

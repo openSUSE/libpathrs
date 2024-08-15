@@ -212,19 +212,19 @@ mod tests {
                     fn [<openflags_ $test_name _access_mode>]() {
                         let flags = $(OpenFlags::$flag)|*;
                         let accmode: Option<i32> = $accmode;
-                        assert_eq!(flags.access_mode(), accmode, "{:?} access mode should be {:?}", flags, accmode.map(OpenFlags::from_bits_retain));
+                        assert_eq!(flags.access_mode(), accmode, "{flags:?} access mode should be {:?}", accmode.map(OpenFlags::from_bits_retain));
                     }
 
                     #[test]
                     fn [<openflags_ $test_name _wants_read>]() {
                         let flags = $(OpenFlags::$flag)|*;
-                        assert_eq!(flags.wants_read(), $wants_read, "{:?} wants_read should be {:?}", flags, $wants_read);
+                        assert_eq!(flags.wants_read(), $wants_read, "{flags:?} wants_read should be {:?}", $wants_read);
                     }
 
                     #[test]
                     fn [<openflags_ $test_name _wants_write>]() {
                         let flags = $(OpenFlags::$flag)|*;
-                        assert_eq!(flags.wants_write(), $wants_write, "{:?} wants_write should be {:?}", flags, $wants_write);
+                        assert_eq!(flags.wants_write(), $wants_write, "{flags:?} wants_write should be {:?}", $wants_write);
                     }
                 }
             )*

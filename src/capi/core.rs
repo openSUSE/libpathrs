@@ -22,7 +22,7 @@ use crate::{
         ret::{self, IntoCReturn},
         utils,
     },
-    error,
+    error::ErrorImpl,
     flags::{OpenFlags, RenameFlags},
     procfs::PROCFS_HANDLE,
     syscalls,
@@ -39,7 +39,6 @@ use std::{
 };
 
 use libc::{c_char, c_int, c_uint, dev_t, size_t};
-use snafu::ResultExt;
 
 /// Open a root handle.
 ///
@@ -95,8 +94,11 @@ pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
             // Rust sets O_CLOEXEC by default, without an opt-out. We need to
             // disable it if we weren't asked to do O_CLOEXEC.
             if !flags.contains(OpenFlags::O_CLOEXEC) {
-                syscalls::fcntl_unset_cloexec(file.as_raw_fd()).context(error::RawOsSnafu {
-                    operation: "clear O_CLOEXEC on fd",
+                syscalls::fcntl_unset_cloexec(file.as_raw_fd()).map_err(|err| {
+                    ErrorImpl::RawOsError {
+                        operation: "clear O_CLOEXEC on fd".into(),
+                        source: err,
+                    }
                 })?;
             }
             Ok(file)
@@ -338,15 +340,13 @@ pub extern "C" fn pathrs_mknod(
             libc::S_IFBLK => InodeType::BlockDevice(perms, dev),
             libc::S_IFCHR => InodeType::CharacterDevice(perms, dev),
             libc::S_IFIFO => InodeType::Fifo(perms),
-            libc::S_IFSOCK => error::NotImplementedSnafu {
-                feature: "mknod(S_IFSOCK)",
-            }
-            .fail()?,
-            _ => error::InvalidArgumentSnafu {
-                name: "mode",
-                description: "invalid S_IFMT mask",
-            }
-            .fail()?,
+            libc::S_IFSOCK => Err(ErrorImpl::NotImplemented {
+                feature: "mknod(S_IFSOCK)".into(),
+            })?,
+            _ => Err(ErrorImpl::InvalidArgument {
+                name: "mode".into(),
+                description: "invalid S_IFMT mask".into(),
+            })?,
         };
         root.create(path, &inode_type)
     })

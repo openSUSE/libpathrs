@@ -24,134 +24,72 @@
 // NOTE: This module is mostly a workaround until several issues have been
 //       resolved:
 //
-//  * https://github.com/shepmaster/snafu/issues/188.
 //  * `std::error::Error::chain` is stabilised.
 //  * I figure out a nice way to implement GlobalBacktrace...
 
-#[doc(inline)]
-pub use crate::{
-    resolvers::opath::SymlinkStackError,
-    syscalls::{Error as SyscallError, FrozenFd},
-};
+use crate::{resolvers::opath::SymlinkStackError, syscalls::Error as SyscallError};
 
-use std::{backtrace::Backtrace, error::Error as StdError, io::Error as IOError};
+use std::{borrow::Cow, error::Error as StdError, io::Error as IOError};
 
-use snafu::ResultExt;
+// TODO: Add a backtrace to Error. We would just need to add an automatic
+//       Backtrace::capture() in From. But it's not clear whether we want to
+//       export the crate types here without std::backtrace::Backtrace.
 
-/// The primary error type returned by libpathrs.
-///
-/// All public interfaces of libpathrs will return this error in `Result`s. In
-/// order to enable or disable backtrace-generation for libpathrs `Error`s,
-/// modify [`BACKTRACES_ENABLED`].
-///
-/// # Caveats
-/// Until [`Error::chain`] is stabilised, it will be necessary for callers
-/// to manually implement their own version of this feature.
-///
-/// [`BACKTRACES_ENABLED`]: static.BACKTRACES_ENABLED.html
-/// [`Error::chain`]: https://doc.rust-lang.org/nightly/std/error/trait.Error.html#method.chain
-#[derive(Snafu, Debug)]
-#[snafu(visibility(pub(crate)))]
-#[non_exhaustive]
-pub enum Error {
-    /// The requested feature is not yet implemented.
-    #[snafu(display("feature '{}' not implemented", feature))]
-    NotImplemented {
-        /// Feature which is not implemented.
-        feature: String,
-        /// Backtrace captured at time of error.
-        backtrace: Option<Backtrace>,
-    },
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+pub struct Error(#[from] Box<ErrorImpl>);
 
-    /// The requested feature is not supported by this kernel.
-    #[snafu(display("feature '{}' not supported on this kernel", feature))]
-    NotSupported {
-        /// Feature which is not supported.
-        feature: String,
-        /// Backtrace captured at time of error.
-        backtrace: Option<Backtrace>,
-    },
+impl From<ErrorImpl> for Error {
+    fn from(err: ErrorImpl) -> Self {
+        Self(Box::new(err))
+    }
+}
 
-    /// One of the provided arguments in invalid.
-    #[snafu(display("invalid {} argument: {}", name, description))]
+impl Error {
+    pub(crate) fn kind(&self) -> ErrorKind {
+        self.0.kind()
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum ErrorImpl {
+    #[error("feature {feature} is not implemented")]
+    NotImplemented { feature: Cow<'static, str> },
+
+    #[error("feature {feature} not supported on this kernel")]
+    NotSupported { feature: Cow<'static, str> },
+
+    #[error("invalid {name} argument: {description}")]
     InvalidArgument {
-        /// Name of the invalid argument.
-        name: String,
-        /// Description of what makes the argument invalid.
-        description: String,
-        /// Backtrace captured at time of error.
-        backtrace: Option<Backtrace>,
+        name: Cow<'static, str>,
+        description: Cow<'static, str>,
     },
 
-    /// libpathrs has detected some form of safety requirement violation.
-    /// This might be an attempted breakout by an attacker or even a bug
-    /// internal to libpathrs.
-    #[snafu(display("violation of safety requirement: {}", description))]
-    SafetyViolation {
-        /// Description of safety requirement which was violated.
-        description: String,
-        /// Backtrace captured at time of error.
-        backtrace: Option<Backtrace>,
-    },
+    #[error("violation of safety requirement: {description}")]
+    SafetyViolation { description: Cow<'static, str> },
 
-    /// There was a broken symlink stack during iteration.
-    #[snafu(display("broken symlink stack during iteration: {description}"))]
+    #[error("broken symlink stack during iteration: {description}")]
     BadSymlinkStackError {
-        /// Description of state check which was violated.
-        description: String,
-        /// Underlying error.
+        description: Cow<'static, str>,
         source: SymlinkStackError,
-        /// Backtrace captured at time of error.
-        backtrace: Option<Backtrace>,
     },
 
-    /// The requested libpathrs operation resulted in an [`IOError`]. This
-    /// should be contrasted with [`RawOsError`] -- which indicates an error
-    /// triggered by one of libpathrs's syscall wrappers.
-    ///
-    /// [`IOError`]: https://doc.rust-lang.org/std/io/struct.Error.html
-    /// [`RawOsError`]: enum.Error.html#variant.RawOsError
-    // TODO: Remove the OsError and RawOsError distinction.
-    #[snafu(display("{} failed: {}", operation, source))]
+    #[error("{operation} failed")]
     OsError {
-        /// Operation which was being attempted.
-        operation: String,
-        /// Underlying error.
+        operation: Cow<'static, str>,
         source: IOError,
-        /// Backtrace captured at time of error.
-        backtrace: Option<Backtrace>,
     },
 
-    /// The requested libpathrs operation resulted in a [`SyscallError`] by
-    /// one of libpathrs's syscall wrappers. This should be contrasted with
-    /// [`OsError`] -- which indicates an error triggered by a Rust stdlib
-    /// function.
-    ///
-    /// [`IOError`]: https://doc.rust-lang.org/std/io/struct.Error.html
-    /// [`OsError`]: enum.Error.html#variant.OsError
-    // TODO: Remove the OsError and RawOsError distinction.
-    #[snafu(display("{} failed: {}", operation, source))]
+    #[error("{operation} failed")]
     RawOsError {
-        /// Operation which was being attempted.
-        operation: String,
-        /// Underlying syscall wrapper error.
-        #[snafu(backtrace)]
+        operation: Cow<'static, str>,
         source: SyscallError,
     },
 
-    /// Wrapped represents an Error which has some simple string-wrapping
-    /// information. This is used to allow for some additional context to be
-    /// added at call-sites.
-    // XXX: Arguably this is super ugly and we should have a separate
-    //      context selector for each callsite but that's just ridiculous.
-    #[snafu(display("{}: {}", context, source))]
+    #[error("{context}")]
     Wrapped {
-        /// Additional context information about the contained error.
-        context: String,
-        /// Underlying wrapped error.
-        #[snafu(backtrace)]
-        #[snafu(source(from(Error, Box::new)))]
-        source: Box<Error>,
+        context: Cow<'static, str>,
+        source: Box<ErrorImpl>,
     },
 }
 
@@ -168,7 +106,7 @@ pub(crate) enum ErrorKind {
     OsError(Option<i32>),
 }
 
-impl Error {
+impl ErrorImpl {
     pub(crate) fn kind(&self) -> ErrorKind {
         match self {
             Self::NotImplemented { .. } => ErrorKind::NotImplemented,
@@ -186,9 +124,11 @@ impl Error {
 }
 
 // Private trait necessary to work around the "orphan trait" restriction.
-pub(crate) trait ErrorExt {
+pub(crate) trait ErrorExt: Sized {
     /// Wrap a `Result<..., Error>` with an additional context string.
-    fn wrap<S: Into<String>>(self, context: S) -> Self;
+    fn wrap<S: Into<String>>(self, context: S) -> Self {
+        self.with_wrap(|| context.into())
+    }
 
     /// Wrap a `Result<..., Error>` with an additional context string created by
     /// a closure.
@@ -197,18 +137,33 @@ pub(crate) trait ErrorExt {
         F: FnOnce() -> String;
 }
 
-impl<T> ErrorExt for Result<T, Error> {
-    fn wrap<S: Into<String>>(self, context: S) -> Self {
-        self.context(WrappedSnafu {
-            context: context.into(),
-        })
-    }
-
+impl ErrorExt for ErrorImpl {
     fn with_wrap<F>(self, context_fn: F) -> Self
     where
         F: FnOnce() -> String,
     {
-        self.wrap(context_fn())
+        Self::Wrapped {
+            context: context_fn().into(),
+            source: self.into(),
+        }
+    }
+}
+
+impl ErrorExt for Error {
+    fn with_wrap<F>(self, context_fn: F) -> Self
+    where
+        F: FnOnce() -> String,
+    {
+        self.0.with_wrap(context_fn).into()
+    }
+}
+
+impl<T, E: ErrorExt> ErrorExt for Result<T, E> {
+    fn with_wrap<F>(self, context_fn: F) -> Self
+    where
+        F: FnOnce() -> String,
+    {
+        self.map_err(|err| err.with_wrap(context_fn))
     }
 }
 

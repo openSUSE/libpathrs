@@ -38,7 +38,6 @@ use crate::utils::PathIterExt;
 
 use std::{
     collections::VecDeque,
-    error::Error as StdError,
     ffi::{OsStr, OsString},
     fmt,
     os::unix::ffi::OsStrExt,
@@ -46,28 +45,15 @@ use std::{
     rc::Rc,
 };
 
-#[derive(Debug, PartialEq)]
-pub enum SymlinkStackError {
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub(crate) enum SymlinkStackError {
+    #[error("[internal] empty stack")]
     EmptyStack,
+    #[error("[internal error] broken symlink stack: trying to pop component {part:?} from an empty stack entry")]
     BrokenStackEmpty { part: OsString },
+    #[error("[internal error] broken symlink stack: trying to pop component {part:?} but expected {expected:?}")]
     BrokenStackWrongComponent { part: OsString, expected: OsString },
 }
-
-impl fmt::Display for SymlinkStackError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyStack => write!(f, "[internal] empty stack"),
-            Self::BrokenStackEmpty { part } => {
-                write!(f, "[internal error] broken symlink stack: trying to pop component {part:?} from an empty stack entry")
-            }
-            Self::BrokenStackWrongComponent { part, expected } => {
-                write!(f, "[internal error] broken symlink stack: trying to pop component {part:?} but expected {expected:?}")
-            }
-        }
-    }
-}
-
-impl StdError for SymlinkStackError {}
 
 #[derive(Debug)]
 struct SymlinkStackEntry<F: fmt::Debug> {

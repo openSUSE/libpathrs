@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{self, Error, ErrorKind};
+use crate::error::{Error, ErrorImpl, ErrorKind};
 
 use std::{
     cmp,
@@ -30,13 +30,12 @@ use std::{
 use libc::{c_char, c_int, size_t};
 
 pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
-    ensure!(
-        !path.is_null(),
-        error::InvalidArgumentSnafu {
-            name: "path",
-            description: "cannot be NULL",
-        }
-    );
+    if path.is_null() {
+        Err(ErrorImpl::InvalidArgument {
+            name: "path".into(),
+            description: "cannot be NULL".into(),
+        })?
+    }
     // SAFETY: C caller guarantees that the path is a valid C-style string.
     let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
     Ok(OsStr::from_bytes(bytes).as_ref())
