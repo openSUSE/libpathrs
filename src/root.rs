@@ -104,6 +104,14 @@ pub enum InodeType {
     //DetachedSocket(),
 }
 
+/// The inode type for [`Root::remove_inode`]. This only used internally within
+/// libpathrs.
+#[derive(Clone, Copy, Debug)]
+enum RemoveInodeType {
+    Regular,   // ~AT_REMOVEDIR
+    Directory, // AT_REMOVEDIR
+}
+
 /// A handle to the root of a directory tree.
 ///
 /// # Safety
@@ -663,7 +671,8 @@ impl Root {
         Ok(Handle::from_file_unchecked(current))
     }
 
-    /// Within the [`Root`]'s tree, remove the inode at `path`.
+    /// Within the [`Root`]'s tree, remove the inode of type `inode_type` at
+    /// `path`.
     ///
     /// Any existing [`Handle`]s to `path` will continue to work as before,
     /// since Linux does not invalidate file handles to unlinked files (though,
@@ -671,19 +680,17 @@ impl Root {
     ///
     /// # Errors
     ///
-    /// If the path does not exist or is a non-empty directory, an error will be
-    /// returned. In order to remove a non-empty directory, please use
-    /// [`Root::remove_all`].
+    /// If the path does not exist, was not actually `inode_type`, or was a
+    /// non-empty directory an error will be returned.
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
-    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
-    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    fn remove_inode(&self, path: &Path, inode_type: RemoveInodeType) -> Result<(), Error> {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
         // the parent.
         let (parent, name) =
-            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+            utils::path_split(path).wrap("split target path into (parent, name)")?;
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
             description: "remove path has trailing slash".into(),
@@ -694,43 +701,55 @@ impl Root {
             .into_file();
         let dirfd = dir.as_raw_fd();
 
-        // There is no kernel API to "just remove this inode please". You need
-        // to know ahead-of-time what inode type it is. So we will try a couple
-        // of times and bail if we managed to hit an inode-type race multiple
-        // times.
-        let mut last_error: Option<syscalls::Error> = None;
-        for _ in 0..16 {
-            // XXX: A try-block would be super useful here but that's not a
-            //     thing in Rust unfortunately. So we need to manage last_error
-            //     ourselves the old fashioned way.
+        let flags = match inode_type {
+            RemoveInodeType::Regular => 0,
+            RemoveInodeType::Directory => libc::AT_REMOVEDIR,
+        };
 
-            let stat = match syscalls::fstatat(dirfd, name) {
-                Ok(stat) => stat,
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            };
-
-            let mut flags = 0;
-            if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
-                flags |= libc::AT_REMOVEDIR;
+        syscalls::unlinkat(dirfd, name, flags).map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "pathrs remove".into(),
+                source: err,
             }
+            .into()
+        })
+    }
 
-            match syscalls::unlinkat(dirfd, name, flags) {
-                Ok(_) => return Ok(()),
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            }
-        }
+    /// Within the [`Root`]'s tree, remove the empty directory at `path`.
+    ///
+    /// Any existing [`Handle`]s to `path` will continue to work as before,
+    /// since Linux does not invalidate file handles to unlinked files (though,
+    /// directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist, was not actually a directory, or was a
+    /// non-empty directory an error will be returned.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Handle`]: trait.Handle.html
+    #[inline]
+    pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.remove_inode(path.as_ref(), RemoveInodeType::Directory)
+    }
 
-        Err(ErrorImpl::RawOsError {
-            operation: "pathrs remove".into(),
-            // If we ever are here, then last_error must be Some.
-            source: last_error.expect("unlinkat loop failed so last_error must exist"),
-        })?
+    /// Within the [`Root`]'s tree, remove the file (any non-directory inode) at
+    /// `path`.
+    ///
+    /// Any existing [`Handle`]s to `path` will continue to work as before,
+    /// since Linux does not invalidate file handles to unlinked files (though,
+    /// directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist or was actually a directory an error will be
+    /// returned.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Handle`]: trait.Handle.html
+    #[inline]
+    pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.remove_inode(path.as_ref(), RemoveInodeType::Regular)
     }
 
     // TODO: remove_all()
