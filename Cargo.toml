@@ -57,7 +57,7 @@ libc = "^0.2"
 memchr = "^2"
 rand = "^0.8"
 # MSRV(1.65): Use regex >= 1.10.
-regex = "1.9.*"
+regex = "1.10.*"
 rustix = { version = "^0.38", features = ["fs"] }
 thiserror = "^1"
 
