@@ -63,7 +63,7 @@ thiserror = "^1"
 
 [dev-dependencies]
 anyhow = "^1"
-clap = { version = "^3", features = ["cargo"] }
+clap = { version = "^4", features = ["cargo"] }
 errno = "^0.3"
 tempfile = "^3"
 paste = "^1"
