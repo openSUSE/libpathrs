@@ -37,6 +37,7 @@ use std::{
 // MSRV(1.80): Use LazyLock.
 lazy_static! {
     /// A `procfs` handle to which is used globally by libpathrs.
+    // TODO: Export this?
     pub(crate) static ref PROCFS_HANDLE: ProcfsHandle =
         ProcfsHandle::new().expect("should be able to get some /proc handle");
 }
@@ -57,8 +58,9 @@ lazy_static! {
 /// thread that no longer exists).
 ///
 /// [`ProcfsHandle`]: struct.ProcfsHandle.html
-#[non_exhaustive]
+#[doc(alias = "pathrs_proc_base_t")]
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum ProcfsBase {
     /// Use `/proc/self`. For most programs, this is the standard choice.
     ProcSelf,
@@ -338,6 +340,7 @@ impl ProcfsHandle {
     ///
     /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
+    #[doc(alias = "pathrs_proc_open")]
     pub fn open_follow<P: AsRef<Path>>(
         &self,
         base: ProcfsBase,
@@ -429,6 +432,7 @@ impl ProcfsHandle {
     /// [`ProcfsBase`]: enum.ProcfsBase.html
     /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     /// [`openat2(2)`]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
+    #[doc(alias = "pathrs_proc_open")]
     pub fn open<P: AsRef<Path>>(
         &self,
         base: ProcfsBase,
@@ -464,6 +468,7 @@ impl ProcfsHandle {
     ///
     /// [`readlinkat(2)`]: https://www.man7.org/linux/man-pages/man2/readlinkat.2.html
     /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
+    #[doc(alias = "pathrs_proc_readlink")]
     pub fn readlink<P: AsRef<Path>>(&self, base: ProcfsBase, subpath: P) -> Result<PathBuf, Error> {
         let link = self.open(base, subpath, OpenFlags::O_PATH)?;
         syscalls::readlinkat(link.as_raw_fd(), "").map_err(|err| {

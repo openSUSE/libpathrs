@@ -67,6 +67,7 @@ impl Handle {
     ///
     /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     /// [`Root::create`]: struct.Root.html#method.create
+    #[doc(alias = "pathrs_reopen")]
     pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
         self.inner.reopen(&PROCFS_HANDLE, flags.into())
     }

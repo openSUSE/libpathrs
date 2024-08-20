@@ -41,6 +41,8 @@ use std::{borrow::Cow, error::Error as StdError, io::Error as IOError};
 pub struct Error(#[from] Box<ErrorImpl>);
 
 impl From<ErrorImpl> for Error {
+    // TODO: Is there a way to make this not be exported at all?
+    #[doc(hidden)]
     fn from(err: ErrorImpl) -> Self {
         Self(Box::new(err))
     }

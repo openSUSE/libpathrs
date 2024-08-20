@@ -50,6 +50,7 @@ const MAX_SYMLINK_TRAVERSALS: usize = 128;
 /// [`Root`]: struct.Root.html
 /// [`Handle`]: struct.Handle.html
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum ResolverBackend {
     /// Use the native `openat2(2)` backend (requires kernel support).
     KernelOpenat2,

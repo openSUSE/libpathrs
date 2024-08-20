@@ -46,6 +46,7 @@ use rustix::fs::{self, Dir, SeekFrom};
 ///
 /// [`Root::create`]: struct.Root.html#method.create
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum InodeType {
     /// Ordinary file, as in [`creat(2)`].
     ///
@@ -159,6 +160,7 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`Resolver`]: struct.Resolver.html
+    #[doc(alias = "pathrs_root_open")]
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
             .map_err(|err| ErrorImpl::RawOsError {
@@ -263,6 +265,7 @@ impl Root {
     /// [`Handle`]: trait.Handle.html
     /// [`Error`]: error/struct.Error.html
     /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
+    #[doc(alias = "pathrs_resolve")]
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.resolver.resolve(&self.inner, path, false)
@@ -271,8 +274,10 @@ impl Root {
     /// Identical to [`Root::resolve`], except that *trailing* symlinks are
     /// *not* followed and if the trailing component is a symlink
     /// `Root::resolve_nofollow` will return a handle to the symlink itself.
+    /// This is effectively equivalent to `O_NOFOLLOW`.
     ///
     /// [`Root::resolve`]: struct.Root.html#method.resolve
+    #[doc(alias = "pathrs_resolve_nofollow")]
     #[inline]
     pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.resolver.resolve(&self.inner, path, true)
@@ -290,6 +295,7 @@ impl Root {
     /// [`Root`]: struct.Root.html
     /// [`Root::resolve`]: struct.Root.html#method.resolve
     /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
+    #[doc(alias = "pathrs_readlink")]
     pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
         let link = self
             .resolve_nofollow(path)
@@ -312,6 +318,8 @@ impl Root {
     /// inode), an error is returned.
     ///
     /// [`Root`]: struct.Root.html
+    #[doc(alias = "pathrs_creat")]
+    #[doc(alias = "pathrs_create")]
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
@@ -405,6 +413,10 @@ impl Root {
     /// [`Root::create_file`]: struct.Root.html#method.create_file
     /// [`InodeType::File`]: enum.InodeType.html#variant.File
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
+    #[doc(alias = "pathrs_mkdir")]
+    #[doc(alias = "pathrs_mknod")]
+    #[doc(alias = "pathrs_symlink")]
+    #[doc(alias = "pathrs_hardlink")]
     pub fn create_file<P: AsRef<Path>>(
         &self,
         path: P,
@@ -462,11 +474,15 @@ impl Root {
     /// provided path were invalid (non-directory components or dangling symlink
     /// components) or if certain exchange attacks were detected.
     ///
+    /// If an error occurs, it is possible for any number of the directories in
+    /// `path` to have been created despite this method returning an error.
+    ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: struct.Handle.html
     /// [`Permissions`]: https://doc.rust-lang.org/stable/std/fs/struct.Permissions.html
     /// [`fs::create_dir_all`]: https://doc.rust-lang.org/stable/std/fs/fn.create_dir_all.html
     /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
+    #[doc(alias = "pathrs_mkdir_all")]
     pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
         if perm.mode() & !0o7777 != 0 {
             Err(ErrorImpl::InvalidArgument {
@@ -717,6 +733,8 @@ impl Root {
         })?
     }
 
+    // TODO: remove_all()
+
     /// Within the [`Root`]'s tree, perform a rename with the given `source` and
     /// `directory`. The `flags` argument is passed directly to
     /// [`renameat2(2)`].
@@ -727,6 +745,7 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
+    #[doc(alias = "pathrs_rename")]
     pub fn rename<P: AsRef<Path>>(
         &self,
         source: P,
@@ -767,8 +786,6 @@ impl Root {
             },
         )
     }
-
-    // TODO: remove_all()
 
     // TODO: implement a way to duplicate (and even serialise) Roots so that you
     //       can send them between processes (presumably with SCM_RIGHTS).
