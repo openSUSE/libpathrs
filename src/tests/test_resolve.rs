@@ -100,14 +100,14 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, rflags: $($rflag:ident)|+) => $expected:expr ) => {
+    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
             @impl $test_name $op_name($path, $(ResolverFlags::$rflag)|*, false) => $expected
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing: $no_follow_trailing:expr) => $expected:expr ) => {
+    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
             @impl $test_name $op_name($path, ResolverFlags::empty(), $no_follow_trailing) => $expected
@@ -134,15 +134,15 @@ macro_rules! resolve_tests {
 resolve_tests! {
     [Path::new("/proc")] {
         proc_pseudo_magiclink: resolve("self/sched") => Ok(("{{/proc/self}}/sched", libc::S_IFREG));
-        proc_pseudo_magiclink_nosym1: resolve("self", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        proc_pseudo_magiclink_nosym2: resolve("self/sched", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        proc_pseudo_magiclink_nofollow1: resolve("self", no_follow_trailing: true) => Ok(("self", libc::S_IFLNK));
-        proc_pseudo_magiclink_nofollow2: resolve("self/sched", no_follow_trailing: true) => Ok(("{{/proc/self}}/sched", libc::S_IFREG));
+        proc_pseudo_magiclink_nosym1: resolve("self", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        proc_pseudo_magiclink_nosym2: resolve("self/sched", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        proc_pseudo_magiclink_nofollow1: resolve("self", no_follow_trailing = true) => Ok(("self", libc::S_IFLNK));
+        proc_pseudo_magiclink_nofollow2: resolve("self/sched", no_follow_trailing = true) => Ok(("{{/proc/self}}/sched", libc::S_IFREG));
 
         // Verify forced RESOLVE_NO_MAGICLINKS behaviour.
         proc_magiclink: resolve("self/exe") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        proc_magiclink_nofollow: resolve("self/exe", no_follow_trailing: true) => Ok(("{{/proc/self}}/exe", libc::S_IFLNK));
-        proc_magiclink_component_nofollow: resolve("self/root/etc/passwd", no_follow_trailing: true) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        proc_magiclink_nofollow: resolve("self/exe", no_follow_trailing = true) => Ok(("{{/proc/self}}/exe", libc::S_IFLNK));
+        proc_magiclink_component_nofollow: resolve("self/root/etc/passwd", no_follow_trailing = true) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     };
 
     // Complete lookups.
@@ -501,12 +501,12 @@ resolve_tests! {
             last_error: ErrorKind::OsError(Some(libc::ENOTDIR)),
         });
         // O_NOFOLLOW doesn't matter for trailing-slash paths.
-        partial_symlink_nofollow_slash1: resolve("link3/target_abs/", no_follow_trailing: true) => Ok(("/target", libc::S_IFDIR));
-        partial_symlink_nofollow_slash1: resolve_partial("link3/target_abs/", no_follow_trailing: true) => Ok(PartialLookup::Complete(("/target", libc::S_IFDIR)));
-        partial_symlink_nofollow_slash2: resolve("link3/target_abs//", no_follow_trailing: true) => Ok(("/target", libc::S_IFDIR));
-        partial_symlink_nofollow_slash2: resolve_partial("link3/target_abs//", no_follow_trailing: true) => Ok(PartialLookup::Complete(("/target", libc::S_IFDIR)));
-        partial_symlink_nofollow_dot: resolve("link3/target_abs/.", no_follow_trailing: true) => Ok(("/target", libc::S_IFDIR));
-        partial_symlink_nofollow_dot: resolve_partial("link3/target_abs/.", no_follow_trailing: true) => Ok(PartialLookup::Complete(("/target", libc::S_IFDIR)));
+        partial_symlink_nofollow_slash1: resolve("link3/target_abs/", no_follow_trailing = true) => Ok(("/target", libc::S_IFDIR));
+        partial_symlink_nofollow_slash1: resolve_partial("link3/target_abs/", no_follow_trailing = true) => Ok(PartialLookup::Complete(("/target", libc::S_IFDIR)));
+        partial_symlink_nofollow_slash2: resolve("link3/target_abs//", no_follow_trailing = true) => Ok(("/target", libc::S_IFDIR));
+        partial_symlink_nofollow_slash2: resolve_partial("link3/target_abs//", no_follow_trailing = true) => Ok(PartialLookup::Complete(("/target", libc::S_IFDIR)));
+        partial_symlink_nofollow_dot: resolve("link3/target_abs/.", no_follow_trailing = true) => Ok(("/target", libc::S_IFDIR));
+        partial_symlink_nofollow_dot: resolve_partial("link3/target_abs/.", no_follow_trailing = true) => Ok(PartialLookup::Complete(("/target", libc::S_IFDIR)));
         // Dangling symlinks are treated as though they are non_existent.
         dangling1_inroot_trailing: resolve("a-fake1") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
         dangling1_inroot_trailing: resolve_partial("a-fake1") => Ok(PartialLookup::Partial {
@@ -752,37 +752,37 @@ resolve_tests! {
             last_error: ErrorKind::OsError(Some(libc::ELOOP)),
         });
         // NO_FOLLOW.
-        symlink_nofollow: resolve("link3/target_abs", no_follow_trailing: true) => Ok(("link3/target_abs", libc::S_IFLNK));
-        symlink_nofollow: resolve_partial("link3/target_abs", no_follow_trailing: true) => Ok(PartialLookup::Complete(("link3/target_abs", libc::S_IFLNK)));
-        symlink_component_nofollow1: resolve("e/f", no_follow_trailing: true) => Ok(("b/c/d/e/f", libc::S_IFDIR));
-        symlink_component_nofollow1: resolve_partial("e/f", no_follow_trailing: true) => Ok(PartialLookup::Complete(("b/c/d/e/f", libc::S_IFDIR)));
-        symlink_component_nofollow2: resolve("link2/link1_abs/target_rel", no_follow_trailing: true) => Ok(("link1/target_rel", libc::S_IFLNK));
-        symlink_component_nofollow2: resolve_partial("link2/link1_abs/target_rel", no_follow_trailing: true) => Ok(PartialLookup::Complete(("link1/target_rel", libc::S_IFLNK)));
-        loop_nofollow: resolve("loop/link", no_follow_trailing: true) => Ok(("loop/link", libc::S_IFLNK));
-        loop_nofollow: resolve_partial("loop/link", no_follow_trailing: true) => Ok(PartialLookup::Complete(("loop/link", libc::S_IFLNK)));
+        symlink_nofollow: resolve("link3/target_abs", no_follow_trailing = true) => Ok(("link3/target_abs", libc::S_IFLNK));
+        symlink_nofollow: resolve_partial("link3/target_abs", no_follow_trailing = true) => Ok(PartialLookup::Complete(("link3/target_abs", libc::S_IFLNK)));
+        symlink_component_nofollow1: resolve("e/f", no_follow_trailing = true) => Ok(("b/c/d/e/f", libc::S_IFDIR));
+        symlink_component_nofollow1: resolve_partial("e/f", no_follow_trailing = true) => Ok(PartialLookup::Complete(("b/c/d/e/f", libc::S_IFDIR)));
+        symlink_component_nofollow2: resolve("link2/link1_abs/target_rel", no_follow_trailing = true) => Ok(("link1/target_rel", libc::S_IFLNK));
+        symlink_component_nofollow2: resolve_partial("link2/link1_abs/target_rel", no_follow_trailing = true) => Ok(PartialLookup::Complete(("link1/target_rel", libc::S_IFLNK)));
+        loop_nofollow: resolve("loop/link", no_follow_trailing = true) => Ok(("loop/link", libc::S_IFLNK));
+        loop_nofollow: resolve_partial("loop/link", no_follow_trailing = true) => Ok(PartialLookup::Complete(("loop/link", libc::S_IFLNK)));
         // RESOLVE_NO_SYMLINKS.
-        dir_nosym: resolve("b/c/d/e", rflags: NO_SYMLINKS) => Ok(("b/c/d/e", libc::S_IFDIR));
-        dir_nosym: resolve_partial("b/c/d/e", rflags: NO_SYMLINKS) => Ok(PartialLookup::Complete(("b/c/d/e", libc::S_IFDIR)));
-        symlink_nosym: resolve("link3/target_abs", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        symlink_nosym: resolve_partial("link3/target_abs", rflags: NO_SYMLINKS) => Ok(PartialLookup::Partial {
+        dir_nosym: resolve("b/c/d/e", rflags = NO_SYMLINKS) => Ok(("b/c/d/e", libc::S_IFDIR));
+        dir_nosym: resolve_partial("b/c/d/e", rflags = NO_SYMLINKS) => Ok(PartialLookup::Complete(("b/c/d/e", libc::S_IFDIR)));
+        symlink_nosym: resolve("link3/target_abs", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        symlink_nosym: resolve_partial("link3/target_abs", rflags = NO_SYMLINKS) => Ok(PartialLookup::Partial {
             handle: ("link3", libc::S_IFDIR),
             remaining: "target_abs".into(),
             last_error: ErrorKind::OsError(Some(libc::ELOOP)),
         });
-        symlink_component_nosym1: resolve("e/f", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        symlink_component_nosym1: resolve_partial("e/f", rflags: NO_SYMLINKS) => Ok(PartialLookup::Partial {
+        symlink_component_nosym1: resolve("e/f", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        symlink_component_nosym1: resolve_partial("e/f", rflags = NO_SYMLINKS) => Ok(PartialLookup::Partial {
             handle: ("", libc::S_IFDIR),
             remaining: "e/f".into(),
             last_error: ErrorKind::OsError(Some(libc::ELOOP)),
         });
-        symlink_component_nosym2: resolve("link2/link1_abs/target_rel", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        symlink_component_nosym2: resolve_partial("link2/link1_abs/target_rel", rflags: NO_SYMLINKS) => Ok(PartialLookup::Partial {
+        symlink_component_nosym2: resolve("link2/link1_abs/target_rel", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        symlink_component_nosym2: resolve_partial("link2/link1_abs/target_rel", rflags = NO_SYMLINKS) => Ok(PartialLookup::Partial {
             handle: ("link2", libc::S_IFDIR),
             remaining: "link1_abs/target_rel".into(),
             last_error: ErrorKind::OsError(Some(libc::ELOOP)),
         });
-        loop_nosym: resolve("loop/link", rflags: NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        loop_nosym: resolve_partial("loop/link", rflags: NO_SYMLINKS) => Ok(PartialLookup::Partial {
+        loop_nosym: resolve("loop/link", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        loop_nosym: resolve_partial("loop/link", rflags = NO_SYMLINKS) => Ok(PartialLookup::Partial {
             handle: ("loop", libc::S_IFDIR),
             remaining: "link".into(),
             last_error: ErrorKind::OsError(Some(libc::ELOOP)),

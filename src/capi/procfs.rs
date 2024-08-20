@@ -24,7 +24,7 @@ use crate::{
     procfs::{ProcfsBase, PROCFS_HANDLE},
 };
 
-use std::os::fd::RawFd;
+use std::os::unix::io::RawFd;
 
 use libc::{c_char, c_int, size_t};
 

@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    error::{self, Error},
+    error::{Error, ErrorImpl},
     flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
     syscalls,
@@ -27,12 +27,11 @@ use crate::{
 use std::{
     env,
     io::{BufRead, BufReader},
-    os::fd::AsRawFd,
+    os::unix::io::AsRawFd,
 };
 
 use libc::mode_t;
 use regex::Regex;
-use snafu::ResultExt;
 
 /// Get the current process's umask from `/proc/thread-self/status`.
 // There has been a Umask: field in /proc/self/status since Linux 4.7.
@@ -41,6 +40,10 @@ use snafu::ResultExt;
 //NOTE: While the umask is shared between threads, it unshared with `CLONE_FS`
 //      so a single thread could have a different umask to other threads.
 fn get_umask_procfs(procfs: &ProcfsHandle) -> Result<Option<mode_t>, Error> {
+    // MSRV(1.70): Use OnceLock.
+    // MSRV(1.80): Use LazyLock.
+    // TODO: Figure out if we even need to use a regex for this. Surely there's
+    //       something like sscanf which works properly in Rust...
     lazy_static! {
         static ref RE: Regex = Regex::new(r"^Umask:\s*(0[0-7]+)$").unwrap();
     }
@@ -48,15 +51,16 @@ fn get_umask_procfs(procfs: &ProcfsHandle) -> Result<Option<mode_t>, Error> {
     let status_file = procfs.open(ProcfsBase::ProcThreadSelf, "status", OpenFlags::O_RDONLY)?;
     let reader = BufReader::new(status_file);
     for line in reader.lines() {
-        let line = line.context(error::OsSnafu {
-            operation: "read lines from /proc/self/status",
+        let line = line.map_err(|err| ErrorImpl::OsError {
+            operation: "read lines from /proc/self/status".into(),
+            source: err,
         })?;
-        let Some((_, [umask])) = RE.captures(&line).map(|caps| caps.extract()) else {
-            continue;
-        };
-        return Ok(Some(
-            mode_t::from_str_radix(umask, 8).expect("parsing 0[0-7]+ octal should work"),
-        ));
+        // MSRV(1.65): Use let-else here.
+        if let Some((_, [umask])) = RE.captures(&line).map(|caps| caps.extract()) {
+            return Ok(Some(
+                mode_t::from_str_radix(umask, 8).expect("parsing 0[0-7]+ octal should work"),
+            ));
+        }
     }
     Ok(None)
 }
@@ -72,8 +76,9 @@ fn get_umask_tmpfile() -> Result<mode_t, Error> {
         libc::O_TMPFILE | libc::O_RDWR,
         0o777,
     )
-    .context(error::RawOsSnafu {
-        operation: "create O_TMPFILE",
+    .map_err(|err| ErrorImpl::RawOsError {
+        operation: "create O_TMPFILE".into(),
+        source: err,
     })?;
     // TODO: Use tempfile to create a named temporary file as a backup. This
     // would let us support pre-3.11 kernels. Ideally setting permissions with
@@ -81,8 +86,9 @@ fn get_umask_tmpfile() -> Result<mode_t, Error> {
     // <https://github.com/Stebalien/tempfile/issues/292>
 
     let actual_mode = syscalls::fstatat(file.as_raw_fd(), "")
-        .context(error::RawOsSnafu {
-            operation: "fstat temporary file",
+        .map_err(|err| ErrorImpl::RawOsError {
+            operation: "fstat temporary file".into(),
+            source: err,
         })?
         .st_mode;
 

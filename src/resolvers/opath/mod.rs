@@ -21,5 +21,4 @@ mod r#impl;
 pub(crate) use r#impl::*;
 
 mod symlink_stack;
-pub(crate) use symlink_stack::SymlinkStack;
-pub use symlink_stack::SymlinkStackError;
+pub(crate) use symlink_stack::{SymlinkStack, SymlinkStackError};

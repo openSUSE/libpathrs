@@ -297,8 +297,10 @@ mod utils {
 
     use std::{
         fs::Permissions,
-        os::fd::AsRawFd,
-        os::unix::fs::{MetadataExt, PermissionsExt},
+        os::unix::{
+            fs::{MetadataExt, PermissionsExt},
+            io::AsRawFd,
+        },
         path::{Path, PathBuf},
     };
 

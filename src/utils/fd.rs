@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    error::{self, Error},
+    error::{Error, ErrorImpl},
     flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
     syscalls,
@@ -29,8 +29,6 @@ use std::{
     os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
 };
-
-use snafu::ResultExt;
 
 pub(crate) trait RawFdExt {
     /// Re-open a file descriptor.
@@ -70,11 +68,10 @@ fn proc_subpath(fd: RawFd) -> Result<String, Error> {
     } else if fd.is_positive() {
         Ok(format!("fd/{}", fd))
     } else {
-        error::InvalidArgumentSnafu {
-            name: "fd",
-            description: "must be positive or AT_FDCWD",
-        }
-        .fail()
+        Err(ErrorImpl::InvalidArgument {
+            name: "fd".into(),
+            description: "must be positive or AT_FDCWD".into(),
+        })?
     }
 }
 
@@ -118,8 +115,12 @@ impl RawFdExt for RawFd {
 
         // Because this code is used within syscalls, we can't even check the
         // filesystem type of /proc (unless we were to copy the logic here).
-        fs::read_link(&fd_path).context(error::OsSnafu {
-            operation: format!("readlink fd magic-link {:?}", fd_path),
+        fs::read_link(&fd_path).map_err(|err| {
+            ErrorImpl::OsError {
+                operation: format!("readlink fd magic-link {fd_path:?}").into(),
+                source: err,
+            }
+            .into()
         })
     }
 
@@ -128,8 +129,9 @@ impl RawFdExt for RawFd {
         // nd_jump_link() is used internally. So, we just have to make an
         // educated guess based on which mainline filesystems expose
         // magic-links.
-        let stat = syscalls::fstatfs(*self).context(error::RawOsSnafu {
-            operation: "check fstype of fd",
+        let stat = syscalls::fstatfs(*self).map_err(|err| ErrorImpl::RawOsError {
+            operation: "check fstype of fd".into(),
+            source: err,
         })?;
         Ok(DANGEROUS_FILESYSTEMS.contains(&stat.f_type))
     }
@@ -200,8 +202,9 @@ pub(crate) fn fetch_mnt_id<P: AsRef<Path>>(dirfd: &File, path: P) -> Result<Opti
             // kernels, so treat an ENOSYS or EINVAL the same so that we can
             // work on pre-4.11 (pre-statx) kernels as well.
             Some(libc::ENOSYS) | Some(libc::EINVAL) => Ok(None),
-            _ => Err(err).context(error::RawOsSnafu {
-                operation: "check mnt_id of filesystem",
+            _ => Err(ErrorImpl::RawOsError {
+                operation: "check mnt_id of filesystem".into(),
+                source: err,
             })?,
         },
     }

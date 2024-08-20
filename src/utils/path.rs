@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{self, Error};
+use crate::error::{Error, ErrorImpl};
 
 use std::{
     collections::VecDeque,
@@ -85,18 +85,16 @@ pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>),
     // If there are any other path components we must bail.
     if let Some(base) = base {
         let base_bytes = base.as_os_str().as_bytes();
-        ensure!(
-            base_bytes != b"",
-            error::SafetyViolationSnafu {
-                description: "trailing component of split pathname is ''",
-            }
-        );
-        ensure!(
-            !base_bytes.contains(&b'/'),
-            error::SafetyViolationSnafu {
-                description: "trailing component of split pathname contains '/'",
-            }
-        );
+        if base_bytes == b"" {
+            Err(ErrorImpl::SafetyViolation {
+                description: "trailing component of split pathname is empty".into(),
+            })?
+        }
+        if base_bytes.contains(&b'/') {
+            Err(ErrorImpl::SafetyViolation {
+                description: "trailing component of split pathname contains '/'".into(),
+            })?
+        }
     }
 
     Ok((dir, base))
@@ -131,8 +129,7 @@ impl<'a> Iterator for RawComponents<'a> {
                 self.inner = remaining;
                 assert!(
                     !next.as_bytes().contains(&b'/'),
-                    "individual path component {:?} contains '/'",
-                    next
+                    "individual path component {next:?} contains '/'",
                 );
                 Some(next)
             }
@@ -156,8 +153,7 @@ impl<'a> DoubleEndedIterator for RawComponents<'a> {
                 self.inner = remaining;
                 assert!(
                     !next.as_bytes().contains(&b'/'),
-                    "individual path component {:?} contains '/'",
-                    next
+                    "individual path component {next:?} contains '/'",
                 );
                 Some(next)
             }
@@ -285,7 +281,7 @@ mod tests {
 
     use std::{
         fs::File,
-        os::fd::{AsRawFd, RawFd},
+        os::unix::io::{AsRawFd, RawFd},
         path::{Path, PathBuf},
     };
 
@@ -359,13 +355,11 @@ mod tests {
 
                         assert_eq!(
                             got_path.as_os_str(), want_path.as_os_str(),
-                            "stripping {:?} produced wrong result -- got {:?}",
-                            path, got_path,
+                            "stripping {path:?} produced wrong result -- got {got_path:?}",
                         );
                         assert_eq!(
                             got_trailing, want_trailing,
-                            "expected {:?} to have trailing_slash={}",
-                            path, want_trailing,
+                            "expected {path:?} to have trailing_slash={want_trailing}",
                         );
                     }
                 )*
@@ -410,7 +404,7 @@ mod tests {
                     fn [<path_split_ $test_name>]() -> Result<(), Error> {
                         let path: PathBuf = $path.into();
                         let (got_dir, got_file) = path_split(&path)
-                            .with_context(|| format!("path_split({:?})", path))?;
+                            .with_context(|| format!("path_split({path:?})"))?;
 
                         let want_dir: PathBuf = $dir.into();
                         let want_file = {

@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    error::{self, Error},
+    error::{Error, ErrorImpl},
     flags::{OpenFlags, ResolverFlags},
     resolvers::PartialLookup,
     syscalls::{self, OpenHow},
@@ -32,8 +32,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use snafu::ResultExt;
-
 /// Resolve `path` within `root` through `openat2(2)`.
 pub(crate) fn resolve<P: AsRef<Path>>(
     root: &File,
@@ -41,10 +39,11 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     rflags: ResolverFlags,
     no_follow_trailing: bool,
 ) -> Result<Handle, Error> {
-    ensure!(
-        *syscalls::OPENAT2_IS_SUPPORTED,
-        error::NotSupportedSnafu { feature: "openat2" }
-    );
+    if !*syscalls::OPENAT2_IS_SUPPORTED {
+        Err(ErrorImpl::NotSupported {
+            feature: "openat2".into(),
+        })?
+    }
 
     // Copy the O_NOFOLLOW and RESOLVE_NO_SYMLINKS bits from flags.
     let mut oflags = OpenFlags::O_PATH;
@@ -69,24 +68,24 @@ pub(crate) fn resolve<P: AsRef<Path>>(
             Err(err) => match err.root_cause().raw_os_error() {
                 Some(libc::ENOSYS) => {
                     // shouldn't happen
-                    return error::NotSupportedSnafu { feature: "openat2" }.fail();
+                    Err(ErrorImpl::NotSupported {
+                        feature: "openat2".into(),
+                    })?
                 }
                 Some(libc::EAGAIN) => continue,
                 // TODO: Add wrapper for known-bad openat2 return codes.
                 //Some(libc::EXDEV) | Some(libc::ELOOP) => { ... }
-                _ => {
-                    return Err(err).context(error::RawOsSnafu {
-                        operation: "openat2 subpath",
-                    })?
-                }
+                _ => Err(ErrorImpl::RawOsError {
+                    operation: "openat2 subpath".into(),
+                    source: err,
+                })?,
             },
         }
     }
 
-    error::SafetyViolationSnafu {
-        description: "racing filesystem changes caused openat2 to abort",
-    }
-    .fail()
+    Err(ErrorImpl::SafetyViolation {
+        description: "racing filesystem changes caused openat2 to abort".into(),
+    })?
 }
 
 /// Resolve as many components as possible in `path` within `root` using
@@ -128,8 +127,9 @@ pub(crate) fn resolve_partial(
         handle: root
             .try_clone()
             .map(Handle::from_file_unchecked)
-            .context(error::OsSnafu {
-                operation: "clone root",
+            .map_err(|err| ErrorImpl::OsError {
+                operation: "clone root".into(),
+                source: err,
             })?,
         remaining: path.into(),
         last_error,

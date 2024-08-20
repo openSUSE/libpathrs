@@ -21,7 +21,7 @@ use std::{
     ffi::CString,
     fs::File,
     io::Error as IOError,
-    os::fd::{AsRawFd, RawFd},
+    os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
     ptr,
 };
@@ -67,9 +67,11 @@ pub(crate) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> 
     let ret = match ty {
         MountType::Tmpfs => unsafe {
             libc::mount(
-                c"".as_ptr(),
+                // MSRV(1.77): Use c"".
+                CString::new("")?.as_ptr(),
                 dst_path.as_ptr(),
-                c"tmpfs".as_ptr(),
+                // MSRV(1.77): Use c"tmpfs".
+                CString::new("tmpfs")?.as_ptr(),
                 0,
                 ptr::null(),
             )

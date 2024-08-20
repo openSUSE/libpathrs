@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{self, Error, ErrorKind};
+use crate::error::{Error, ErrorImpl, ErrorKind};
 
 use std::{
     cmp,
@@ -30,13 +30,12 @@ use std::{
 use libc::{c_char, c_int, size_t};
 
 pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
-    ensure!(
-        !path.is_null(),
-        error::InvalidArgumentSnafu {
-            name: "path",
-            description: "cannot be NULL",
-        }
-    );
+    if path.is_null() {
+        Err(ErrorImpl::InvalidArgument {
+            name: "path".into(),
+            description: "cannot be NULL".into(),
+        })?
+    }
     // SAFETY: C caller guarantees that the path is a valid C-style string.
     let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
     Ok(OsStr::from_bytes(bytes).as_ref())
@@ -53,7 +52,8 @@ pub(crate) fn copy_path_into_buffer<P: AsRef<Path>>(
     // If the linkbuf is null, we just return the number of bytes we
     // would've written.
     if !buf.is_null() && bufsize > 0 {
-        let to_copy = cmp::min(path.count_bytes(), bufsize);
+        // MSRV(1.79): Switch to .count_bytes().
+        let to_copy = cmp::min(path.to_bytes().len(), bufsize);
         // SAFETY: The C caller guarantees that buf is safe to write to
         // up to bufsize bytes.
         unsafe {
@@ -61,7 +61,8 @@ pub(crate) fn copy_path_into_buffer<P: AsRef<Path>>(
         }
     }
 
-    Ok(path.count_bytes() as c_int)
+    // MSRV(1.79): Switch to .count_bytes().
+    Ok(path.to_bytes().len() as c_int)
 }
 
 pub(crate) trait Leakable {

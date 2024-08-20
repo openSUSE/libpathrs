@@ -20,15 +20,13 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    error::{self, Error},
+    error::{Error, ErrorImpl},
     flags::OpenFlags,
     procfs::PROCFS_HANDLE,
     utils::RawFdExt,
 };
 
 use std::fs::File;
-
-use snafu::ResultExt;
 
 /// A handle to an existing inode within a [`Root`].
 ///
@@ -82,8 +80,12 @@ impl Handle {
     pub fn try_clone(&self) -> Result<Self, Error> {
         self.as_file()
             .try_clone()
-            .context(error::OsSnafu {
-                operation: "clone underlying handle file",
+            .map_err(|err| {
+                ErrorImpl::OsError {
+                    operation: "clone underlying handle file".into(),
+                    source: err,
+                }
+                .into()
             })
             .map(Self::from_file_unchecked)
     }
