@@ -103,6 +103,22 @@ func pathrsReadlink(rootFd uintptr, path string) (string, error) {
 	}
 }
 
+func pathrsRmdir(rootFd uintptr, path string) error {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	err := C.pathrs_rmdir(C.int(rootFd), cPath)
+	return fetchError(err)
+}
+
+func pathrsUnlink(rootFd uintptr, path string) error {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	err := C.pathrs_unlink(C.int(rootFd), cPath)
+	return fetchError(err)
+}
+
 func pathrsCreat(rootFd uintptr, path string, flags int, mode uint32) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))

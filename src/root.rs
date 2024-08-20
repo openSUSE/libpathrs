@@ -728,6 +728,7 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
+    #[doc(alias = "pathrs_rmdir")]
     #[inline]
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Directory)
@@ -747,6 +748,7 @@ impl Root {
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
+    #[doc(alias = "pathrs_unlink")]
     #[inline]
     pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Regular)
