@@ -21,6 +21,8 @@ package pathrs
 import (
 	"fmt"
 	"os"
+
+	"syscall"
 )
 
 // Root is a handle to the root of a directory tree to resolve within. The only
@@ -127,6 +129,56 @@ func (r *Root) Create(path string, flags int, mode os.FileMode) (*Handle, error)
 func (r *Root) Rename(src, dst string, flags uint) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
 		err := pathrsRename(rootFd, src, dst, flags)
+		return struct{}{}, err
+	})
+	return err
+}
+
+// RemoveDir removes the named empty directory within a Root's directory tree.
+func (r *Root) RemoveDir(path string) error {
+	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
+		err := pathrsRmdir(rootFd, path)
+		return struct{}{}, err
+	})
+	return err
+}
+
+// RemoveFile removes the named file within a Root's directory tree.
+func (r *Root) RemoveFile(path string) error {
+	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
+		err := pathrsUnlink(rootFd, path)
+		return struct{}{}, err
+	})
+	return err
+}
+
+// Remove removes the named file or (empty) directory within a Root's directory
+// tree. This is designed to match the semantics of os.Remove.
+func (r *Root) Remove(path string) error {
+	// In order to match os.Remove's implementation we need to also do both
+	// syscalls unconditionally and adjust the error based on whether
+	// pathrs_rmdir() returned ENOTDIR.
+	unlinkErr := r.RemoveFile(path)
+	if unlinkErr == nil {
+		return nil
+	}
+	rmdirErr := r.RemoveDir(path)
+	if rmdirErr == nil {
+		return nil
+	}
+	// Both failed, adjust the error in the same way that os.Remove does.
+	if err, ok := rmdirErr.(*Error); ok && err.errno != syscall.ENOTDIR {
+		return rmdirErr
+	} else {
+		return unlinkErr
+	}
+}
+
+// RemoveAll recursively deletes a path and all of its children. This is
+// designed to match the semantics of os.RemoveAll.
+func (r *Root) RemoveAll(path string) error {
+	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
+		err := pathrsRemoveAll(rootFd, path)
 		return struct{}{}, err
 	})
 	return err

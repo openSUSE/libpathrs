@@ -228,6 +228,57 @@ int pathrs_rename(int root_fd,
                   uint32_t flags);
 
 /**
+ * Remove the empty directory at path within the rootfs referenced by root_fd.
+ *
+ * The semantics are effectively equivalent to unlinkat(..., AT_REMOVEDIR).
+ * This function will return an error if the path doesn't exist, was not a
+ * directory, or was a non-empty directory.
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_rmdir(int root_fd, const char *path);
+
+/**
+ * Remove the file (a non-directory inode) at path within the rootfs referenced
+ * by root_fd.
+ *
+ * The semantics are effectively equivalent to unlinkat(..., 0). This function
+ * will return an error if the path doesn't exist or was a directory.
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_unlink(int root_fd, const char *path);
+
+/**
+ * Recursively delete the path and any children it contains if it is a
+ * directory. The semantics are equivalent to `rm -r`.
+ *
+ * # Return Value
+ *
+ * On success, this function returns 0.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_remove_all(int root_fd, const char *path);
+
+/**
  * Create a new regular file within the rootfs referenced by root_fd. This is
  * effectively an O_CREAT operation, and so (unlike pathrs_resolve()), this
  * function can be used on non-existent paths.

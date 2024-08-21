@@ -34,7 +34,11 @@ use std::{
     io::Error as IOError,
     os::{
         linux::fs::MetadataExt,
-        unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd},
+        unix::{
+            ffi::OsStrExt,
+            fs::PermissionsExt,
+            io::{AsRawFd, OwnedFd},
+        },
     },
     path::{Path, PathBuf},
 };
@@ -102,6 +106,14 @@ pub enum InodeType {
     ////
     //// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
     //DetachedSocket(),
+}
+
+/// The inode type for [`Root::remove_inode`]. This only used internally within
+/// libpathrs.
+#[derive(Clone, Copy, Debug)]
+enum RemoveInodeType {
+    Regular,   // ~AT_REMOVEDIR
+    Directory, // AT_REMOVEDIR
 }
 
 /// A handle to the root of a directory tree.
@@ -283,6 +295,16 @@ impl Root {
         self.resolver.resolve(&self.inner, path, true)
     }
 
+    // Used in operations where we need to get a handle to the parent directory.
+    fn resolve_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, Option<&'p Path>), Error> {
+        let (parent, name) = utils::path_split(path).wrap("split path into (parent, name)")?;
+        let dir = self
+            .resolve(parent)
+            .wrap("resolve parent directory")?
+            .into_file();
+        Ok((dir.into(), name))
+    }
+
     /// Get the target of a symlink within a [`Root`].
     ///
     /// **NOTE**: The returned path is not modified to be "safe" outside of the
@@ -318,23 +340,20 @@ impl Root {
     /// inode), an error is returned.
     ///
     /// [`Root`]: struct.Root.html
-    #[doc(alias = "pathrs_creat")]
-    #[doc(alias = "pathrs_create")]
+    #[doc(alias = "pathrs_mkdir")]
+    #[doc(alias = "pathrs_mknod")]
+    #[doc(alias = "pathrs_symlink")]
+    #[doc(alias = "pathrs_hardlink")]
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
-        // Get a handle for the lexical parent of the target path. It must
-        // already exist, and once we have it we're safe from rename races in
-        // the parent.
-        let (parent, name) =
-            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        // The path doesn't exist yet, so we need to get a safe reference to the
+        // parent and just operate on the final (slashless) component.
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve file creation path")?;
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
-            description: "create path has trailing slash".into(),
+            description: "file creation path has trailing slash".into(),
         })?;
-
-        let dir = self
-            .resolve(parent)
-            .wrap("resolve target parent directory for inode creation")?
-            .into_file();
         let dirfd = dir.as_raw_fd();
 
         match inode_type {
@@ -351,18 +370,14 @@ impl Root {
                 syscalls::symlinkat(target, dirfd, name)
             }
             InodeType::Hardlink(target) => {
-                let (oldparent, oldname) = utils::path_split(target)
-                    .wrap("split hardlink source path into (parent, name)")?;
+                let (olddir, oldname) = self
+                    .resolve_parent(target)
+                    .wrap("resolve hardlink source path")?;
                 let oldname = oldname.ok_or_else(|| ErrorImpl::InvalidArgument {
                     name: "target".into(),
                     description: "hardlink target has trailing slash".into(),
                 })?;
-                let olddir = self
-                    .resolve(oldparent)
-                    .wrap("resolve hardlink source parent for hardlink")?
-                    .into_file();
-                let olddirfd = olddir.as_raw_fd();
-                syscalls::linkat(olddirfd, oldname, dirfd, name, 0)
+                syscalls::linkat(olddir.as_raw_fd(), oldname, dirfd, name, 0)
             }
             InodeType::Fifo(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
@@ -413,29 +428,23 @@ impl Root {
     /// [`Root::create_file`]: struct.Root.html#method.create_file
     /// [`InodeType::File`]: enum.InodeType.html#variant.File
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
-    #[doc(alias = "pathrs_mkdir")]
-    #[doc(alias = "pathrs_mknod")]
-    #[doc(alias = "pathrs_symlink")]
-    #[doc(alias = "pathrs_hardlink")]
+    #[doc(alias = "pathrs_creat")]
+    #[doc(alias = "pathrs_create")]
     pub fn create_file<P: AsRef<Path>>(
         &self,
         path: P,
         mut flags: OpenFlags,
         perm: &Permissions,
     ) -> Result<Handle, Error> {
-        // Get a handle for the lexical parent of the target path. It must
-        // already exist, and once we have it we're safe from rename races in
-        // the parent.
-        let (parent, name) =
-            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        // The path doesn't exist yet, so we need to get a safe reference to the
+        // parent and just operate on the final (slashless) component.
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve file creation path")?;
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
-            description: "create_file path has trailing slash".into(),
+            description: "file creation path has trailing slash".into(),
         })?;
-        let dir = self
-            .resolve(parent)
-            .wrap("resolve target parent directory for inode creation")?
-            .into_file();
         let dirfd = dir.as_raw_fd();
 
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
@@ -663,7 +672,8 @@ impl Root {
         Ok(Handle::from_file_unchecked(current))
     }
 
-    /// Within the [`Root`]'s tree, remove the inode at `path`.
+    /// Within the [`Root`]'s tree, remove the inode of type `inode_type` at
+    /// `path`.
     ///
     /// Any existing [`Handle`]s to `path` will continue to work as before,
     /// since Linux does not invalidate file handles to unlinked files (though,
@@ -671,69 +681,115 @@ impl Root {
     ///
     /// # Errors
     ///
-    /// If the path does not exist or is a non-empty directory, an error will be
-    /// returned. In order to remove a non-empty directory, please use
-    /// [`Root::remove_all`].
+    /// If the path does not exist, was not actually `inode_type`, or was a
+    /// non-empty directory an error will be returned. In order to remove a path
+    /// regardless of whether it exists, its type, or if it it's a non-empty
+    /// directory, you can use [`Root::remove_all`].
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
     /// [`Root::remove_all`]: struct.Root.html#method.remove_all
-    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
-        // Get a handle for the lexical parent of the target path. It must
-        // already exist, and once we have it we're safe from rename races in
-        // the parent.
-        let (parent, name) =
-            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+    fn remove_inode(&self, path: &Path, inode_type: RemoveInodeType) -> Result<(), Error> {
+        // unlinkat(2) doesn't let us remove an inode using just a handle (for
+        // obvious reasons -- on Unix hardlinks mean that "unlink this file"
+        // doesn't make sense without referring to a specific directory entry).
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve file removal path")?;
+        // TODO: rmdir() lets you use trailing slashes. We should probably allow
+        //       that too...
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
-            description: "remove path has trailing slash".into(),
+            description: "file removal path has trailing slash".into(),
         })?;
-        let dir = self
-            .resolve(parent)
-            .wrap("resolve target parent directory for inode creation")?
-            .into_file();
-        let dirfd = dir.as_raw_fd();
 
-        // There is no kernel API to "just remove this inode please". You need
-        // to know ahead-of-time what inode type it is. So we will try a couple
-        // of times and bail if we managed to hit an inode-type race multiple
-        // times.
-        let mut last_error: Option<syscalls::Error> = None;
-        for _ in 0..16 {
-            // XXX: A try-block would be super useful here but that's not a
-            //     thing in Rust unfortunately. So we need to manage last_error
-            //     ourselves the old fashioned way.
-
-            let stat = match syscalls::fstatat(dirfd, name) {
-                Ok(stat) => stat,
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            };
-
-            let mut flags = 0;
-            if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
-                flags |= libc::AT_REMOVEDIR;
+        let flags = match inode_type {
+            RemoveInodeType::Regular => 0,
+            RemoveInodeType::Directory => libc::AT_REMOVEDIR,
+        };
+        syscalls::unlinkat(dir.as_raw_fd(), name, flags).map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "pathrs remove".into(),
+                source: err,
             }
-
-            match syscalls::unlinkat(dirfd, name, flags) {
-                Ok(_) => return Ok(()),
-                Err(err) => {
-                    last_error = Some(err);
-                    continue;
-                }
-            }
-        }
-
-        Err(ErrorImpl::RawOsError {
-            operation: "pathrs remove".into(),
-            // If we ever are here, then last_error must be Some.
-            source: last_error.expect("unlinkat loop failed so last_error must exist"),
-        })?
+            .into()
+        })
     }
 
-    // TODO: remove_all()
+    /// Within the [`Root`]'s tree, remove the empty directory at `path`.
+    ///
+    /// Any existing [`Handle`]s to `path` will continue to work as before,
+    /// since Linux does not invalidate file handles to unlinked files (though,
+    /// directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist, was not actually a directory, or was a
+    /// non-empty directory an error will be returned. In order to remove a
+    /// directory and all of its children, you can use [`Root::remove_all`].
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Handle`]: trait.Handle.html
+    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
+    #[doc(alias = "pathrs_rmdir")]
+    #[inline]
+    pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.remove_inode(path.as_ref(), RemoveInodeType::Directory)
+    }
+
+    /// Within the [`Root`]'s tree, remove the file (any non-directory inode) at
+    /// `path`.
+    ///
+    /// Any existing [`Handle`]s to `path` will continue to work as before,
+    /// since Linux does not invalidate file handles to unlinked files (though,
+    /// directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist or was actually a directory an error will be
+    /// returned. In order to remove a path regardless of its type (even if it
+    /// is a non-empty directory), you can use [`Root::remove_all`].
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Handle`]: trait.Handle.html
+    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
+    #[doc(alias = "pathrs_unlink")]
+    #[inline]
+    pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.remove_inode(path.as_ref(), RemoveInodeType::Regular)
+    }
+
+    /// Within the [`Root`]'s tree, recursively delete the provided `path` and
+    /// any children it contains if it is a directory. This is effectively
+    /// equivalent to [`fs::remove_dir_all`], Go's [`os.RemoveAll`], or Unix's
+    /// `rm -r`.
+    ///
+    /// Any existing [`Handle`]s to paths within `path` will continue to work as
+    /// before, since Linux does not invalidate file handles to unlinked files
+    /// (though, directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist or some other error occurred during the
+    /// deletion process an error will be returned.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Handle`]: trait.Handle.html
+    /// [`fs::remove_dir_all`]: https://doc.rust-lang.org/std/fs/fn.remove_dir_all.html
+    /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
+    pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve remove-all path")?;
+        // TODO: rmdir() lets you use trailing slashes. We should probably allow
+        //       that too...
+        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
+            name: "path".into(),
+            description: "file removal path has trailing slash".into(),
+        })?;
+
+        utils::remove_all(&dir, name)
+    }
 
     /// Within the [`Root`]'s tree, perform a rename with the given `source` and
     /// `directory`. The `flags` argument is passed directly to
@@ -752,39 +808,38 @@ impl Root {
         destination: P,
         rflags: RenameFlags,
     ) -> Result<(), Error> {
-        let (src_parent, src_name) =
-            utils::path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
+        // renameat2(2) doesn't let us rename paths using just handles. In
+        // addition, the target path might not exist (except in the case of
+        // RENAME_EXCHANGE and clobbering).
+        let (src_dir, src_name) = self
+            .resolve_parent(source.as_ref())
+            .wrap("resolve rename source path")?;
         let src_name = src_name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "source".into(),
             description: "rename source path has trailing slash".into(),
         })?;
-        let (dst_parent, dst_name) = utils::path_split(destination.as_ref())
-            .wrap("split target path into (parent, name)")?;
+        let (dst_dir, dst_name) = self
+            .resolve_parent(destination.as_ref())
+            .wrap("resolve rename destination path")?;
         let dst_name = dst_name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "source".into(),
+            name: "destination".into(),
             description: "rename destination path has trailing slash".into(),
         })?;
 
-        let src_dir = self
-            .resolve(src_parent)
-            .wrap("resolve source path for rename")?
-            .into_file();
-        let src_dirfd = src_dir.as_raw_fd();
-        let dst_dir = self
-            .resolve(dst_parent)
-            .wrap("resolve target path for rename")?
-            .into_file();
-        let dst_dirfd = dst_dir.as_raw_fd();
-
-        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, rflags.bits()).map_err(
-            |err| {
-                ErrorImpl::RawOsError {
-                    operation: "pathrs rename".into(),
-                    source: err,
-                }
-                .into()
-            },
+        syscalls::renameat2(
+            src_dir.as_raw_fd(),
+            src_name,
+            dst_dir.as_raw_fd(),
+            dst_name,
+            rflags.bits(),
         )
+        .map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "pathrs rename".into(),
+                source: err,
+            }
+            .into()
+        })
     }
 
     // TODO: implement a way to duplicate (and even serialise) Roots so that you

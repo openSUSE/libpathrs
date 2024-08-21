@@ -132,10 +132,26 @@ macro_rules! root_op_tests {
         }
     };
 
-    (@impl remove $test_name:ident ($path:expr) => $expected_result:expr) => {
+    (@impl remove_dir $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
             fn $test_name(root) {
-                utils::check_root_remove(&root, $path, $expected_result)
+                utils::check_root_remove_dir(&root, $path, $expected_result)
+            }
+        }
+    };
+
+    (@impl remove_file $test_name:ident ($path:expr) => $expected_result:expr) => {
+        root_op_tests!{
+            fn $test_name(root) {
+                utils::check_root_remove_file(&root, $path, $expected_result)
+            }
+        }
+    };
+
+    (@impl remove_all $test_name:ident ($path:expr) => $expected_result:expr) => {
+        root_op_tests!{
+            fn $test_name(root) {
+                utils::check_root_remove_all(&root, $path, $expected_result)
             }
         }
     };
@@ -222,10 +238,36 @@ root_op_tests! {
     oexcl_symlink: create_file("b-file", O_EXCL|O_RDONLY, 0o100) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
     oexcl_dangling_symlink: create_file("a-fake1", O_EXCL|O_RDONLY, 0o100) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
 
-    plain: remove("a") => Ok(());
-    enoent: remove("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
-    symlink: remove("b-file") => Ok(());
-    dangling_symlink: remove("a-fake1") => Ok(());
+    empty_dir: remove_dir("a") => Ok(());
+    empty_dir: remove_file("a") => Err(ErrorKind::OsError(Some(libc::EISDIR)));
+    empty_dir: remove_all("a") => Ok(());
+    nonempty_dir: remove_dir("b") => Err(ErrorKind::OsError(Some(libc::ENOTEMPTY)));
+    nonempty_dir: remove_file("b") => Err(ErrorKind::OsError(Some(libc::EISDIR)));
+    nonempty_dir: remove_all("b") => Ok(());
+    file: remove_dir("b/c/file") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    file: remove_file("b/c/file") => Ok(());
+    file: remove_all("b/c/file") => Ok(());
+    fifo: remove_dir("b/fifo") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    fifo: remove_file("b/fifo") => Ok(());
+    fifo: remove_all("b/fifo") => Ok(());
+    sock: remove_dir("b/sock") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    sock: remove_file("b/sock") => Ok(());
+    sock: remove_all("b/sock") => Ok(());
+    enoent: remove_dir("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    enoent: remove_file("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    enoent: remove_all("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    symlink: remove_dir("b-file") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    symlink: remove_file("b-file") => Ok(());
+    symlink: remove_all("b-file") => Ok(());
+    dangling_symlink: remove_dir("a-fake1") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dangling_symlink: remove_file("a-fake1") => Ok(());
+    dangling_symlink: remove_all("a-fake1") => Ok(());
+    dir_trailing_slash: remove_dir("a/") => Err(ErrorKind::InvalidArgument);
+    dir_trailing_slash: remove_file("a/") => Err(ErrorKind::InvalidArgument);
+    dir_trailing_slash: remove_all("a/") => Err(ErrorKind::InvalidArgument);
+    file_trailing_slash: remove_dir("b/c/file/") => Err(ErrorKind::InvalidArgument);
+    file_trailing_slash: remove_file("b/c/file/") => Err(ErrorKind::InvalidArgument);
+    file_trailing_slash: remove_all("b/c/file/") => Err(ErrorKind::InvalidArgument);
 
     plain: rename("a", "aa", RenameFlags::empty()) => Ok(());
     noreplace_plain: rename("a", "aa", RenameFlags::RENAME_NOREPLACE) => Ok(());
@@ -455,18 +497,20 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_remove<P: AsRef<Path>>(
+    fn check_root_remove<F>(
         root: &Root,
-        path: P,
+        path: &Path,
+        remove_fn: F,
         expected_result: Result<(), ErrorKind>,
-    ) -> Result<(), Error> {
-        let path = path.as_ref();
-
+    ) -> Result<(), Error>
+    where
+        F: FnOnce(&Root, &Path) -> Result<(), PathrsError>,
+    {
         // Get a handle before we remove the path, to make sure the actual inode
         // was unlinked.
         let handle = root.resolve_nofollow(path); // do not unwrap
 
-        let res = root.remove(path);
+        let res = remove_fn(root, path);
         assert_eq!(
             res.as_ref().err().map(PathrsError::kind),
             expected_result.err(),
@@ -488,6 +532,45 @@ mod utils {
             );
         }
         Ok(())
+    }
+
+    pub(super) fn check_root_remove_dir<P: AsRef<Path>>(
+        root: &Root,
+        path: P,
+        expected_result: Result<(), ErrorKind>,
+    ) -> Result<(), Error> {
+        check_root_remove(
+            root,
+            path.as_ref(),
+            |root, path| root.remove_dir(path),
+            expected_result,
+        )
+    }
+
+    pub(super) fn check_root_remove_file<P: AsRef<Path>>(
+        root: &Root,
+        path: P,
+        expected_result: Result<(), ErrorKind>,
+    ) -> Result<(), Error> {
+        check_root_remove(
+            root,
+            path.as_ref(),
+            |root, path| root.remove_file(path),
+            expected_result,
+        )
+    }
+
+    pub(super) fn check_root_remove_all<P: AsRef<Path>>(
+        root: &Root,
+        path: P,
+        expected_result: Result<(), ErrorKind>,
+    ) -> Result<(), Error> {
+        check_root_remove(
+            root,
+            path.as_ref(),
+            |root, path| root.remove_all(path),
+            expected_result,
+        )
     }
 
     pub(super) fn check_root_rename<P1: AsRef<Path>, P2: AsRef<Path>>(

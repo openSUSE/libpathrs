@@ -222,6 +222,66 @@ pub extern "C" fn pathrs_rename(
     })
 }
 
+/// Remove the empty directory at path within the rootfs referenced by root_fd.
+///
+/// The semantics are effectively equivalent to unlinkat(..., AT_REMOVEDIR).
+/// This function will return an error if the path doesn't exist, was not a
+/// directory, or was a non-empty directory.
+///
+/// # Return Value
+///
+/// On success, this function returns 0.
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub extern "C" fn pathrs_rmdir(root_fd: RawFd, path: *const c_char) -> c_int {
+    ret::with_fd(root_fd, |root: &mut Root| {
+        root.remove_dir(utils::parse_path(path)?)
+    })
+}
+
+/// Remove the file (a non-directory inode) at path within the rootfs referenced
+/// by root_fd.
+///
+/// The semantics are effectively equivalent to unlinkat(..., 0). This function
+/// will return an error if the path doesn't exist or was a directory.
+///
+/// # Return Value
+///
+/// On success, this function returns 0.
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub extern "C" fn pathrs_unlink(root_fd: RawFd, path: *const c_char) -> c_int {
+    ret::with_fd(root_fd, |root: &mut Root| {
+        root.remove_file(utils::parse_path(path)?)
+    })
+}
+
+/// Recursively delete the path and any children it contains if it is a
+/// directory. The semantics are equivalent to `rm -r`.
+///
+/// # Return Value
+///
+/// On success, this function returns 0.
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub extern "C" fn pathrs_remove_all(root_fd: RawFd, path: *const c_char) -> c_int {
+    ret::with_fd(root_fd, |root: &mut Root| {
+        root.remove_all(utils::parse_path(path)?)
+    })
+}
+
 // Within the root, create an inode at the path with the given mode. If the
 // path already exists, an error is returned (effectively acting as though
 // O_EXCL is always set). Each pathrs_* corresponds to the matching syscall.
