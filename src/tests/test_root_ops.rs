@@ -148,6 +148,14 @@ macro_rules! root_op_tests {
         }
     };
 
+    (@impl remove_all $test_name:ident ($path:expr) => $expected_result:expr) => {
+        root_op_tests!{
+            fn $test_name(root) {
+                utils::check_root_remove_all(&root, $path, $expected_result)
+            }
+        }
+    };
+
     (@impl rename $test_name:ident ($src_path:expr, $dst_path:expr, $rflags:expr) => $expected_result:expr) => {
         root_op_tests!{
             fn $test_name(root) {
@@ -232,24 +240,34 @@ root_op_tests! {
 
     empty_dir: remove_dir("a") => Ok(());
     empty_dir: remove_file("a") => Err(ErrorKind::OsError(Some(libc::EISDIR)));
+    empty_dir: remove_all("a") => Ok(());
     nonempty_dir: remove_dir("b") => Err(ErrorKind::OsError(Some(libc::ENOTEMPTY)));
     nonempty_dir: remove_file("b") => Err(ErrorKind::OsError(Some(libc::EISDIR)));
+    nonempty_dir: remove_all("b") => Ok(());
     file: remove_dir("b/c/file") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     file: remove_file("b/c/file") => Ok(());
+    file: remove_all("b/c/file") => Ok(());
     fifo: remove_dir("b/fifo") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     fifo: remove_file("b/fifo") => Ok(());
+    fifo: remove_all("b/fifo") => Ok(());
     sock: remove_dir("b/sock") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     sock: remove_file("b/sock") => Ok(());
+    sock: remove_all("b/sock") => Ok(());
     enoent: remove_dir("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     enoent: remove_file("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    enoent: remove_all("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     symlink: remove_dir("b-file") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     symlink: remove_file("b-file") => Ok(());
+    symlink: remove_all("b-file") => Ok(());
     dangling_symlink: remove_dir("a-fake1") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     dangling_symlink: remove_file("a-fake1") => Ok(());
+    dangling_symlink: remove_all("a-fake1") => Ok(());
     dir_trailing_slash: remove_dir("a/") => Err(ErrorKind::InvalidArgument);
     dir_trailing_slash: remove_file("a/") => Err(ErrorKind::InvalidArgument);
+    dir_trailing_slash: remove_all("a/") => Err(ErrorKind::InvalidArgument);
     file_trailing_slash: remove_dir("b/c/file/") => Err(ErrorKind::InvalidArgument);
     file_trailing_slash: remove_file("b/c/file/") => Err(ErrorKind::InvalidArgument);
+    file_trailing_slash: remove_all("b/c/file/") => Err(ErrorKind::InvalidArgument);
 
     plain: rename("a", "aa", RenameFlags::empty()) => Ok(());
     noreplace_plain: rename("a", "aa", RenameFlags::RENAME_NOREPLACE) => Ok(());
@@ -538,6 +556,19 @@ mod utils {
             root,
             path.as_ref(),
             |root, path| root.remove_file(path),
+            expected_result,
+        )
+    }
+
+    pub(super) fn check_root_remove_all<P: AsRef<Path>>(
+        root: &Root,
+        path: P,
+        expected_result: Result<(), ErrorKind>,
+    ) -> Result<(), Error> {
+        check_root_remove(
+            root,
+            path.as_ref(),
+            |root, path| root.remove_all(path),
             expected_result,
         )
     }

@@ -19,6 +19,9 @@
 
 #![forbid(unsafe_code)]
 
+mod dir;
+pub(crate) use dir::*;
+
 mod path;
 pub(crate) use path::*;
 

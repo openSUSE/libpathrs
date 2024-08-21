@@ -682,10 +682,13 @@ impl Root {
     /// # Errors
     ///
     /// If the path does not exist, was not actually `inode_type`, or was a
-    /// non-empty directory an error will be returned.
+    /// non-empty directory an error will be returned. In order to remove a path
+    /// regardless of whether it exists, its type, or if it it's a non-empty
+    /// directory, you can use [`Root::remove_all`].
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
+    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
     fn remove_inode(&self, path: &Path, inode_type: RemoveInodeType) -> Result<(), Error> {
         // unlinkat(2) doesn't let us remove an inode using just a handle (for
         // obvious reasons -- on Unix hardlinks mean that "unlink this file"
@@ -693,6 +696,8 @@ impl Root {
         let (dir, name) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve file removal path")?;
+        // TODO: rmdir() lets you use trailing slashes. We should probably allow
+        //       that too...
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
             description: "file removal path has trailing slash".into(),
@@ -720,10 +725,12 @@ impl Root {
     /// # Errors
     ///
     /// If the path does not exist, was not actually a directory, or was a
-    /// non-empty directory an error will be returned.
+    /// non-empty directory an error will be returned. In order to remove a
+    /// directory and all of its children, you can use [`Root::remove_all`].
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
+    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
     #[doc(alias = "pathrs_rmdir")]
     #[inline]
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
@@ -740,17 +747,49 @@ impl Root {
     /// # Errors
     ///
     /// If the path does not exist or was actually a directory an error will be
-    /// returned.
+    /// returned. In order to remove a path regardless of its type (even if it
+    /// is a non-empty directory), you can use [`Root::remove_all`].
     ///
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
+    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
     #[doc(alias = "pathrs_unlink")]
     #[inline]
     pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Regular)
     }
 
-    // TODO: remove_all()
+    /// Within the [`Root`]'s tree, recursively delete the provided `path` and
+    /// any children it contains if it is a directory. This is effectively
+    /// equivalent to [`fs::remove_dir_all`], Go's [`os.RemoveAll`], or Unix's
+    /// `rm -r`.
+    ///
+    /// Any existing [`Handle`]s to paths within `path` will continue to work as
+    /// before, since Linux does not invalidate file handles to unlinked files
+    /// (though, directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist or some other error occurred during the
+    /// deletion process an error will be returned.
+    ///
+    /// [`Root`]: struct.Root.html
+    /// [`Handle`]: trait.Handle.html
+    /// [`fs::remove_dir_all`]: https://doc.rust-lang.org/std/fs/fn.remove_dir_all.html
+    /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
+    pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve remove-all path")?;
+        // TODO: rmdir() lets you use trailing slashes. We should probably allow
+        //       that too...
+        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
+            name: "path".into(),
+            description: "file removal path has trailing slash".into(),
+        })?;
+
+        utils::remove_all(&dir, name)
+    }
 
     /// Within the [`Root`]'s tree, perform a rename with the given `source` and
     /// `directory`. The `flags` argument is passed directly to
