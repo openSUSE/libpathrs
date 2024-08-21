@@ -174,6 +174,16 @@ func (r *Root) Remove(path string) error {
 	}
 }
 
+// RemoveAll recursively deletes a path and all of its children. This is
+// designed to match the semantics of os.RemoveAll.
+func (r *Root) RemoveAll(path string) error {
+	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
+		err := pathrsRemoveAll(rootFd, path)
+		return struct{}{}, err
+	})
+	return err
+}
+
 // Mkdir creates a directory within a Root's directory tree. The provided mode
 // is used for the new directory (the process's umask applies).
 func (r *Root) Mkdir(path string, mode os.FileMode) error {

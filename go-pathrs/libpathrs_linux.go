@@ -119,6 +119,14 @@ func pathrsUnlink(rootFd uintptr, path string) error {
 	return fetchError(err)
 }
 
+func pathrsRemoveAll(rootFd uintptr, path string) error {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	err := C.pathrs_remove_all(C.int(rootFd), cPath)
+	return fetchError(err)
+}
+
 func pathrsCreat(rootFd uintptr, path string, flags int, mode uint32) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))

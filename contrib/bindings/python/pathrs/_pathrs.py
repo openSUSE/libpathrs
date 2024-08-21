@@ -350,6 +350,12 @@ class Root(WrappedFd):
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
+	def remove_all(self, path):
+		path = _cstr(path)
+		err = libpathrs_so.pathrs_remove_all(self.fileno(), path)
+		if err < 0:
+			raise Error._fetch(err) or INTERNAL_ERROR
+
 	def mkdir(self, path, mode):
 		path = _cstr(path)
 		err = libpathrs_so.pathrs_mkdir(self.fileno(), path, mode)
