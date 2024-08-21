@@ -34,7 +34,11 @@ use std::{
     io::Error as IOError,
     os::{
         linux::fs::MetadataExt,
-        unix::{ffi::OsStrExt, fs::PermissionsExt, io::AsRawFd},
+        unix::{
+            ffi::OsStrExt,
+            fs::PermissionsExt,
+            io::{AsRawFd, OwnedFd},
+        },
     },
     path::{Path, PathBuf},
 };
@@ -291,6 +295,16 @@ impl Root {
         self.resolver.resolve(&self.inner, path, true)
     }
 
+    // Used in operations where we need to get a handle to the parent directory.
+    fn resolve_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, Option<&'p Path>), Error> {
+        let (parent, name) = utils::path_split(path).wrap("split path into (parent, name)")?;
+        let dir = self
+            .resolve(parent)
+            .wrap("resolve parent directory")?
+            .into_file();
+        Ok((dir.into(), name))
+    }
+
     /// Get the target of a symlink within a [`Root`].
     ///
     /// **NOTE**: The returned path is not modified to be "safe" outside of the
@@ -331,20 +345,15 @@ impl Root {
     #[doc(alias = "pathrs_symlink")]
     #[doc(alias = "pathrs_hardlink")]
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
-        // Get a handle for the lexical parent of the target path. It must
-        // already exist, and once we have it we're safe from rename races in
-        // the parent.
-        let (parent, name) =
-            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        // The path doesn't exist yet, so we need to get a safe reference to the
+        // parent and just operate on the final (slashless) component.
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve file creation path")?;
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
-            description: "create path has trailing slash".into(),
+            description: "file creation path has trailing slash".into(),
         })?;
-
-        let dir = self
-            .resolve(parent)
-            .wrap("resolve target parent directory for inode creation")?
-            .into_file();
         let dirfd = dir.as_raw_fd();
 
         match inode_type {
@@ -361,18 +370,14 @@ impl Root {
                 syscalls::symlinkat(target, dirfd, name)
             }
             InodeType::Hardlink(target) => {
-                let (oldparent, oldname) = utils::path_split(target)
-                    .wrap("split hardlink source path into (parent, name)")?;
+                let (olddir, oldname) = self
+                    .resolve_parent(target)
+                    .wrap("resolve hardlink source path")?;
                 let oldname = oldname.ok_or_else(|| ErrorImpl::InvalidArgument {
                     name: "target".into(),
                     description: "hardlink target has trailing slash".into(),
                 })?;
-                let olddir = self
-                    .resolve(oldparent)
-                    .wrap("resolve hardlink source parent for hardlink")?
-                    .into_file();
-                let olddirfd = olddir.as_raw_fd();
-                syscalls::linkat(olddirfd, oldname, dirfd, name, 0)
+                syscalls::linkat(olddir.as_raw_fd(), oldname, dirfd, name, 0)
             }
             InodeType::Fifo(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
@@ -431,19 +436,15 @@ impl Root {
         mut flags: OpenFlags,
         perm: &Permissions,
     ) -> Result<Handle, Error> {
-        // Get a handle for the lexical parent of the target path. It must
-        // already exist, and once we have it we're safe from rename races in
-        // the parent.
-        let (parent, name) =
-            utils::path_split(path.as_ref()).wrap("split target path into (parent, name)")?;
+        // The path doesn't exist yet, so we need to get a safe reference to the
+        // parent and just operate on the final (slashless) component.
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve file creation path")?;
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
-            description: "create_file path has trailing slash".into(),
+            description: "file creation path has trailing slash".into(),
         })?;
-        let dir = self
-            .resolve(parent)
-            .wrap("resolve target parent directory for inode creation")?
-            .into_file();
         let dirfd = dir.as_raw_fd();
 
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
@@ -686,27 +687,22 @@ impl Root {
     /// [`Root`]: struct.Root.html
     /// [`Handle`]: trait.Handle.html
     fn remove_inode(&self, path: &Path, inode_type: RemoveInodeType) -> Result<(), Error> {
-        // Get a handle for the lexical parent of the target path. It must
-        // already exist, and once we have it we're safe from rename races in
-        // the parent.
-        let (parent, name) =
-            utils::path_split(path).wrap("split target path into (parent, name)")?;
+        // unlinkat(2) doesn't let us remove an inode using just a handle (for
+        // obvious reasons -- on Unix hardlinks mean that "unlink this file"
+        // doesn't make sense without referring to a specific directory entry).
+        let (dir, name) = self
+            .resolve_parent(path.as_ref())
+            .wrap("resolve file removal path")?;
         let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "path".into(),
-            description: "remove path has trailing slash".into(),
+            description: "file removal path has trailing slash".into(),
         })?;
-        let dir = self
-            .resolve(parent)
-            .wrap("resolve target parent directory for inode creation")?
-            .into_file();
-        let dirfd = dir.as_raw_fd();
 
         let flags = match inode_type {
             RemoveInodeType::Regular => 0,
             RemoveInodeType::Directory => libc::AT_REMOVEDIR,
         };
-
-        syscalls::unlinkat(dirfd, name, flags).map_err(|err| {
+        syscalls::unlinkat(dir.as_raw_fd(), name, flags).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "pathrs remove".into(),
                 source: err,
@@ -773,39 +769,38 @@ impl Root {
         destination: P,
         rflags: RenameFlags,
     ) -> Result<(), Error> {
-        let (src_parent, src_name) =
-            utils::path_split(source.as_ref()).wrap("split source path into (parent, name)")?;
+        // renameat2(2) doesn't let us rename paths using just handles. In
+        // addition, the target path might not exist (except in the case of
+        // RENAME_EXCHANGE and clobbering).
+        let (src_dir, src_name) = self
+            .resolve_parent(source.as_ref())
+            .wrap("resolve rename source path")?;
         let src_name = src_name.ok_or_else(|| ErrorImpl::InvalidArgument {
             name: "source".into(),
             description: "rename source path has trailing slash".into(),
         })?;
-        let (dst_parent, dst_name) = utils::path_split(destination.as_ref())
-            .wrap("split target path into (parent, name)")?;
+        let (dst_dir, dst_name) = self
+            .resolve_parent(destination.as_ref())
+            .wrap("resolve rename destination path")?;
         let dst_name = dst_name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "source".into(),
+            name: "destination".into(),
             description: "rename destination path has trailing slash".into(),
         })?;
 
-        let src_dir = self
-            .resolve(src_parent)
-            .wrap("resolve source path for rename")?
-            .into_file();
-        let src_dirfd = src_dir.as_raw_fd();
-        let dst_dir = self
-            .resolve(dst_parent)
-            .wrap("resolve target path for rename")?
-            .into_file();
-        let dst_dirfd = dst_dir.as_raw_fd();
-
-        syscalls::renameat2(src_dirfd, src_name, dst_dirfd, dst_name, rflags.bits()).map_err(
-            |err| {
-                ErrorImpl::RawOsError {
-                    operation: "pathrs rename".into(),
-                    source: err,
-                }
-                .into()
-            },
+        syscalls::renameat2(
+            src_dir.as_raw_fd(),
+            src_name,
+            dst_dir.as_raw_fd(),
+            dst_name,
+            rflags.bits(),
         )
+        .map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "pathrs rename".into(),
+                source: err,
+            }
+            .into()
+        })
     }
 
     // TODO: implement a way to duplicate (and even serialise) Roots so that you
