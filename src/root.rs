@@ -326,8 +326,10 @@ impl Root {
     /// inode), an error is returned.
     ///
     /// [`Root`]: struct.Root.html
-    #[doc(alias = "pathrs_creat")]
-    #[doc(alias = "pathrs_create")]
+    #[doc(alias = "pathrs_mkdir")]
+    #[doc(alias = "pathrs_mknod")]
+    #[doc(alias = "pathrs_symlink")]
+    #[doc(alias = "pathrs_hardlink")]
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
         // Get a handle for the lexical parent of the target path. It must
         // already exist, and once we have it we're safe from rename races in
@@ -421,10 +423,8 @@ impl Root {
     /// [`Root::create_file`]: struct.Root.html#method.create_file
     /// [`InodeType::File`]: enum.InodeType.html#variant.File
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
-    #[doc(alias = "pathrs_mkdir")]
-    #[doc(alias = "pathrs_mknod")]
-    #[doc(alias = "pathrs_symlink")]
-    #[doc(alias = "pathrs_hardlink")]
+    #[doc(alias = "pathrs_creat")]
+    #[doc(alias = "pathrs_create")]
     pub fn create_file<P: AsRef<Path>>(
         &self,
         path: P,
