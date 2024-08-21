@@ -112,9 +112,7 @@
 //! }
 //! ```
 //!
-//! [`Root`]: struct.Root.html
-//! [`Handle`]: trait.Handle.html
-//! [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
+//! [`File`]: std::fs::File
 //! [`chroot(2)`]: http://man7.org/linux/man-pages/man2/chroot.2.html
 
 // libpathrs only supports Linux at the moment.

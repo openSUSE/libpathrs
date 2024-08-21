@@ -47,8 +47,6 @@ use libc::dev_t;
 use rustix::fs::{self, Dir, SeekFrom};
 
 /// An inode type to be created with [`Root::create`].
-///
-/// [`Root::create`]: struct.Root.html#method.create
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum InodeType {
@@ -65,26 +63,23 @@ pub enum InodeType {
     /// [`mkdir(2)`]: http://man7.org/linux/man-pages/man2/mkdir.2.html
     Directory(Permissions),
 
-    /// Symlink with the given [`Path`], as in [`symlinkat(2)`].
+    /// Symlink with the given path, as in [`symlinkat(2)`].
     ///
     /// Note that symlinks can contain any arbitrary `CStr`-style string (it
     /// doesn't need to be a real pathname). We don't do any verification of the
     /// target name.
     ///
-    /// [`Path`]: https://doc.rust-lang.org/std/path/struct.Path.html
     /// [`symlinkat(2)`]: http://man7.org/linux/man-pages/man2/symlinkat.2.html
     Symlink(PathBuf),
 
-    /// Hard-link to the given [`Path`], as in [`linkat(2)`].
+    /// Hard-link to the given path, as in [`linkat(2)`].
     ///
-    /// The provided [`Path`] is resolved within the [`Root`]. It is currently
+    /// The provided path is resolved within the [`Root`]. It is currently
     /// not supported to hardlink a file inside the [`Root`]'s tree to a file
     /// outside the [`Root`]'s tree.
+    // XXX: Should we ever support that?
     ///
     /// [`linkat(2)`]: http://man7.org/linux/man-pages/man2/linkat.2.html
-    /// [`Path`]: https://doc.rust-lang.org/std/path/struct.Path.html
-    /// [`Root`]: struct.Root.html
-    // XXX: Should we ever support that?
     Hardlink(PathBuf),
 
     /// Named pipe (aka FIFO), as in [`mkfifo(3)`].
@@ -135,12 +130,10 @@ enum RemoveInodeType {
 /// `-EXDEV` in certain attack scenarios.
 ///
 /// Additionally, if this root directory is moved then any subsequent operations
-/// will fail with an [`Error::SafetyViolation`] since it's not obvious whether
-/// there is an attacker or if the path was moved innocently. This restriction
-/// might be relaxed in the future.
-///
-/// [`Root`]: struct.Root.html
-/// [`Error::SafetyViolation`]: enum.Error.html#variant.SafetyViolation
+/// will fail with a `SafetyViolation` error since it's not obvious
+/// whether there is an attacker or if the path was moved innocently. This
+/// restriction might be relaxed in the future.
+// TODO: Fix the SafetyViolation link once we expose ErrorKind.
 #[derive(Debug)]
 pub struct Root {
     /// The underlying `O_PATH` `File` for this root handle.
@@ -149,9 +142,6 @@ pub struct Root {
     /// The underlying [`Resolver`] to use for all operations underneath this
     /// root. This affects not just [`Root::resolve`] but also all other methods
     /// which have to implicitly resolve a path underneath `Root`.
-    ///
-    /// [`Resolver`]: struct.Resolver.html
-    /// [`Root::resolve`]: #method.resolve
     // TODO: Drop this and switch to builder-pattern...
     pub resolver: Resolver,
 }
@@ -169,9 +159,6 @@ impl Root {
     /// `path` must be an existing directory, and must (at the moment) be a
     /// fully-resolved pathname with no symlink components. This restriction
     /// might be relaxed in the future.
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Resolver`]: struct.Resolver.html
     #[doc(alias = "pathrs_root_open")]
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
@@ -186,8 +173,6 @@ impl Root {
     ///
     /// The new handle is completely independent from the original, but
     /// references the same underlying file and has the same configuration.
-    ///
-    /// [`Root`]: struct.Root.html
     pub fn try_clone(&self) -> Result<Self, Error> {
         Ok(Self {
             inner: self
@@ -207,9 +192,6 @@ impl Root {
     /// passing or otherwise transmitting file descriptor information. It is not
     /// safe to use this [`File`] directly to do filesystem operations. Please
     /// use the provided [`Root`] methods.
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     pub fn into_file(self) -> File {
         self.inner
     }
@@ -220,10 +202,6 @@ impl Root {
     /// code to check the status of the underlying [`File`] without having to
     /// use [`Root::into_file`]. It is not safe to use this [`File`] directly
     /// to do filesystem operations. Please use the provided [`Root`] methods.
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Root::into_file`]: struct.Root.html#method.into_file
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     pub fn as_file(&self) -> &File {
         &self.inner
     }
@@ -245,11 +223,6 @@ impl Root {
     /// guarantee required is not related to memory-safety), users should still
     /// take great care when using this method because it can cause other kinds
     /// of unsafety.
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-    /// [`Root::open`]: struct.Root.html#method.open
-    /// [`Root::into_file`]: struct.Root.html#method.into_file
     // TODO: We should probably have a `Root::from_file` which attempts to
     //       re-open the path with `O_PATH | O_DIRECTORY`, to allow for an
     //       alternative to `Root::open`.
@@ -272,11 +245,6 @@ impl Root {
     /// the path is guaranteed to have been reachable from the root of the
     /// directory tree and thus have been inside the root at one point in the
     /// resolution.
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Handle`]: trait.Handle.html
-    /// [`Error`]: error/struct.Error.html
-    /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
     #[doc(alias = "pathrs_resolve")]
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
@@ -287,8 +255,6 @@ impl Root {
     /// *not* followed and if the trailing component is a symlink
     /// `Root::resolve_nofollow` will return a handle to the symlink itself.
     /// This is effectively equivalent to `O_NOFOLLOW`.
-    ///
-    /// [`Root::resolve`]: struct.Root.html#method.resolve
     #[doc(alias = "pathrs_resolve_nofollow")]
     #[inline]
     pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
@@ -313,10 +279,6 @@ impl Root {
     ///
     /// This method is just shorthand for calling `readlinkat(2)` on the handle
     /// returned by [`Root::resolve_nofollow`].
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Root::resolve`]: struct.Root.html#method.resolve
-    /// [`Root::resolve_nofollow`]: struct.Root.html#method.resolve_nofollow
     #[doc(alias = "pathrs_readlink")]
     pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
         let link = self
@@ -338,8 +300,6 @@ impl Root {
     ///
     /// If the path already exists (regardless of the type of the existing
     /// inode), an error is returned.
-    ///
-    /// [`Root`]: struct.Root.html
     #[doc(alias = "pathrs_mkdir")]
     #[doc(alias = "pathrs_mknod")]
     #[doc(alias = "pathrs_symlink")]
@@ -422,11 +382,6 @@ impl Root {
     ///
     /// Identical to [`Root::create`].
     ///
-    /// [`Root`]: struct.Root.html
-    /// [`Handle`]: trait.Handle.html
-    /// [`Root::create`]: struct.Root.html#method.create
-    /// [`Root::create_file`]: struct.Root.html#method.create_file
-    /// [`InodeType::File`]: enum.InodeType.html#variant.File
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
     #[doc(alias = "pathrs_creat")]
     #[doc(alias = "pathrs_create")]
@@ -463,7 +418,7 @@ impl Root {
 
     /// Within the [`Root`]'s tree, create a directory and any of its parent
     /// component if they are missing. This is effectively equivalent to
-    /// [`fs::create_dir_all`], Go's [`os.MkdirAll`], or Unix's `mkdir -p`.
+    /// [`std::fs::create_dir_all`], Go's [`os.MkdirAll`], or Unix's `mkdir -p`.
     ///
     /// The provided set of [`Permissions`] only applies to path components
     /// created by this function, existing components will not have their
@@ -486,10 +441,6 @@ impl Root {
     /// If an error occurs, it is possible for any number of the directories in
     /// `path` to have been created despite this method returning an error.
     ///
-    /// [`Root`]: struct.Root.html
-    /// [`Handle`]: struct.Handle.html
-    /// [`Permissions`]: https://doc.rust-lang.org/stable/std/fs/struct.Permissions.html
-    /// [`fs::create_dir_all`]: https://doc.rust-lang.org/stable/std/fs/fn.create_dir_all.html
     /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
     #[doc(alias = "pathrs_mkdir_all")]
     pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
@@ -685,10 +636,6 @@ impl Root {
     /// non-empty directory an error will be returned. In order to remove a path
     /// regardless of whether it exists, its type, or if it it's a non-empty
     /// directory, you can use [`Root::remove_all`].
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Handle`]: trait.Handle.html
-    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
     fn remove_inode(&self, path: &Path, inode_type: RemoveInodeType) -> Result<(), Error> {
         // unlinkat(2) doesn't let us remove an inode using just a handle (for
         // obvious reasons -- on Unix hardlinks mean that "unlink this file"
@@ -727,10 +674,6 @@ impl Root {
     /// If the path does not exist, was not actually a directory, or was a
     /// non-empty directory an error will be returned. In order to remove a
     /// directory and all of its children, you can use [`Root::remove_all`].
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Handle`]: trait.Handle.html
-    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
     #[doc(alias = "pathrs_rmdir")]
     #[inline]
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
@@ -749,10 +692,6 @@ impl Root {
     /// If the path does not exist or was actually a directory an error will be
     /// returned. In order to remove a path regardless of its type (even if it
     /// is a non-empty directory), you can use [`Root::remove_all`].
-    ///
-    /// [`Root`]: struct.Root.html
-    /// [`Handle`]: trait.Handle.html
-    /// [`Root::remove_all`]: struct.Root.html#method.remove_all
     #[doc(alias = "pathrs_unlink")]
     #[inline]
     pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
@@ -761,8 +700,8 @@ impl Root {
 
     /// Within the [`Root`]'s tree, recursively delete the provided `path` and
     /// any children it contains if it is a directory. This is effectively
-    /// equivalent to [`fs::remove_dir_all`], Go's [`os.RemoveAll`], or Unix's
-    /// `rm -r`.
+    /// equivalent to [`std::fs::remove_dir_all`], Go's [`os.RemoveAll`], or
+    /// Unix's `rm -r`.
     ///
     /// Any existing [`Handle`]s to paths within `path` will continue to work as
     /// before, since Linux does not invalidate file handles to unlinked files
@@ -773,9 +712,6 @@ impl Root {
     /// If the path does not exist or some other error occurred during the
     /// deletion process an error will be returned.
     ///
-    /// [`Root`]: struct.Root.html
-    /// [`Handle`]: trait.Handle.html
-    /// [`fs::remove_dir_all`]: https://doc.rust-lang.org/std/fs/fn.remove_dir_all.html
     /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
     pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         let (dir, name) = self
@@ -799,7 +735,6 @@ impl Root {
     ///
     /// The error rules are identical to [`renameat2(2)`].
     ///
-    /// [`Root`]: struct.Root.html
     /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
     #[doc(alias = "pathrs_rename")]
     pub fn rename<P: AsRef<Path>>(

@@ -34,8 +34,6 @@ use libc::{c_char, c_int, size_t};
 /// access on those older kernels.
 ///
 /// NOTE: Currently, operating on /proc/... directly is not supported.
-///
-/// [`ProcfsHandle`]: struct.ProcfsHandle.html
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[allow(non_camel_case_types, dead_code)]

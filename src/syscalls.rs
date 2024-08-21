@@ -96,7 +96,7 @@ impl fmt::Display for FrozenFd {
 /// often not interact with these error variants directly and instead would make
 /// use of the top-level [`Error`] type.
 ///
-/// [`Error`]: enum.Error.html
+/// [`Error`]: crate::error::Error
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
     #[error("fcntl({fd}, F_GETFD)")]

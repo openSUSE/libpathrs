@@ -176,8 +176,7 @@ bitflags! {
     /// [`RenameFlags::supported`].
     ///
     /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/rename.2.html
-    /// [`Root::rename`]: struct.Root.html#method.rename
-    /// [`RenameFlags::supported`]: struct.RenameFlags.html#method.supported
+    /// [`Root::rename`]: crate::Root::rename
     #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
     pub struct RenameFlags: libc::c_uint {
         const RENAME_EXCHANGE = libc::RENAME_EXCHANGE;
@@ -267,7 +266,7 @@ mod tests {
 bitflags! {
     /// Optional flags to modify the resolution of paths inside a [`Root`].
     ///
-    /// [`Root`]: struct.Root.html
+    /// [`Root`]: crate::Root
     #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
     pub struct ResolverFlags: u64 {
         // TODO: We should probably have our own bits...

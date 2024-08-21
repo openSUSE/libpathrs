@@ -47,8 +47,8 @@ const MAX_SYMLINK_TRAVERSALS: usize = 128;
 /// automatically detect the best backend for your platform (which is the value
 /// returned by `Resolver::default`). However, this can be useful for testing.
 ///
-/// [`Root`]: struct.Root.html
-/// [`Handle`]: struct.Handle.html
+/// [`Root`]: crate::Root
+/// [`Handle`]: crate::Handle
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResolverBackend {
@@ -93,8 +93,7 @@ impl ResolverBackend {
 /// conduct path resolutions. It's not recommended to change the
 /// [`ResolverBackend`] but it wouldn't hurt.
 ///
-/// [`Root`]: struct.Root.html
-/// [`ResolverBackend`]: enum.ResolverBackend.html
+/// [`Root`]: crate::Root
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Resolver {
     /// Underlying resolution backend used.

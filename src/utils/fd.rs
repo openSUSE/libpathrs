@@ -42,19 +42,18 @@ pub(crate) trait RawFdExt {
     /// during execution this was the path the fd pointed to" and
     /// no more.
     ///
-    /// NOTE: This method uses a [`procfs::ProcfsHandle`] to
-    ///
-    /// [`procfs::ProcfsHandle`]: procfs/struct.ProcfsHandle.html
+    /// NOTE: This method uses the [`ProcfsHandle`] to resolve the path. This
+    /// means that it is UNSAFE to use this method within any of our `procfs`
+    /// code!
     fn as_unsafe_path(&self, procfs: &ProcfsHandle) -> Result<PathBuf, Error>;
 
-    /// Like [`as_unsafe_path`], except that the lookup is done using the basic
-    /// host `/proc` mount. This is not safe against various races, and thus
-    /// MUST ONLY be used in codepaths that
+    /// Like [`RawFdExt::as_unsafe_path`], except that the lookup is done using
+    /// the basic host `/proc` mount. This is not safe against various races,
+    /// and thus MUST ONLY be used in codepaths that are not susceptible to
+    /// those kinds of attacks.
     ///
     /// Currently this should only be used by the `syscall::FrozenFd` logic
     /// which saves the path a file descriptor references.
-    ///
-    /// [`as_unsafe_path`]: #method.as_unsafe_path
     fn as_unsafe_path_unchecked(&self) -> Result<PathBuf, Error>;
 
     /// Check if the File is on a "dangerous" filesystem that might contain

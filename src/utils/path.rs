@@ -100,12 +100,11 @@ pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>),
     Ok((dir, base))
 }
 
-/// RawComponents is like [`std::path::Components`] execpt that no normalisation
-/// is done for any path components ([`std::path::Components`] normalises "/./"
-/// components), and all of the components are simply [`std::ffi::OsStr`].
+/// RawComponents is like [`Components`] execpt that no normalisation is done
+/// for any path components ([`Components`] normalises "/./" components), and
+/// all of the components are simply [`OsStr`].
 ///
-/// [`std::path::Components`]: https://doc.rust-lang.org/std/path/struct.Components.html
-/// [`std::ffi::OsStr`]: https://doc.rust-lang.org/std/ffi/struct.OsStr.html
+/// [`Components`]: std::path::Components
 #[derive(Debug)]
 pub(crate) struct RawComponents<'a> {
     inner: Option<&'a OsStr>,

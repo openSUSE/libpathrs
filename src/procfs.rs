@@ -56,8 +56,6 @@ lazy_static! {
 /// alive until you stop using the handle (if the thread dies the handle may
 /// start returning invalid data or errors because it refers to a specific
 /// thread that no longer exists).
-///
-/// [`ProcfsHandle`]: struct.ProcfsHandle.html
 #[doc(alias = "pathrs_proc_base_t")]
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -160,8 +158,6 @@ impl ProcfsHandle {
     /// Create a new `fsopen(2)`-based [`ProcfsHandle`]. This handle is safe
     /// against racing attackers changing the mount table and is guaranteed to
     /// have no overmounts because it is a brand-new procfs.
-    ///
-    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     pub(crate) fn new_fsopen() -> Result<Self, Error> {
         let sfd = syscalls::fsopen("proc", FsopenFlags::FSOPEN_CLOEXEC).map_err(|err| {
             ErrorImpl::RawOsError {
@@ -199,8 +195,6 @@ impl ProcfsHandle {
     /// Create a new `open_tree(2)`-based [`ProcfsHandle`]. This handle is
     /// guaranteed to be safe against racing attackers, and will not have
     /// overmounts unless `flags` contains `OpenTreeFlags::AT_RECURSIVE`.
-    ///
-    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     pub(crate) fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
         syscalls::open_tree(
             -libc::EBADF,
@@ -221,8 +215,6 @@ impl ProcfsHandle {
     /// Create a plain `open(2)`-style [`ProcfsHandle`].
     ///
     /// This handle is NOT safe against racing attackers and overmounts.
-    ///
-    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     pub(crate) fn new_unsafe_open() -> Result<Self, Error> {
         syscalls::openat(libc::AT_FDCWD, "/proc", libc::O_PATH | libc::O_DIRECTORY, 0)
             .map_err(|err| {
@@ -255,10 +247,6 @@ impl ProcfsHandle {
     /// However, the Linux 5.8-or-later `STATX_MNT_ID` protections will protect
     /// against static overmounts created by an attacker that cannot modify the
     /// mount table while these operations are running.
-    ///
-    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
-    /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
-    /// [`ProcfsHandle::open_follow`]: struct.ProcfsHandle.html#method.open_follow
     pub fn new() -> Result<Self, Error> {
         Self::new_fsopen()
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
@@ -337,9 +325,6 @@ impl ProcfsHandle {
     /// In addition (like [`ProcfsHandle::open`]), `open_follow` will not permit
     /// a magic-link to be a path component (ie. `/proc/self/root/etc/passwd`).
     /// This method *only* permits *trailing* symlinks.
-    ///
-    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
-    /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
     #[doc(alias = "pathrs_proc_open")]
     pub fn open_follow<P: AsRef<Path>>(
         &self,
@@ -428,9 +413,6 @@ impl ProcfsHandle {
     /// All mount point crossings are also forbidden (including bind-mounts),
     /// meaning that this method implies [`RESOLVE_NO_XDEV`][`openat2(2)`].
     ///
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-    /// [`ProcfsBase`]: enum.ProcfsBase.html
-    /// [`ProcfsHandle`]: struct.ProcfsHandle.html
     /// [`openat2(2)`]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
     #[doc(alias = "pathrs_proc_open")]
     pub fn open<P: AsRef<Path>>(
@@ -467,7 +449,6 @@ impl ProcfsHandle {
     /// well.
     ///
     /// [`readlinkat(2)`]: https://www.man7.org/linux/man-pages/man2/readlinkat.2.html
-    /// [`ProcfsHandle::open`]: struct.ProcfsHandle.html#method.open
     #[doc(alias = "pathrs_proc_readlink")]
     pub fn readlink<P: AsRef<Path>>(&self, base: ProcfsBase, subpath: P) -> Result<PathBuf, Error> {
         let link = self.open(base, subpath, OpenFlags::O_PATH)?;
@@ -484,6 +465,9 @@ impl ProcfsHandle {
 impl TryFrom<File> for ProcfsHandle {
     type Error = Error;
 
+    /// Try to convert a regular [`File`] handle to a [`ProcfsHandle`]. This
+    /// method will return an error if the file handle is not actually the root
+    /// of a procfs mount.
     fn try_from(inner: File) -> Result<Self, Self::Error> {
         // Make sure the file is actually a procfs handle.
         Self::check_is_procfs(&inner)?;

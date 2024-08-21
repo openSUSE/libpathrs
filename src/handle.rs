@@ -41,11 +41,8 @@ use std::fs::File;
 /// extract from the [`File`] you get from this [`Handle`]. **You must always do
 /// operations through a valid [`Root`].**
 ///
-/// [`Root`]: struct.Root.html
-/// [`Handle`]: trait.Handle.html
-/// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-/// [`RawFd`]: https://doc.rust-lang.org/std/os/unix/io/type.RawFd.html
-/// [`libc::openat`]: https://docs.rs/libc/latest/libc/fn.openat.html
+/// [`RawFd`]: std::os::unix::io::RawFd
+/// [`Root`]: crate::Root
 #[derive(Debug)]
 pub struct Handle {
     inner: File,
@@ -65,8 +62,7 @@ impl Handle {
     /// 2. `ioctl(fd, TIOCSCTTY, 0)` will set the fd as the controlling terminal
     ///    (if you don't have one already, and the fd references a TTY).
     ///
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-    /// [`Root::create`]: struct.Root.html#method.create
+    /// [`Root::create`]: crate::Root::create
     #[doc(alias = "pathrs_reopen")]
     pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
         self.inner.reopen(&PROCFS_HANDLE, flags.into())
@@ -76,8 +72,6 @@ impl Handle {
     ///
     /// The new handle is completely independent from the original, but
     /// references the same underlying file.
-    ///
-    /// [`Handle`]: struct.Handle.html
     pub fn try_clone(&self) -> Result<Self, Error> {
         self.as_file()
             .try_clone()
@@ -97,10 +91,6 @@ impl Handle {
     /// passing or otherwise transmitting file descriptor information. If you
     /// want to get a [`File`] handle for general use, please use
     /// [`Handle::reopen`] instead.
-    ///
-    /// [`Handle`]: struct.Handle.html
-    /// [`Handle::reopen`]: struct.Handle.html#method.reopen
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     #[inline]
     pub fn into_file(self) -> File {
         self.inner
@@ -112,11 +102,6 @@ impl Handle {
     /// code to check the status of the underlying [`File`] without having to
     /// use [`Handle::into_file`]. If you want to get a [`File`] handle for
     /// general use, please use [`Handle::reopen`] instead.
-    ///
-    /// [`Handle`]: struct.Handle.html
-    /// [`Handle::into_file`]: struct.Handle.html#method.into_file
-    /// [`Handle::reopen`]: struct.Handle.html#method.reopen
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
     #[inline]
     pub fn as_file(&self) -> &File {
         &self.inner
@@ -137,10 +122,7 @@ impl Handle {
     /// take great care when using this method because it can cause other kinds
     /// of unsafety.
     ///
-    /// [`Handle`]: struct.Handle.html
-    /// [`File`]: https://doc.rust-lang.org/std/fs/struct.File.html
-    /// [`Root::resolve`]: struct.Root.html#method.resolve
-    /// [`Handle::into_file`]: struct.Handle.html#method.into_file
+    /// [`Root::resolve`]: crate::Root::resolve
     pub fn from_file_unchecked(inner: File) -> Self {
         Self { inner }
     }
