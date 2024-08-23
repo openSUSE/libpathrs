@@ -25,14 +25,47 @@ use crate::{
 };
 
 use std::{
-    fs::{self, File},
-    os::unix::io::{AsRawFd, RawFd},
+    fs,
+    os::unix::io::{AsFd, AsRawFd, OwnedFd},
     path::{Path, PathBuf},
 };
 
-pub(crate) trait RawFdExt {
+pub(crate) struct Metadata(libc::stat);
+
+// TODO: Maybe we should just implement MetadataExt?
+impl Metadata {
+    pub(crate) fn mode(&self) -> u32 {
+        self.0.st_mode
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rdev(&self) -> u64 {
+        self.0.st_rdev
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ino(&self) -> u64 {
+        self.0.st_ino
+    }
+
+    #[cfg(test)]
+    pub(crate) fn nlink(&self) -> u64 {
+        self.0.st_nlink
+    }
+
+    pub(crate) fn is_symlink(&self) -> bool {
+        self.mode() & libc::S_IFMT == libc::S_IFLNK
+    }
+}
+
+pub(crate) trait FdExt {
+    /// Equivalent to [`File::metadata`].
+    ///
+    /// [`File::metadata`]: std::fs::File::metadata
+    fn metadata(&self) -> Result<Metadata, Error>;
+
     /// Re-open a file descriptor.
-    fn reopen(&self, procfs: &ProcfsHandle, flags: OpenFlags) -> Result<File, Error>;
+    fn reopen(&self, procfs: &ProcfsHandle, flags: OpenFlags) -> Result<OwnedFd, Error>;
 
     /// Get the path this RawFd is referencing.
     ///
@@ -47,10 +80,10 @@ pub(crate) trait RawFdExt {
     /// code!
     fn as_unsafe_path(&self, procfs: &ProcfsHandle) -> Result<PathBuf, Error>;
 
-    /// Like [`RawFdExt::as_unsafe_path`], except that the lookup is done using
-    /// the basic host `/proc` mount. This is not safe against various races,
-    /// and thus MUST ONLY be used in codepaths that are not susceptible to
-    /// those kinds of attacks.
+    /// Like [`FdExt::as_unsafe_path`], except that the lookup is done using the
+    /// basic host `/proc` mount. This is not safe against various races, and
+    /// thus MUST ONLY be used in codepaths that are not susceptible to those
+    /// kinds of attacks.
     ///
     /// Currently this should only be used by the `syscall::FrozenFd` logic
     /// which saves the path a file descriptor references.
@@ -61,7 +94,8 @@ pub(crate) trait RawFdExt {
     fn is_magiclink_filesystem(&self) -> Result<bool, Error>;
 }
 
-fn proc_subpath(fd: RawFd) -> Result<String, Error> {
+fn proc_subpath<Fd: AsRawFd>(fd: Fd) -> Result<String, Error> {
+    let fd = fd.as_raw_fd();
     if fd == libc::AT_FDCWD {
         Ok("cwd".to_string())
     } else if fd.is_positive() {
@@ -94,23 +128,36 @@ const DANGEROUS_FILESYSTEMS: [i64; 2] = [
     0x5a3c_69f0,            // apparmorfs
 ];
 
-impl RawFdExt for RawFd {
-    fn reopen(&self, procfs: &ProcfsHandle, flags: OpenFlags) -> Result<File, Error> {
+impl<T: AsFd> FdExt for T {
+    fn metadata(&self) -> Result<Metadata, Error> {
+        let stat = syscalls::fstatat(self.as_fd(), "").map_err(|err| ErrorImpl::RawOsError {
+            operation: "get fd metadata".into(),
+            source: err,
+        })?;
+        Ok(Metadata(stat))
+    }
+
+    fn reopen(&self, procfs: &ProcfsHandle, flags: OpenFlags) -> Result<OwnedFd, Error> {
+        let fd = self.as_fd();
         // TODO: We should look into using O_EMPTYPATH if it's available to
         //       avoid the /proc dependency -- though then again, as_unsafe_path
         //       necessarily requires /proc.
-        procfs.open_follow(ProcfsBase::ProcThreadSelf, proc_subpath(*self)?, flags)
+        procfs
+            .open_follow(ProcfsBase::ProcThreadSelf, proc_subpath(fd)?, flags)
+            .map(OwnedFd::from)
     }
 
     fn as_unsafe_path(&self, procfs: &ProcfsHandle) -> Result<PathBuf, Error> {
-        procfs.readlink(ProcfsBase::ProcThreadSelf, proc_subpath(*self)?)
+        let fd = self.as_fd();
+        procfs.readlink(ProcfsBase::ProcThreadSelf, proc_subpath(fd)?)
     }
 
     fn as_unsafe_path_unchecked(&self) -> Result<PathBuf, Error> {
+        let fd = self.as_fd();
         // "/proc/thread-self/fd/$n"
         let fd_path = PathBuf::from("/proc")
             .join(ProcfsBase::ProcThreadSelf.into_path(None))
-            .join(proc_subpath(*self)?);
+            .join(proc_subpath(fd)?);
 
         // Because this code is used within syscalls, we can't even check the
         // filesystem type of /proc (unless we were to copy the logic here).
@@ -128,7 +175,7 @@ impl RawFdExt for RawFd {
         // nd_jump_link() is used internally. So, we just have to make an
         // educated guess based on which mainline filesystems expose
         // magic-links.
-        let stat = syscalls::fstatfs(*self).map_err(|err| ErrorImpl::RawOsError {
+        let stat = syscalls::fstatfs(self).map_err(|err| ErrorImpl::RawOsError {
             operation: "check fstype of fd".into(),
             source: err,
         })?;
@@ -136,32 +183,10 @@ impl RawFdExt for RawFd {
     }
 }
 
-// XXX: We can't use <T: AsRawFd> here, because Rust tells us that RawFd might
-//      have an AsRawFd in the future (and thus produce a conflicting
-//      implementations error) and so we have to manually define it for the
-//      types we are going to be using.
-
-impl RawFdExt for File {
-    fn reopen(&self, procfs: &ProcfsHandle, flags: OpenFlags) -> Result<File, Error> {
-        self.as_raw_fd().reopen(procfs, flags)
-    }
-
-    fn as_unsafe_path(&self, procfs: &ProcfsHandle) -> Result<PathBuf, Error> {
-        // SAFETY: Caller guarantees that as_unsafe_path usage is safe.
-        self.as_raw_fd().as_unsafe_path(procfs)
-    }
-
-    fn as_unsafe_path_unchecked(&self) -> Result<PathBuf, Error> {
-        // SAFETY: Caller guarantees that as_unsafe_path usage is safe.
-        self.as_raw_fd().as_unsafe_path_unchecked()
-    }
-
-    fn is_magiclink_filesystem(&self) -> Result<bool, Error> {
-        self.as_raw_fd().is_magiclink_filesystem()
-    }
-}
-
-pub(crate) fn fetch_mnt_id<P: AsRef<Path>>(dirfd: &File, path: P) -> Result<Option<u64>, Error> {
+pub(crate) fn fetch_mnt_id<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
+    path: P,
+) -> Result<Option<u64>, Error> {
     // NOTE: stx.stx_mnt_id is fairly new (added in Linux 5.8[1]) so this check
     // might not work on quite a few kernels and so we have to fallback to not
     // checking the mount ID (removing some protections).
@@ -190,7 +215,7 @@ pub(crate) fn fetch_mnt_id<P: AsRef<Path>>(dirfd: &File, path: P) -> Result<Opti
     const STATX_MNT_ID_UNIQUE: u32 = 0x4000;
     let want_mask = libc::STATX_MNT_ID | STATX_MNT_ID_UNIQUE;
 
-    match syscalls::statx(dirfd.as_raw_fd(), path, want_mask) {
+    match syscalls::statx(dirfd, path, want_mask) {
         Ok(stx) => Ok(if stx.stx_mask & want_mask != 0 {
             Some(stx.stx_mnt_id)
         } else {

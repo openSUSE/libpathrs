@@ -35,14 +35,16 @@ use crate::{
     flags::{OpenFlags, ResolverFlags},
     resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls::{self, OpenHow},
-    utils::{self, PathIterExt},
+    utils::{self, FdExt, PathIterExt},
 };
 
 use std::{
     collections::VecDeque,
-    fs::File,
     io::Error as IOError,
-    os::unix::{ffi::OsStrExt, io::AsRawFd},
+    os::unix::{
+        ffi::OsStrExt,
+        io::{AsFd, OwnedFd},
+    },
     path::Path,
 };
 
@@ -65,13 +67,13 @@ impl Default for ProcfsResolver {
 }
 
 impl ProcfsResolver {
-    pub(crate) fn resolve<P: AsRef<Path>>(
+    pub(crate) fn resolve<F: AsFd, P: AsRef<Path>>(
         &self,
-        root: &File,
+        root: F,
         path: P,
         oflags: OpenFlags,
         rflags: ResolverFlags,
-    ) -> Result<File, Error> {
+    ) -> Result<OwnedFd, Error> {
         // These flags don't make sense for procfs and will just result in
         // confusing errors during lookup. O_TMPFILE contains multiple flags
         // (including O_DIRECTORY!) so we have to check it separately.
@@ -94,12 +96,12 @@ impl ProcfsResolver {
     }
 }
 
-fn openat2_resolve<P: AsRef<Path>>(
-    root: &File,
+fn openat2_resolve<F: AsFd, P: AsRef<Path>>(
+    root: F,
     path: P,
     oflags: OpenFlags,
     rflags: ResolverFlags,
-) -> Result<File, Error> {
+) -> Result<OwnedFd, Error> {
     if !*syscalls::OPENAT2_IS_SUPPORTED {
         Err(ErrorImpl::NotSupported {
             feature: "openat2".into(),
@@ -112,7 +114,7 @@ fn openat2_resolve<P: AsRef<Path>>(
         libc::RESOLVE_BENEATH | libc::RESOLVE_NO_MAGICLINKS | libc::RESOLVE_NO_XDEV | rflags.bits();
 
     syscalls::openat2(
-        root.as_raw_fd(),
+        root,
         path,
         &OpenHow {
             flags: oflags,
@@ -129,7 +131,7 @@ fn openat2_resolve<P: AsRef<Path>>(
     })
 }
 
-fn check_mnt_id(root_mnt_id: Option<u64>, file: &File) -> Result<(), Error> {
+fn check_mnt_id<Fd: AsFd>(root_mnt_id: Option<u64>, file: Fd) -> Result<(), Error> {
     let got_mnt_id = utils::fetch_mnt_id(file, "")?;
     if got_mnt_id != root_mnt_id {
         Err(ErrorImpl::OsError {
@@ -143,20 +145,23 @@ fn check_mnt_id(root_mnt_id: Option<u64>, file: &File) -> Result<(), Error> {
     Ok(())
 }
 
-fn opath_resolve<P: AsRef<Path>>(
-    root: &File,
+fn opath_resolve<F: AsFd, P: AsRef<Path>>(
+    root: F,
     path: P,
     oflags: OpenFlags,
     rflags: ResolverFlags,
-) -> Result<File, Error> {
+) -> Result<OwnedFd, Error> {
+    let root = root.as_fd();
     let root_mnt_id = utils::fetch_mnt_id(root, "")?;
 
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one.
-    let mut current = root.try_clone().map_err(|err| ErrorImpl::OsError {
-        operation: "dup root handle as starting point of resolution".into(),
-        source: err,
-    })?;
+    let mut current = root
+        .try_clone_to_owned()
+        .map_err(|err| ErrorImpl::OsError {
+            operation: "dup root handle as starting point of resolution".into(),
+            source: err,
+        })?;
 
     // Get initial set of components from the passed path. We remove components
     // as we do the path walk, and update them with the contents of any symlinks
@@ -186,30 +191,19 @@ fn opath_resolve<P: AsRef<Path>>(
         }
 
         // Get our next element.
-        let next = syscalls::openat(
-            current.as_raw_fd(),
-            &part,
-            libc::O_PATH | libc::O_NOFOLLOW,
-            0,
-        )
-        .map_err(|err| ErrorImpl::RawOsError {
-            operation: "open next component of resolution".into(),
-            source: err,
-        })?;
+        let next = syscalls::openat(&current, &part, libc::O_PATH | libc::O_NOFOLLOW, 0).map_err(
+            |err| ErrorImpl::RawOsError {
+                operation: "open next component of resolution".into(),
+                source: err,
+            },
+        )?;
 
         // Check that the next component is on the same mountpoint.
         // NOTE: If the root is the host /proc mount, this is only safe if there
         // are no racing mounts.
         check_mnt_id(root_mnt_id, &next).with_wrap(|| format!("open next component {part:?}"))?;
 
-        let next_type = next
-            // NOTE: File::metadata definitely does an fstat(2) here.
-            .metadata()
-            .map_err(|err| ErrorImpl::OsError {
-                operation: "fstat of next component".into(),
-                source: err,
-            })?
-            .file_type();
+        let next_meta = next.metadata().wrap("fstat of next component")?;
 
         // If this is the last component, try to open the same component again
         // with with the requested flags. Unlike the other Handle resolvers, we
@@ -270,12 +264,7 @@ fn opath_resolve<P: AsRef<Path>>(
             // continue walking).
             && oflags.intersection(OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW | OpenFlags::O_DIRECTORY) != OpenFlags::O_PATH
         {
-            match syscalls::openat(
-                current.as_raw_fd(),
-                &part,
-                oflags.bits() | libc::O_NOFOLLOW,
-                0,
-            ) {
+            match syscalls::openat(&current, &part, oflags.bits() | libc::O_NOFOLLOW, 0) {
                 Ok(final_reopen) => {
                     // Re-verify the next component is on the same mount.
                     check_mnt_id(root_mnt_id, &final_reopen).wrap("open final component")?;
@@ -295,7 +284,7 @@ fn opath_resolve<P: AsRef<Path>>(
                     if oflags.contains(OpenFlags::O_NOFOLLOW)
                         || !oflags.contains(OpenFlags::O_DIRECTORY)
                         || err.root_cause().raw_os_error() != Some(libc::ENOTDIR)
-                        || !next_type.is_symlink()
+                        || !next_meta.is_symlink()
                     {
                         Err(ErrorImpl::RawOsError {
                             operation: format!("open last component of resolution with {oflags:?}")
@@ -310,7 +299,7 @@ fn opath_resolve<P: AsRef<Path>>(
         // Is the next dirfd a symlink or an ordinary path? If we're an ordinary
         // dirent, we just update current and move on to the next component.
         // Nothing special here.
-        if !next_type.is_symlink() {
+        if !next_meta.is_symlink() {
             current = next;
             continue;
         }
@@ -341,11 +330,10 @@ fn opath_resolve<P: AsRef<Path>>(
             .wrap("exceeded symlink limit")?
         }
 
-        let link_target =
-            syscalls::readlinkat(next.as_raw_fd(), "").map_err(|err| ErrorImpl::RawOsError {
-                operation: "readlink next symlink component".into(),
-                source: err,
-            })?;
+        let link_target = syscalls::readlinkat(&next, "").map_err(|err| ErrorImpl::RawOsError {
+            operation: "readlink next symlink component".into(),
+            source: err,
+        })?;
 
         // The hardened resolver is called using a root that is a subdir of
         // /proc (such as /proc/self or /proc/thread-self), so it makes no sense
@@ -377,7 +365,7 @@ mod tests {
         resolvers::procfs::ProcfsResolver,
         syscalls,
         tests::common as tests_common,
-        utils::RawFdExt,
+        utils::FdExt,
     };
 
     use std::{fs::File, path::PathBuf};

@@ -791,10 +791,10 @@ resolve_tests! {
 }
 
 mod utils {
-    use std::{os::linux::fs::MetadataExt, path::Path};
+    use std::path::Path;
 
     use crate::{
-        error::ErrorKind, flags::OpenFlags, resolvers::PartialLookup, syscalls, utils::RawFdExt,
+        error::ErrorKind, flags::OpenFlags, resolvers::PartialLookup, syscalls, utils::FdExt,
         Handle, Root,
     };
 
@@ -875,7 +875,7 @@ mod utils {
             }
         };
 
-        let real_handle_path = handle.as_file().as_unsafe_path_unchecked()?;
+        let real_handle_path = handle.as_unsafe_path_unchecked()?;
         let real_reopen_path = file.as_unsafe_path_unchecked()?;
 
         assert_eq!(
@@ -884,7 +884,7 @@ mod utils {
         );
 
         let clone_handle = handle.try_clone()?;
-        let clone_handle_path = clone_handle.as_file().as_unsafe_path_unchecked()?;
+        let clone_handle_path = clone_handle.as_unsafe_path_unchecked()?;
 
         assert_eq!(
             real_handle_path, clone_handle_path,
@@ -902,21 +902,21 @@ mod utils {
         no_follow_trailing: bool,
         expected: Result<PartialLookup<LookupResult, ErrorKind>, ErrorKind>,
     ) -> Result<(), Error> {
-        let root_dir = root.as_file().as_unsafe_path_unchecked()?;
+        let root_dir = root.as_unsafe_path_unchecked()?;
         let unsafe_path = unsafe_path.as_ref();
 
         let result = root
             .resolver
-            .resolve_partial(root.as_file(), unsafe_path, no_follow_trailing)
+            .resolve_partial(root, unsafe_path, no_follow_trailing)
             .map(|lookup_result| {
                 let (path, file_type) = {
-                    let file = lookup_result.as_inner_handle().as_file();
+                    let file = lookup_result.as_inner_handle();
                     (
                         file.as_unsafe_path_unchecked()
                             .expect("should be able to get real path of handle"),
                         file.metadata()
                             .expect("should be able to fstat handle")
-                            .st_mode()
+                            .mode()
                             & libc::S_IFMT,
                     )
                 };
@@ -1022,7 +1022,7 @@ mod utils {
         no_follow_trailing: bool,
         expected: Result<LookupResult, ErrorKind>,
     ) -> Result<(), Error> {
-        let root_dir = root.as_file().as_unsafe_path_unchecked()?;
+        let root_dir = root.as_unsafe_path_unchecked()?;
         let unsafe_path = unsafe_path.as_ref();
 
         let result = if no_follow_trailing {
@@ -1049,7 +1049,7 @@ mod utils {
             (Ok(handle), Err(want_err)) => anyhow::bail!(
                 "expected to get io::Error {} but instead got file {}",
                 errno_description(want_err),
-                handle.as_file().as_unsafe_path_unchecked()?.display(),
+                handle.as_unsafe_path_unchecked()?.display(),
             ),
 
             (Err(err), Err(want_err)) => {
@@ -1065,15 +1065,15 @@ mod utils {
         };
 
         let expected_path = expected_path.trim_start_matches('/');
-        let real_handle_path = handle.as_file().as_unsafe_path_unchecked()?;
+        let real_handle_path = handle.as_unsafe_path_unchecked()?;
         assert_eq!(
             real_handle_path,
             root_dir.join(expected_path),
             "resolve({unsafe_path:?}, {no_follow_trailing}) path mismatch",
         );
 
-        let meta = handle.as_file().metadata()?;
-        let real_file_type = meta.st_mode() & libc::S_IFMT;
+        let meta = handle.metadata()?;
+        let real_file_type = meta.mode() & libc::S_IFMT;
         assert_eq!(real_file_type, expected_file_type, "file type mismatch",);
 
         match real_file_type {

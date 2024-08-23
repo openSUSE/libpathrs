@@ -29,7 +29,7 @@ use crate::{
 
 use std::{
     fs::File,
-    os::unix::{fs::MetadataExt, io::AsRawFd},
+    os::unix::io::{AsFd, BorrowedFd, OwnedFd},
     path::{Path, PathBuf},
 };
 
@@ -69,7 +69,8 @@ pub enum ProcfsBase {
 }
 
 impl ProcfsBase {
-    pub(crate) fn into_path(self, proc_root: Option<&File>) -> PathBuf {
+    pub(crate) fn into_path(self, proc_root: Option<BorrowedFd<'_>>) -> PathBuf {
+        let proc_root = proc_root.as_ref().map(AsFd::as_fd);
         match self {
             Self::ProcSelf => PathBuf::from("self"),
             Self::ProcThreadSelf => vec![
@@ -87,8 +88,10 @@ impl ProcfsBase {
             // Return the first option that exists in proc_root.
             .find(|base| {
                 match proc_root {
-                    Some(root) => syscalls::fstatat(root.as_raw_fd(), base),
-                    None => syscalls::fstatat(libc::AT_FDCWD, PathBuf::from("/proc").join(base)),
+                    Some(root) => syscalls::fstatat(root, base),
+                    None => {
+                        syscalls::fstatat(syscalls::AT_FDCWD, PathBuf::from("/proc").join(base))
+                    }
                 }
                 .is_ok()
             })
@@ -146,7 +149,7 @@ impl ProcfsBase {
 /// [lxcfs]: https://github.com/lxc/lxcfs
 #[derive(Debug)]
 pub struct ProcfsHandle {
-    inner: File,
+    inner: OwnedFd,
     mnt_id: Option<u64>,
     pub(crate) resolver: ProcfsResolver,
 }
@@ -168,16 +171,16 @@ impl ProcfsHandle {
 
         // Try to configure hidepid=ptraceable,subset=pid if possible, but
         // ignore errors.
-        let _ = syscalls::fsconfig_set_string(sfd.as_raw_fd(), "hidepid", "ptraceable");
-        let _ = syscalls::fsconfig_set_string(sfd.as_raw_fd(), "subset", "pid");
+        let _ = syscalls::fsconfig_set_string(&sfd, "hidepid", "ptraceable");
+        let _ = syscalls::fsconfig_set_string(&sfd, "subset", "pid");
 
-        syscalls::fsconfig_create(sfd.as_raw_fd()).map_err(|err| ErrorImpl::RawOsError {
+        syscalls::fsconfig_create(&sfd).map_err(|err| ErrorImpl::RawOsError {
             operation: "instantiate procfs superblock".into(),
             source: err,
         })?;
 
         syscalls::fsmount(
-            sfd.as_raw_fd(),
+            &sfd,
             FsmountFlags::FSMOUNT_CLOEXEC,
             libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID,
         )
@@ -188,8 +191,8 @@ impl ProcfsHandle {
             }
             .into()
         })
-        // NOTE: try_from checks this is an actual procfs root.
-        .and_then(Self::try_from)
+        // NOTE: from_fd checks this is an actual procfs root.
+        .and_then(Self::from_fd)
     }
 
     /// Create a new `open_tree(2)`-based [`ProcfsHandle`]. This handle is
@@ -197,7 +200,7 @@ impl ProcfsHandle {
     /// overmounts unless `flags` contains `OpenTreeFlags::AT_RECURSIVE`.
     pub(crate) fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
         syscalls::open_tree(
-            -libc::EBADF,
+            syscalls::AT_FDCWD,
             "/proc",
             OpenTreeFlags::OPEN_TREE_CLONE | flags,
         )
@@ -208,24 +211,29 @@ impl ProcfsHandle {
             }
             .into()
         })
-        // NOTE: try_from checks this is an actual procfs root.
-        .and_then(Self::try_from)
+        // NOTE: from_fd checks this is an actual procfs root.
+        .and_then(Self::from_fd)
     }
 
     /// Create a plain `open(2)`-style [`ProcfsHandle`].
     ///
     /// This handle is NOT safe against racing attackers and overmounts.
     pub(crate) fn new_unsafe_open() -> Result<Self, Error> {
-        syscalls::openat(libc::AT_FDCWD, "/proc", libc::O_PATH | libc::O_DIRECTORY, 0)
-            .map_err(|err| {
-                ErrorImpl::RawOsError {
-                    operation: "open /proc handle".into(),
-                    source: err,
-                }
-                .into()
-            })
-            // NOTE: try_from checks this is an actual procfs root.
-            .and_then(Self::try_from)
+        syscalls::openat(
+            syscalls::AT_FDCWD,
+            "/proc",
+            libc::O_PATH | libc::O_DIRECTORY,
+            0,
+        )
+        .map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "open /proc handle".into(),
+                source: err,
+            }
+            .into()
+        })
+        // NOTE: from_fd checks this is an actual procfs root.
+        .and_then(Self::from_fd)
     }
 
     /// Create a new handle that references a safe `/proc`.
@@ -254,8 +262,8 @@ impl ProcfsHandle {
             .or_else(|_| Self::new_unsafe_open())
     }
 
-    fn check_is_procfs(file: &File) -> Result<(), Error> {
-        let fs_type = syscalls::fstatfs(file.as_raw_fd())
+    fn check_is_procfs<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
+        let fs_type = syscalls::fstatfs(fd)
             .map_err(|err| ErrorImpl::RawOsError {
                 operation: "fstatfs proc handle".into(),
                 source: err,
@@ -273,8 +281,8 @@ impl ProcfsHandle {
         Ok(())
     }
 
-    fn check_mnt_id<P: AsRef<Path>>(&self, dir: &File, path: P) -> Result<(), Error> {
-        let mnt_id = utils::fetch_mnt_id(dir, path)?;
+    fn check_mnt_id<Fd: AsFd, P: AsRef<Path>>(&self, dirfd: Fd, path: P) -> Result<(), Error> {
+        let mnt_id = utils::fetch_mnt_id(dirfd, path)?;
         if self.mnt_id != mnt_id {
             Err(ErrorImpl::SafetyViolation {
                 // TODO: Include the full path in the error.
@@ -288,21 +296,22 @@ impl ProcfsHandle {
         Ok(())
     }
 
-    fn open_base(&self, base: ProcfsBase) -> Result<File, Error> {
-        let file = self.resolver.resolve(
-            &self.inner,
-            base.into_path(Some(&self.inner)),
+    fn open_base(&self, base: ProcfsBase) -> Result<OwnedFd, Error> {
+        let proc_rootfd = self.inner.as_fd();
+        let fd = self.resolver.resolve(
+            proc_rootfd,
+            base.into_path(Some(proc_rootfd)),
             OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
             ResolverFlags::empty(),
         )?;
         // Detect if the file we landed is in a bind-mount.
-        self.check_mnt_id(&file, "")?;
+        self.check_mnt_id(&fd, "")?;
         // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
         // do is check the fs_type to avoid mounts non-procfs filesystems.
         // Unfortunately, attackers can bind-mount procfs files and still
         // cause damage so this protection is marginal at best.
-        Self::check_is_procfs(&file)?;
-        Ok(file)
+        Self::check_is_procfs(&fd)?;
+        Ok(fd)
     }
 
     /// Safely open a magic-link inside `procfs`.
@@ -354,7 +363,7 @@ impl ProcfsHandle {
         //       being a magic-link and then another thing being mounted on top.
         //       This is the same race as below.
         if self.readlink(base, subpath).is_err() {
-            return self.open(base, subpath, flags);
+            return self.open(base, subpath, flags).map(File::from);
         }
 
         // Get a no-follow handle to the parent of the magic-link.
@@ -372,13 +381,15 @@ impl ProcfsHandle {
         // for the ProcfsHandle::{new_fsopen,new_open_tree} cases.
         self.check_mnt_id(&parent, trailing)?;
 
-        syscalls::openat_follow(parent.as_raw_fd(), trailing, flags.bits(), 0).map_err(|err| {
-            ErrorImpl::RawOsError {
-                operation: "open final magiclink component".into(),
-                source: err,
-            }
-            .into()
-        })
+        syscalls::openat_follow(parent, trailing, flags.bits(), 0)
+            .map(File::from)
+            .map_err(|err| {
+                ErrorImpl::RawOsError {
+                    operation: "open final magiclink component".into(),
+                    source: err,
+                }
+                .into()
+            })
     }
 
     /// Safely open a path inside `procfs`.
@@ -426,19 +437,19 @@ impl ProcfsHandle {
 
         // Do a basic lookup.
         let base = self.open_base(base)?;
-        let file = self
+        let fd = self
             .resolver
             .resolve(&base, subpath, flags, ResolverFlags::empty())?;
 
         // Detect if the file we landed is in a bind-mount.
-        self.check_mnt_id(&file, "")?;
+        self.check_mnt_id(&fd, "")?;
         // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
         // do is check the fs_type to avoid mounts non-procfs filesystems.
         // Unfortunately, attackers can bind-mount procfs files and still
         // cause damage so this protection is marginal at best.
-        Self::check_is_procfs(&file)?;
+        Self::check_is_procfs(&fd)?;
 
-        Ok(file)
+        Ok(fd.into())
     }
 
     /// Safely read the contents of a symlink inside `procfs`.
@@ -452,7 +463,7 @@ impl ProcfsHandle {
     #[doc(alias = "pathrs_proc_readlink")]
     pub fn readlink<P: AsRef<Path>>(&self, base: ProcfsBase, subpath: P) -> Result<PathBuf, Error> {
         let link = self.open(base, subpath, OpenFlags::O_PATH)?;
-        syscalls::readlinkat(link.as_raw_fd(), "").map_err(|err| {
+        syscalls::readlinkat(link, "").map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "read procfs magiclink".into(),
                 source: err,
@@ -460,22 +471,22 @@ impl ProcfsHandle {
             .into()
         })
     }
-}
-
-impl TryFrom<File> for ProcfsHandle {
-    type Error = Error;
 
     /// Try to convert a regular [`File`] handle to a [`ProcfsHandle`]. This
     /// method will return an error if the file handle is not actually the root
     /// of a procfs mount.
-    fn try_from(inner: File) -> Result<Self, Self::Error> {
+    pub fn from_fd<Fd: Into<OwnedFd>>(inner: Fd) -> Result<Self, Error> {
+        let inner = inner.into();
+
         // Make sure the file is actually a procfs handle.
         Self::check_is_procfs(&inner)?;
 
         // And make sure it's the root of procfs. The root directory is
         // guaranteed to have an inode number of PROC_ROOT_INO. If this check
         // ever stops working, it's a kernel regression.
-        let ino = inner.metadata().expect("fstat(/proc) should work").ino();
+        let ino = syscalls::fstatat(&inner, "")
+            .expect("fstat(/proc) should work")
+            .st_ino;
         if ino != Self::PROC_ROOT_INO {
             Err(ErrorImpl::SafetyViolation {
                 description: format!(
@@ -506,7 +517,7 @@ mod tests {
     #[test]
     fn bad_root() {
         let file = File::open("/").expect("open root");
-        let procfs = ProcfsHandle::try_from(file);
+        let procfs = ProcfsHandle::from_fd(file);
 
         assert!(
             procfs.is_err(),
@@ -517,7 +528,7 @@ mod tests {
     #[test]
     fn bad_tmpfs() {
         let file = File::open("/tmp").expect("open tmpfs");
-        let procfs = ProcfsHandle::try_from(file);
+        let procfs = ProcfsHandle::from_fd(file);
 
         assert!(
             procfs.is_err(),
@@ -528,7 +539,7 @@ mod tests {
     #[test]
     fn bad_proc_nonroot() {
         let file = File::open("/proc/tty").expect("open tmpfs");
-        let procfs = ProcfsHandle::try_from(file);
+        let procfs = ProcfsHandle::from_fd(file);
 
         assert!(
             procfs.is_err(),

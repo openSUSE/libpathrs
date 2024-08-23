@@ -27,14 +27,13 @@ use crate::{
 };
 
 use std::{
-    fs::File,
-    os::unix::io::AsRawFd,
+    os::unix::io::AsFd,
     path::{Path, PathBuf},
 };
 
 /// Resolve `path` within `root` through `openat2(2)`.
-pub(crate) fn resolve<P: AsRef<Path>>(
-    root: &File,
+pub(crate) fn resolve<F: AsFd, P: AsRef<Path>>(
+    root: F,
     path: P,
     rflags: ResolverFlags,
     no_follow_trailing: bool,
@@ -63,8 +62,8 @@ pub(crate) fn resolve<P: AsRef<Path>>(
     // do is attempt the openat2(2) a couple of times. If it still fails, just
     // error out.
     for _ in 0..16 {
-        match syscalls::openat2(root.as_raw_fd(), path.as_ref(), &how) {
-            Ok(file) => return Ok(Handle::from_file_unchecked(file)),
+        match syscalls::openat2(&root, path.as_ref(), &how) {
+            Ok(file) => return Ok(Handle::from_fd_unchecked(file)),
             Err(err) => match err.root_cause().raw_os_error() {
                 Some(libc::ENOSYS) => {
                     // shouldn't happen
@@ -90,12 +89,13 @@ pub(crate) fn resolve<P: AsRef<Path>>(
 
 /// Resolve as many components as possible in `path` within `root` using
 /// `openat2(2)`.
-pub(crate) fn resolve_partial(
-    root: &File,
+pub(crate) fn resolve_partial<F: AsFd>(
+    root: F,
     path: &Path,
     rflags: ResolverFlags,
     no_follow_trailing: bool,
 ) -> Result<PartialLookup<Handle>, Error> {
+    let root = root.as_fd();
     let mut last_error = match resolve(root, path, rflags, no_follow_trailing) {
         Ok(handle) => return Ok(PartialLookup::Complete(handle)),
         Err(err) => err,
@@ -125,8 +125,8 @@ pub(crate) fn resolve_partial(
     // be unreachable!()...
     Ok(PartialLookup::Partial {
         handle: root
-            .try_clone()
-            .map(Handle::from_file_unchecked)
+            .try_clone_to_owned()
+            .map(Handle::from_fd_unchecked)
             .map_err(|err| ErrorImpl::OsError {
                 operation: "clone root".into(),
                 source: err,

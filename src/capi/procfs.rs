@@ -24,7 +24,7 @@ use crate::{
     procfs::{ProcfsBase, PROCFS_HANDLE},
 };
 
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{OwnedFd, RawFd};
 
 use libc::{c_char, c_int, size_t};
 
@@ -108,6 +108,7 @@ pub extern "C" fn pathrs_proc_open(base: CProcfsBase, path: *const c_char, flags
             false => PROCFS_HANDLE.open_follow(base.into(), path, oflags),
         }
     }()
+    .map(OwnedFd::from)
     .into_c_return()
 }
 

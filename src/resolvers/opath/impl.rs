@@ -42,17 +42,19 @@ use crate::{
     procfs::PROCFS_HANDLE,
     resolvers::{opath::SymlinkStack, PartialLookup, MAX_SYMLINK_TRAVERSALS},
     syscalls,
-    utils::{PathIterExt, RawFdExt},
+    utils::{FdExt, PathIterExt},
     Handle,
 };
 
 use std::{
     collections::VecDeque,
     ffi::{OsStr, OsString},
-    fs::File,
     io::Error as IOError,
     iter,
-    os::unix::{ffi::OsStrExt, io::AsRawFd},
+    os::unix::{
+        ffi::OsStrExt,
+        io::{AsFd, OwnedFd},
+    },
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -60,7 +62,11 @@ use std::{
 use itertools::Itertools;
 
 /// Ensure that the expected path within the root matches the current fd.
-fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Result<(), Error> {
+fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
+    current: Fd,
+    root: RootFd,
+    expected: P,
+) -> Result<(), Error> {
     // SAFETY: as_unsafe_path is safe here since we're using it to build a path
     //         for a string-based check as part of a larger safety setup. This
     //         path will be re-checked after the unsafe "current_path" is
@@ -127,13 +133,13 @@ fn check_current<P: AsRef<Path>>(current: &File, root: &File, expected: P) -> Re
 /// difference is that if `symlink_stack` is `true`, the returned paths
 // TODO: Make (flags, no_follow_trailing, symlink_stack) a single struct to
 //       avoid possible issues with passing a bool to the wrong argument.
-fn do_resolve<P: AsRef<Path>>(
-    root: &File,
+fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
+    root: Fd,
     path: P,
     flags: ResolverFlags,
     no_follow_trailing: bool,
-    mut symlink_stack: Option<&mut SymlinkStack<File>>,
-) -> Result<PartialLookup<Rc<File>>, Error> {
+    mut symlink_stack: Option<&mut SymlinkStack<OwnedFd>>,
+) -> Result<PartialLookup<Rc<OwnedFd>>, Error> {
     // What is the final path we expect to get after we do the final open? This
     // allows us to track any attacker moving path components around and we can
     // sanity-check at the very end. This does not include rootpath.
@@ -142,10 +148,14 @@ fn do_resolve<P: AsRef<Path>>(
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one, and can always switch back to the root
     // if we hit an absolute symlink.
-    let root = Rc::new(root.try_clone().map_err(|err| ErrorImpl::OsError {
-        operation: "dup root handle as starting point of resolution".into(),
-        source: err,
-    })?);
+    let root = Rc::new(
+        root.as_fd()
+            .try_clone_to_owned()
+            .map_err(|err| ErrorImpl::OsError {
+                operation: "dup root handle as starting point of resolution".into(),
+                source: err,
+            })?,
+    );
     let mut current = Rc::clone(&root);
 
     // Get initial set of components from the passed path. We remove components
@@ -208,19 +218,16 @@ fn do_resolve<P: AsRef<Path>>(
         };
 
         // Get our next element.
-        match syscalls::openat(
-            current.as_raw_fd(),
-            &part,
-            libc::O_PATH | libc::O_NOFOLLOW,
-            0,
-        )
-        .map_err(|err| {
-            ErrorImpl::RawOsError {
-                operation: "open next component of resolution".into(),
-                source: err,
-            }
-            .into()
-        }) {
+        // MSRV(1.69): Remove &*.
+        match syscalls::openat(&*current, &part, libc::O_PATH | libc::O_NOFOLLOW, 0).map_err(
+            |err| {
+                ErrorImpl::RawOsError {
+                    operation: "open next component of resolution".into(),
+                    source: err,
+                }
+                .into()
+            },
+        ) {
             Err(err) => {
                 return Ok(PartialLookup::Partial {
                     handle: current,
@@ -240,7 +247,8 @@ fn do_resolve<P: AsRef<Path>>(
                 // we don't have the luxury of only doing this check when there
                 // was a racing rename -- we have to do it every time.
                 if part.as_bytes() == b".." {
-                    check_current(&next, &root, &expected_path)
+                    // MSRV(1.69): Remove &*.
+                    check_current(&next, &*root, &expected_path)
                         .wrap("check next '..' component didn't escape")?;
                 }
 
@@ -248,13 +256,8 @@ fn do_resolve<P: AsRef<Path>>(
                 // ordinary dirent, we just update current and move on to the
                 // next component. Nothing special here.
                 if !next
-                    // NOTE: File::metadata definitely does an fstat(2) here.
                     .metadata()
-                    .map_err(|err| ErrorImpl::OsError {
-                        operation: "fstat of next component".into(),
-                        source: err,
-                    })?
-                    .file_type()
+                    .wrap("fstat of next component")?
                     .is_symlink()
                 {
                     // We hit a non-symlink component, so clear it from the
@@ -313,11 +316,9 @@ fn do_resolve<P: AsRef<Path>>(
                     }
 
                     let link_target =
-                        syscalls::readlinkat(next.as_raw_fd(), "").map_err(|err| {
-                            ErrorImpl::RawOsError {
-                                operation: "readlink next symlink component".into(),
-                                source: err,
-                            }
+                        syscalls::readlinkat(&next, "").map_err(|err| ErrorImpl::RawOsError {
+                            operation: "readlink next symlink component".into(),
+                            source: err,
                         })?;
 
                     // Check if it's a good idea to walk this symlink. If we are on
@@ -381,7 +382,8 @@ fn do_resolve<P: AsRef<Path>>(
     }
 
     // Make sure that the path is what we expect...
-    check_current(&current, &root, &expected_path).wrap("check final handle didn't escape")?;
+    // MSRV(1.69): Remove &*.
+    check_current(&*current, &*root, &expected_path).wrap("check final handle didn't escape")?;
 
     // We finished the lookup with no remaining components.
     Ok(PartialLookup::Complete(current))
@@ -389,14 +391,14 @@ fn do_resolve<P: AsRef<Path>>(
 
 /// Resolve as many components as possible in `path` within `root` through
 /// user-space emulation.
-pub(crate) fn resolve_partial<P: AsRef<Path>>(
-    root: &File,
+pub(crate) fn resolve_partial<Fd: AsFd, P: AsRef<Path>>(
+    root: Fd,
     path: P,
     flags: ResolverFlags,
     no_follow_trailing: bool,
-) -> Result<PartialLookup<Rc<File>>, Error> {
+) -> Result<PartialLookup<Rc<OwnedFd>>, Error> {
     // For partial lookups, we need to use a SymlinkStack to match openat2.
-    let mut symlink_stack: SymlinkStack<File> = SymlinkStack::new();
+    let mut symlink_stack = SymlinkStack::new();
 
     match do_resolve(
         root,
@@ -435,8 +437,8 @@ pub(crate) fn resolve_partial<P: AsRef<Path>>(
 }
 
 /// Resolve `path` within `root` through user-space emulation.
-pub(crate) fn resolve<P: AsRef<Path>>(
-    root: &File,
+pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
+    root: Fd,
     path: P,
     flags: ResolverFlags,
     no_follow_trailing: bool,

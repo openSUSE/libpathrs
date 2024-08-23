@@ -333,15 +333,15 @@ mod utils {
         procfs::PROCFS_HANDLE,
         resolvers::PartialLookup,
         syscalls,
-        utils::{self, PathIterExt, RawFdExt},
+        utils::{self, FdExt, PathIterExt},
         InodeType, Root,
     };
 
     use std::{
         fs::Permissions,
         os::unix::{
-            fs::{MetadataExt, PermissionsExt},
-            io::AsRawFd,
+            fs::PermissionsExt,
+            io::{AsFd, OwnedFd},
         },
         path::{Path, PathBuf},
     };
@@ -356,8 +356,9 @@ mod utils {
             root.resolver, root_clone.resolver,
             "cloned root should have the same resolver settings"
         );
+        let root_fd: OwnedFd = root_clone.into();
 
-        let mut new_root = Root::from_file_unchecked(root_clone.into_file());
+        let mut new_root = Root::from_fd_unchecked(root_fd);
         new_root.resolver = root.resolver;
         Ok(new_root)
     }
@@ -374,7 +375,7 @@ mod utils {
         let _ = unsafe { libc::umask(0) };
 
         // Update the expected path to have the rootdir as a prefix.
-        let root_dir = root.as_file().as_unsafe_path_unchecked()?;
+        let root_dir = root.as_fd().as_unsafe_path_unchecked()?;
         let expected_result = expected_result.map(|(path, mode)| (root_dir.join(path), mode));
 
         match root.create(path, &inode_type) {
@@ -382,10 +383,10 @@ mod utils {
             Ok(_) => {
                 let root = root_roundtrip(root)?;
                 let created = root.resolve_nofollow(path)?;
-                let meta = created.as_file().metadata()?;
+                let meta = created.metadata()?;
 
-                let actual_path = created.as_file().as_unsafe_path_unchecked()?;
-                let actual_mode = meta.permissions().mode();
+                let actual_path = created.as_fd().as_unsafe_path_unchecked()?;
+                let actual_mode = meta.mode();
                 assert_eq!(
                     Ok((actual_path.clone(), actual_mode)),
                     expected_result,
@@ -401,7 +402,7 @@ mod utils {
                     }
                     // Check hardlink is the same inode.
                     InodeType::Hardlink(target) => {
-                        let target_meta = root.resolve_nofollow(target)?.as_file().metadata()?;
+                        let target_meta = root.resolve_nofollow(target)?.as_fd().metadata()?;
                         assert_eq!(
                             meta.ino(),
                             target_meta.ino(),
@@ -411,8 +412,7 @@ mod utils {
                     // Check symlink is correct.
                     InodeType::Symlink(target) => {
                         // Check using the a resolved handle.
-                        let actual_target =
-                            syscalls::readlinkat(created.as_file().as_raw_fd(), "")?;
+                        let actual_target = syscalls::readlinkat(&created, "")?;
                         assert_eq!(
                             target, actual_target,
                             "readlinkat(handle) link target mismatch"
@@ -446,13 +446,13 @@ mod utils {
         let pre_create_handle = root.resolve_nofollow(path); // do not unwrap
 
         // Update the expected path to have the rootdir as a prefix.
-        let root_dir = root.as_file().as_unsafe_path_unchecked()?;
+        let root_dir = root.as_fd().as_unsafe_path_unchecked()?;
         let expected_result = expected_result.map(|path| root_dir.join(path));
 
         match root.create_file(path, oflags, perm) {
             Err(err) => assert_eq!(Err(err.kind()), expected_result, "unexpected err {err:?}"),
             Ok(file) => {
-                let actual_path = file.as_file().as_unsafe_path_unchecked()?;
+                let actual_path = file.as_fd().as_unsafe_path_unchecked()?;
                 assert_eq!(
                     Ok(actual_path.clone()),
                     expected_result,
@@ -465,18 +465,18 @@ mod utils {
                     .wrap("re-open created file using original path")?;
 
                 assert_eq!(
-                    new_lookup.as_file().as_unsafe_path_unchecked()?,
-                    file.as_file().as_unsafe_path_unchecked()?,
+                    new_lookup.as_fd().as_unsafe_path_unchecked()?,
+                    file.as_fd().as_unsafe_path_unchecked()?,
                     "expected real path of {path:?} handles to be the same",
                 );
 
                 let expect_mode = if let Ok(handle) = pre_create_handle {
-                    handle.as_file().metadata()?.mode()
+                    handle.as_fd().metadata()?.mode()
                 } else {
                     libc::S_IFREG | perm.mode()
                 };
 
-                let orig_meta = file.as_file().metadata()?;
+                let orig_meta = file.as_fd().metadata()?;
                 assert_eq!(
                     orig_meta.mode(),
                     expect_mode,
@@ -484,7 +484,7 @@ mod utils {
                     orig_meta.mode(),
                 );
 
-                let new_meta = new_lookup.as_file().metadata()?;
+                let new_meta = new_lookup.as_fd().metadata()?;
                 assert_eq!(
                     orig_meta.ino(),
                     new_meta.ino(),
@@ -520,7 +520,7 @@ mod utils {
         if res.is_ok() {
             let handle = handle.wrap("open handle before remoev")?;
 
-            let meta = handle.as_file().metadata()?;
+            let meta = handle.as_fd().metadata()?;
             assert_eq!(meta.nlink(), 0, "deleted file should have a 0 nlink");
 
             let root = root_roundtrip(root)?;
@@ -589,9 +589,9 @@ mod utils {
         let dst_handle = root.resolve_nofollow(dst_path); // do not unwrap this here!
 
         // Keep track of the original paths, pre-rename.
-        let src_real_path = src_handle.as_file().as_unsafe_path_unchecked()?;
+        let src_real_path = src_handle.as_fd().as_unsafe_path_unchecked()?;
         let dst_real_path = if let Ok(ref handle) = dst_handle {
-            Some(handle.as_file().as_unsafe_path_unchecked()?)
+            Some(handle.as_fd().as_unsafe_path_unchecked()?)
         } else {
             None
         };
@@ -605,7 +605,7 @@ mod utils {
 
         if res.is_ok() {
             // Confirm that the handle was moved.
-            let moved_src_real_path = src_handle.as_file().as_unsafe_path_unchecked()?;
+            let moved_src_real_path = src_handle.as_fd().as_unsafe_path_unchecked()?;
             assert_ne!(
                 src_real_path, moved_src_real_path,
                 "expected real path of handle to move after rename"
@@ -625,7 +625,7 @@ mod utils {
                     );
 
                     // Confirm that the destination was also moved.
-                    let moved_dst_real_path = dst_handle.as_file().as_unsafe_path_unchecked()?;
+                    let moved_dst_real_path = dst_handle.as_fd().as_unsafe_path_unchecked()?;
                     assert_eq!(
                         src_real_path, moved_dst_real_path,
                         "expected real path of destination to move to source with RENAME_EXCHANGE"
@@ -638,7 +638,7 @@ mod utils {
                         .resolve_nofollow(src_path)
                         .wrap("expected source to exist with RENAME_WHITEOUT")?;
 
-                    let meta = new_lookup.as_file().metadata()?;
+                    let meta = new_lookup.as_fd().metadata()?;
                     assert_eq!(
                         syscalls::devmajorminor(meta.rdev()),
                         (0, 0),
@@ -655,7 +655,7 @@ mod utils {
             }
         } else {
             // Confirm the handle was not moved.
-            let nonmoved_src_real_path = src_handle.as_file().as_unsafe_path_unchecked()?;
+            let nonmoved_src_real_path = src_handle.as_fd().as_unsafe_path_unchecked()?;
             assert_eq!(
                 src_real_path, nonmoved_src_real_path,
                 "expected real path of handle to not change after failed rename"
@@ -674,9 +674,7 @@ mod utils {
 
         // Before trying to create the directory tree, figure out what
         // components don't exist yet so we can check them later.
-        let before_partial_lookup =
-            root.resolver
-                .resolve_partial(root.as_file(), unsafe_path, false)?;
+        let before_partial_lookup = root.resolver.resolve_partial(root, unsafe_path, false)?;
 
         let expected_mode = match expected_result {
             Ok(_) => Some(libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&PROCFS_HANDLE))?)),
@@ -720,7 +718,7 @@ mod utils {
             // Verify that the remaining paths match the mode we expect (either
             // they don't exist or it matches the mode we requested).
             for subpath in subpaths {
-                let got_mode = syscalls::fstatat(handle.as_file().as_raw_fd(), &subpath)
+                let got_mode = syscalls::fstatat(&handle, &subpath)
                     .map(|st| st.st_mode)
                     .ok();
                 match expected_mode {
