@@ -272,64 +272,12 @@ impl<P: AsRef<Path>> PathIterExt for P {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        procfs::PROCFS_HANDLE,
-        syscalls,
-        utils::{path_split, path_strip_trailing_slash, FdExt, PathIterExt},
-    };
+    use crate::utils::{path_split, path_strip_trailing_slash, PathIterExt};
 
-    use std::{
-        fs::File,
-        os::unix::io::AsFd,
-        path::{Path, PathBuf},
-    };
+    use std::path::{Path, PathBuf};
 
     use anyhow::{Context, Error};
     use pretty_assertions::assert_eq;
-    use tempfile::TempDir;
-
-    fn check_as_unsafe_path<Fd: AsFd, P: AsRef<Path>>(fd: Fd, want_path: P) -> Result<(), Error> {
-        let want_path = want_path.as_ref();
-
-        // Plain /proc/... lookup.
-        let got_path = fd.as_unsafe_path_unchecked()?;
-        assert_eq!(
-            got_path, want_path,
-            "expected as_unsafe_path_unchecked to give the correct path"
-        );
-        // ProcfsHandle-based lookup.
-        let got_path = fd.as_unsafe_path(&PROCFS_HANDLE)?;
-        assert_eq!(
-            got_path, want_path,
-            "expected as_unsafe_path to give the correct path"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn as_unsafe_path_cwd() -> Result<(), Error> {
-        let real_cwd = syscalls::getcwd()?;
-        check_as_unsafe_path(syscalls::AT_FDCWD, real_cwd)
-    }
-
-    #[test]
-    fn as_unsafe_path_fd() -> Result<(), Error> {
-        let real_tmpdir = TempDir::new()?;
-        let file = File::open(&real_tmpdir)?;
-        check_as_unsafe_path(&file, real_tmpdir)
-    }
-
-    #[test]
-    fn as_unsafe_path_badfd() {
-        assert!(
-            syscalls::BADFD.as_unsafe_path_unchecked().is_err(),
-            "as_unsafe_path_unchecked should fail for bad file descriptor"
-        );
-        assert!(
-            syscalls::BADFD.as_unsafe_path(&PROCFS_HANDLE).is_err(),
-            "as_unsafe_path should fail for bad file descriptor"
-        );
-    }
 
     // TODO: Add propcheck tests?
 
