@@ -61,7 +61,7 @@ pub(crate) enum MountType {
 
 pub(crate) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> {
     let dst = dst.as_ref();
-    let dst_file = syscalls::openat(libc::AT_FDCWD, dst, libc::O_NOFOLLOW | libc::O_PATH, 0)?;
+    let dst_file = syscalls::openat(syscalls::AT_FDCWD, dst, libc::O_NOFOLLOW | libc::O_PATH, 0)?;
     let dst_path = CString::new(format!("/proc/self/fd/{}", dst_file.as_raw_fd()))?;
 
     let ret = match ty {
@@ -78,7 +78,7 @@ pub(crate) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> 
         },
         MountType::Bind { src } => {
             let src_file =
-                syscalls::openat(libc::AT_FDCWD, src, libc::O_NOFOLLOW | libc::O_PATH, 0)?;
+                syscalls::openat(syscalls::AT_FDCWD, src, libc::O_NOFOLLOW | libc::O_PATH, 0)?;
             let src_path = CString::new(format!("/proc/self/fd/{}", src_file.as_raw_fd()))?;
             unsafe {
                 libc::mount(

@@ -30,14 +30,14 @@ use crate::{
 };
 
 use std::{
-    fs::{File, Permissions},
+    fs::Permissions,
     io::Error as IOError,
     os::{
         linux::fs::MetadataExt,
         unix::{
             ffi::OsStrExt,
             fs::PermissionsExt,
-            io::{AsRawFd, OwnedFd},
+            io::{AsFd, BorrowedFd, OwnedFd},
         },
     },
     path::{Path, PathBuf},
@@ -103,8 +103,8 @@ pub enum InodeType {
     //DetachedSocket(),
 }
 
-/// The inode type for [`Root::remove_inode`]. This only used internally within
-/// libpathrs.
+/// The inode type for [`RootRef::remove_inode`]. This only used internally
+/// within libpathrs.
 #[derive(Clone, Copy, Debug)]
 enum RemoveInodeType {
     Regular,   // ~AT_REMOVEDIR
@@ -136,12 +136,14 @@ enum RemoveInodeType {
 // TODO: Fix the SafetyViolation link once we expose ErrorKind.
 #[derive(Debug)]
 pub struct Root {
-    /// The underlying `O_PATH` `File` for this root handle.
-    inner: File,
+    /// The underlying `O_PATH` [`OwnedFd`] for this root handle.
+    inner: OwnedFd,
 
     /// The underlying [`Resolver`] to use for all operations underneath this
-    /// root. This affects not just [`Root::resolve`] but also all other methods
-    /// which have to implicitly resolve a path underneath `Root`.
+    /// root. This affects not just [`resolve`] but also all other methods which
+    /// have to implicitly resolve a path underneath `Root`.
+    ///
+    /// [`resolve`]: Self::resolve
     // TODO: Drop this and switch to builder-pattern...
     pub resolver: Resolver,
 }
@@ -161,52 +163,20 @@ impl Root {
     /// might be relaxed in the future.
     #[doc(alias = "pathrs_root_open")]
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let file = syscalls::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_DIRECTORY, 0)
-            .map_err(|err| ErrorImpl::RawOsError {
-                operation: "open root handle".into(),
-                source: err,
-            })?;
-        Ok(Root::from_file_unchecked(file))
+        let file = syscalls::openat(
+            syscalls::AT_FDCWD,
+            path,
+            libc::O_PATH | libc::O_DIRECTORY,
+            0,
+        )
+        .map_err(|err| ErrorImpl::RawOsError {
+            operation: "open root handle".into(),
+            source: err,
+        })?;
+        Ok(Self::from_fd_unchecked(file))
     }
 
-    /// Create a copy of an existing [`Root`].
-    ///
-    /// The new handle is completely independent from the original, but
-    /// references the same underlying file and has the same configuration.
-    pub fn try_clone(&self) -> Result<Self, Error> {
-        Ok(Self {
-            inner: self
-                .as_file()
-                .try_clone()
-                .map_err(|err| ErrorImpl::OsError {
-                    operation: "clone underlying root file".into(),
-                    source: err,
-                })?,
-            resolver: self.resolver,
-        })
-    }
-
-    /// Unwrap a [`Root`] to reveal the underlying [`File`].
-    ///
-    /// **Note**: This method is primarily intended to allow for file descriptor
-    /// passing or otherwise transmitting file descriptor information. It is not
-    /// safe to use this [`File`] directly to do filesystem operations. Please
-    /// use the provided [`Root`] methods.
-    pub fn into_file(self) -> File {
-        self.inner
-    }
-
-    /// Access the underlying [`File`] for a [`Root`].
-    ///
-    /// **Note**: This method is primarily intended to allow for tests and other
-    /// code to check the status of the underlying [`File`] without having to
-    /// use [`Root::into_file`]. It is not safe to use this [`File`] directly
-    /// to do filesystem operations. Please use the provided [`Root`] methods.
-    pub fn as_file(&self) -> &File {
-        &self.inner
-    }
-
-    /// Wrap a [`File`] into a [`Root`].
+    /// Wrap an [`OwnedFd`] into a [`Root`].
     ///
     /// The configuration is set to the system default and should be configured
     /// prior to usage, if appropriate.
@@ -216,7 +186,7 @@ impl Root {
     /// The caller guarantees that the provided file is an `O_PATH` file
     /// descriptor with exactly the same semantics as one created through
     /// [`Root::open`]. This means that this function should usually be used to
-    /// convert a [`File`] returned from [`Root::into_file`] (possibly from
+    /// convert an [`OwnedFd`] returned from [`OwnedFd::from`] (possibly from
     /// another process) into a [`Root`].
     ///
     /// While this function is not marked as `unsafe` (because the safety
@@ -226,17 +196,42 @@ impl Root {
     // TODO: We should probably have a `Root::from_file` which attempts to
     //       re-open the path with `O_PATH | O_DIRECTORY`, to allow for an
     //       alternative to `Root::open`.
-    pub fn from_file_unchecked(inner: File) -> Self {
+    #[inline]
+    pub fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
         Self {
-            inner,
+            inner: fd.into(),
             resolver: Default::default(),
         }
     }
 
+    /// Borrow this [`Root`] as a [`RootRef`].
+    // XXX: We can't use Borrow/Deref for this because HandleRef takes a
+    //      lifetime rather than being a pure reference. Ideally we would use
+    //      Deref but it seems that won't be possible in standard Rust for a
+    //      long time, if ever...
+    #[inline]
+    pub fn as_ref(&self) -> RootRef<'_> {
+        RootRef {
+            inner: self.as_fd(),
+            resolver: self.resolver,
+        }
+    }
+
+    /// Create a copy of an existing [`Root`].
+    ///
+    /// The new handle is completely independent from the original, but
+    /// references the same underlying file and has the same configuration.
+    #[inline]
+    pub fn try_clone(&self) -> Result<Root, Error> {
+        self.as_ref().try_clone()
+    }
+
     /// Within the given [`Root`]'s tree, resolve `path` and return a
-    /// [`Handle`]. All symlink path components are scoped to [`Root`]. Trailing
-    /// symlinks *are* followed, if you want to get a handle to a symlink use
-    /// [`Root::resolve_nofollow`].
+    /// [`Handle`].
+    ///
+    /// All symlink path components are scoped to [`Root`]. Trailing symlinks
+    /// *are* followed, if you want to get a handle to a symlink use
+    /// [`resolve_nofollow`].
     ///
     /// # Errors
     ///
@@ -245,20 +240,339 @@ impl Root {
     /// the path is guaranteed to have been reachable from the root of the
     /// directory tree and thus have been inside the root at one point in the
     /// resolution.
+    ///
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_resolve")]
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
-        self.resolver.resolve(&self.inner, path, false)
+        self.as_ref().resolve(path)
     }
 
-    /// Identical to [`Root::resolve`], except that *trailing* symlinks are
-    /// *not* followed and if the trailing component is a symlink
-    /// `Root::resolve_nofollow` will return a handle to the symlink itself.
-    /// This is effectively equivalent to `O_NOFOLLOW`.
+    /// Identical to [`resolve`], except that *trailing* symlinks are *not*
+    /// followed.
+    ///
+    /// If the trailing component is a symlink [`resolve_nofollow`] will return
+    /// a handle to the symlink itself. This is effectively equivalent to
+    /// `O_NOFOLLOW`.
+    ///
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_resolve_nofollow")]
     #[inline]
     pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
-        self.resolver.resolve(&self.inner, path, true)
+        self.as_ref().resolve_nofollow(path)
+    }
+
+    /// Get the target of a symlink within a [`Root`].
+    ///
+    /// **NOTE**: The returned path is not modified to be "safe" outside of the
+    /// root. You should not use this path for doing further path lookups -- use
+    /// [`resolve`] instead.
+    ///
+    /// This method is just shorthand for calling `readlinkat(2)` on the handle
+    /// returned by [`resolve_nofollow`].
+    ///
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
+    #[doc(alias = "pathrs_readlink")]
+    #[inline]
+    pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
+        self.as_ref().readlink(path)
+    }
+
+    /// Within the [`Root`]'s tree, create an inode at `path` as specified by
+    /// `inode_type`.
+    ///
+    /// # Errors
+    ///
+    /// If the path already exists (regardless of the type of the existing
+    /// inode), an error is returned.
+    #[doc(alias = "pathrs_mkdir")]
+    #[doc(alias = "pathrs_mknod")]
+    #[doc(alias = "pathrs_symlink")]
+    #[doc(alias = "pathrs_hardlink")]
+    #[inline]
+    pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
+        self.as_ref().create(path, inode_type)
+    }
+
+    /// Create an [`InodeType::File`] within the [`Root`]'s tree at `path` with
+    /// the mode given by `perm`, and return a [`Handle`] to the newly-created
+    /// file.
+    ///
+    /// However, unlike the trivial way of doing the above:
+    ///
+    /// ```dead_code
+    /// root.create(path, inode_type)?;
+    /// // What happens if the file is replaced here!?
+    /// let handle = root.resolve(path, perm)?;
+    /// ```
+    ///
+    /// [`create_file`] guarantees that the returned [`Handle`] is the same as
+    /// the file created by the operation. This is only possible to guarantee
+    /// for ordinary files because there is no [`O_CREAT`]-equivalent for other
+    /// inode types.
+    ///
+    /// # Errors
+    ///
+    /// Identical to [`create`].
+    ///
+    /// [`create`]: Self::create
+    /// [`create_file`]: Self::create_file
+    /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
+    #[doc(alias = "pathrs_creat")]
+    #[doc(alias = "pathrs_create")]
+    #[inline]
+    pub fn create_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+        flags: OpenFlags,
+        perm: &Permissions,
+    ) -> Result<Handle, Error> {
+        self.as_ref().create_file(path, flags, perm)
+    }
+
+    /// Within the [`Root`]'s tree, create a directory and any of its parent
+    /// component if they are missing. This is effectively equivalent to
+    /// [`std::fs::create_dir_all`], Go's [`os.MkdirAll`], or Unix's `mkdir -p`.
+    ///
+    /// The provided set of [`Permissions`] only applies to path components
+    /// created by this function, existing components will not have their
+    /// permissions modified. In addition, if the provided path already exists
+    /// and is a directory, this function will return successfully.
+    ///
+    /// The returned [`Handle`] is an `O_DIRECTORY` handle referencing the
+    /// created directory (due to kernel limitations, we cannot guarantee that
+    /// the handle is the exact directory created and not a similar-looking
+    /// directory that was swapped in by an attacker, but we do as much
+    /// validation as possible to make sure the directory is functionally
+    /// identical to the directory we would've created).
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if any of the path components in the
+    /// provided path were invalid (non-directory components or dangling symlink
+    /// components) or if certain exchange attacks were detected.
+    ///
+    /// If an error occurs, it is possible for any number of the directories in
+    /// `path` to have been created despite this method returning an error.
+    ///
+    /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
+    #[doc(alias = "pathrs_mkdir_all")]
+    #[inline]
+    pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
+        self.as_ref().mkdir_all(path, perm)
+    }
+
+    /// Within the [`Root`]'s tree, remove the empty directory at `path`.
+    ///
+    /// Any existing [`Handle`]s to `path` will continue to work as before,
+    /// since Linux does not invalidate file handles to unlinked files (though,
+    /// directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist, was not actually a directory, or was a
+    /// non-empty directory an error will be returned. In order to remove a
+    /// directory and all of its children, you can use [`remove_all`].
+    ///
+    /// [`remove_all`]: Self::remove_all
+    #[doc(alias = "pathrs_rmdir")]
+    #[inline]
+    pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.as_ref().remove_dir(path)
+    }
+
+    /// Within the [`Root`]'s tree, remove the file (any non-directory inode) at
+    /// `path`.
+    ///
+    /// Any existing [`Handle`]s to `path` will continue to work as before,
+    /// since Linux does not invalidate file handles to unlinked files (though,
+    /// directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist or was actually a directory an error will be
+    /// returned. In order to remove a path regardless of its type (even if it
+    /// is a non-empty directory), you can use [`remove_all`].
+    ///
+    /// [`remove_all`]: Self::remove_all
+    #[doc(alias = "pathrs_unlink")]
+    #[inline]
+    pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.as_ref().remove_file(path)
+    }
+
+    /// Within the [`Root`]'s tree, recursively delete the provided `path` and
+    /// any children it contains if it is a directory. This is effectively
+    /// equivalent to [`std::fs::remove_dir_all`], Go's [`os.RemoveAll`], or
+    /// Unix's `rm -r`.
+    ///
+    /// Any existing [`Handle`]s to paths within `path` will continue to work as
+    /// before, since Linux does not invalidate file handles to unlinked files
+    /// (though, directory handling is not as simple).
+    ///
+    /// # Errors
+    ///
+    /// If the path does not exist or some other error occurred during the
+    /// deletion process an error will be returned.
+    ///
+    /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
+    #[doc(alias = "pathrs_remove_all")]
+    #[inline]
+    pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.as_ref().remove_all(path)
+    }
+
+    /// Within the [`Root`]'s tree, perform a rename with the given `source` and
+    /// `directory`. The `flags` argument is passed directly to
+    /// [`renameat2(2)`].
+    ///
+    /// # Errors
+    ///
+    /// The error rules are identical to [`renameat2(2)`].
+    ///
+    /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
+    #[doc(alias = "pathrs_rename")]
+    pub fn rename<P: AsRef<Path>>(
+        &self,
+        source: P,
+        destination: P,
+        rflags: RenameFlags,
+    ) -> Result<(), Error> {
+        self.as_ref().rename(source, destination, rflags)
+    }
+}
+
+impl From<Root> for OwnedFd {
+    /// Unwrap a [`Root`] to reveal the underlying [`OwnedFd`].
+    ///
+    /// **Note**: This method is primarily intended to allow for file descriptor
+    /// passing or otherwise transmitting file descriptor information. It is not
+    /// safe to use this [`OwnedFd`] directly to do filesystem operations.
+    /// Please use the provided [`Root`] methods.
+    fn from(root: Root) -> Self {
+        root.inner
+    }
+}
+
+impl AsFd for Root {
+    /// Access the underlying file descriptor for a [`Root`].
+    ///
+    /// **Note**: This method is primarily intended to allow for tests and other
+    /// code to check the status of the underlying [`OwnedFd`] without having to
+    /// use [`OwnedFd::from`]. It is not safe to use this [`BorrowedFd`]
+    /// directly to do filesystem operations. Please use the provided [`Root`]
+    /// methods.
+    #[inline]
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
+    }
+}
+
+/// Borrowed version of [`Root`].
+///
+/// Unlike [`Root`], when [`RootRef`] is dropped the underlying file descriptor
+/// is *not* closed. This is mainly useful for programs and libraries that have
+/// to do operations on [`&File`][File]s and [`BorrowedFd`]s passed from
+/// elsewhere.
+///
+/// [File]: std::fs::File
+// TODO: Is there any way we can restructure this to use Deref so that we don't
+//       need to copy all of the methods into Handle? Probably not... Maybe GATs
+//       will eventually support this but we'd still need a GAT-friendly Deref.
+#[derive(Copy, Clone, Debug)]
+pub struct RootRef<'fd> {
+    inner: BorrowedFd<'fd>,
+    // TODO: Drop this and switch to builder-pattern.
+    pub resolver: Resolver,
+}
+
+impl RootRef<'_> {
+    /// Wrap a [`BorrowedFd`] into a [`RootRef`]. The lifetime is tied to the
+    /// [`BorrowedFd`].
+    ///
+    /// The configuration is set to the system default and should be configured
+    /// prior to usage, if appropriate.
+    ///
+    /// # Safety
+    ///
+    /// The caller guarantees that the provided file is an `O_PATH` file
+    /// descriptor with exactly the same semantics as one created through
+    /// [`Root::open`]. This means that this function should usually be used to
+    /// convert a [`BorrowedFd`] returned from [`AsFd::as_fd`] into a
+    /// [`RootRef`].
+    ///
+    /// While this function is not marked as `unsafe` (because the safety
+    /// guarantee required is not related to memory-safety), users should still
+    /// take great care when using this method because it can cause other kinds
+    /// of unsafety.
+    // TODO: We should probably have a `Root::from_file` which attempts to
+    //       re-open the path with `O_PATH | O_DIRECTORY`, to allow for an
+    //       alternative to `Root::open`.
+    pub fn from_fd_unchecked(inner: BorrowedFd<'_>) -> RootRef<'_> {
+        RootRef {
+            inner,
+            resolver: Default::default(),
+        }
+    }
+
+    /// Create a copy of a [`RootRef`].
+    ///
+    /// Note that (unlike [`BorrowedFd::clone`]) this method creates a full copy
+    /// of the underlying file descriptor and thus is more equivalent to
+    /// [`BorrowedFd::try_clone_to_owned`].
+    ///
+    /// To create a shallow copy of a [`RootRef`], you can use [`Clone::clone`]
+    /// (or just [`Copy`]).
+    pub fn try_clone(&self) -> Result<Root, Error> {
+        Ok(Root {
+            inner: self
+                .as_fd()
+                .try_clone_to_owned()
+                .map_err(|err| ErrorImpl::OsError {
+                    operation: "clone underlying root file".into(),
+                    source: err,
+                })?,
+            resolver: self.resolver,
+        })
+    }
+
+    /// Within the given [`RootRef`]'s tree, resolve `path` and return a
+    /// [`Handle`].
+    ///
+    /// All symlink path components are scoped to [`RootRef`]. Trailing symlinks
+    /// *are* followed, if you want to get a handle to a symlink use
+    /// [`resolve_nofollow`].
+    ///
+    /// # Errors
+    ///
+    /// If `path` doesn't exist, or an attack was detected during resolution, a
+    /// corresponding [`Error`] will be returned. If no error is returned, then
+    /// the path is guaranteed to have been reachable from the root of the
+    /// directory tree and thus have been inside the root at one point in the
+    /// resolution.
+    ///
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
+    #[doc(alias = "pathrs_resolve")]
+    #[inline]
+    pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+        self.resolver.resolve(self, path, false)
+    }
+
+    /// Identical to [`resolve`], except that *trailing* symlinks are *not*
+    /// followed.
+    ///
+    /// If the trailing component is a symlink [`resolve_nofollow`] will return
+    /// a handle to the symlink itself. This is effectively equivalent to
+    /// `O_NOFOLLOW`.
+    ///
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
+    #[doc(alias = "pathrs_resolve_nofollow")]
+    #[inline]
+    pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+        self.resolver.resolve(self, path, true)
     }
 
     // Used in operations where we need to get a handle to the parent directory.
@@ -267,24 +581,27 @@ impl Root {
         let dir = self
             .resolve(parent)
             .wrap("resolve parent directory")?
-            .into_file();
-        Ok((dir.into(), name))
+            .into();
+        Ok((dir, name))
     }
 
-    /// Get the target of a symlink within a [`Root`].
+    /// Get the target of a symlink within a [`RootRef`].
     ///
     /// **NOTE**: The returned path is not modified to be "safe" outside of the
     /// root. You should not use this path for doing further path lookups -- use
-    /// [`Root::resolve`] instead.
+    /// [`resolve`] instead.
     ///
     /// This method is just shorthand for calling `readlinkat(2)` on the handle
-    /// returned by [`Root::resolve_nofollow`].
+    /// returned by [`resolve_nofollow`].
+    ///
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_readlink")]
     pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
         let link = self
             .resolve_nofollow(path)
             .wrap("resolve symlink O_NOFOLLOW for readlink")?;
-        syscalls::readlinkat(link.as_file().as_raw_fd(), "").map_err(|err| {
+        syscalls::readlinkat(link, "").map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "readlink resolve symlink".into(),
                 source: err,
@@ -293,7 +610,7 @@ impl Root {
         })
     }
 
-    /// Within the [`Root`]'s tree, create an inode at `path` as specified by
+    /// Within the [`RootRef`]'s tree, create an inode at `path` as specified by
     /// `inode_type`.
     ///
     /// # Errors
@@ -314,20 +631,19 @@ impl Root {
             name: "path".into(),
             description: "file creation path has trailing slash".into(),
         })?;
-        let dirfd = dir.as_raw_fd();
 
         match inode_type {
             InodeType::File(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                syscalls::mknodat(dirfd, name, libc::S_IFREG | mode, 0)
+                syscalls::mknodat(dir, name, libc::S_IFREG | mode, 0)
             }
             InodeType::Directory(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                syscalls::mkdirat(dirfd, name, mode)
+                syscalls::mkdirat(dir, name, mode)
             }
             InodeType::Symlink(target) => {
                 // No need to touch target.
-                syscalls::symlinkat(target, dirfd, name)
+                syscalls::symlinkat(target, dir, name)
             }
             InodeType::Hardlink(target) => {
                 let (olddir, oldname) = self
@@ -337,19 +653,19 @@ impl Root {
                     name: "target".into(),
                     description: "hardlink target has trailing slash".into(),
                 })?;
-                syscalls::linkat(olddir.as_raw_fd(), oldname, dirfd, name, 0)
+                syscalls::linkat(olddir, oldname, dir, name, 0)
             }
             InodeType::Fifo(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                syscalls::mknodat(dirfd, name, libc::S_IFIFO | mode, 0)
+                syscalls::mknodat(dir, name, libc::S_IFIFO | mode, 0)
             }
             InodeType::CharacterDevice(perm, dev) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                syscalls::mknodat(dirfd, name, libc::S_IFCHR | mode, *dev)
+                syscalls::mknodat(dir, name, libc::S_IFCHR | mode, *dev)
             }
             InodeType::BlockDevice(perm, dev) => {
                 let mode = perm.mode() & !libc::S_IFMT;
-                syscalls::mknodat(dirfd, name, libc::S_IFBLK | mode, *dev)
+                syscalls::mknodat(dir, name, libc::S_IFBLK | mode, *dev)
             }
         }
         .map_err(|err| {
@@ -361,9 +677,9 @@ impl Root {
         })
     }
 
-    /// Create an [`InodeType::File`] within the [`Root`]'s tree at `path` with
-    /// the mode given by `perm`, and return a [`Handle`] to the newly-created
-    /// file.
+    /// Create an [`InodeType::File`] within the [`RootRef`]'s tree at `path`
+    /// with the mode given by `perm`, and return a [`Handle`] to the
+    /// newly-created file.
     ///
     /// However, unlike the trivial way of doing the above:
     ///
@@ -373,15 +689,17 @@ impl Root {
     /// let handle = root.resolve(path, perm)?;
     /// ```
     ///
-    /// [`Root::create_file`] guarantees that the returned [`Handle`] is the
-    /// same as the file created by the operation. This is only possible to
-    /// guarantee for ordinary files because there is no [`O_CREAT`]-equivalent
-    /// for other inode types.
+    /// [`create_file`] guarantees that the returned [`Handle`] is the same as
+    /// the file created by the operation. This is only possible to guarantee
+    /// for ordinary files because there is no [`O_CREAT`]-equivalent for other
+    /// inode types.
     ///
     /// # Errors
     ///
-    /// Identical to [`Root::create`].
+    /// Identical to [`create`].
     ///
+    /// [`create`]: Self::create
+    /// [`create_file`]: Self::create_file
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
     #[doc(alias = "pathrs_creat")]
     #[doc(alias = "pathrs_create")]
@@ -400,25 +718,26 @@ impl Root {
             name: "path".into(),
             description: "file creation path has trailing slash".into(),
         })?;
-        let dirfd = dir.as_raw_fd();
 
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
         // O_NOFOLLOW. We might want to expose that here, though because it
         // can't be done with the emulated backend that might be a bad idea.
         flags.insert(OpenFlags::O_CREAT);
-        let file = syscalls::openat(dirfd, name, flags.bits(), perm.mode()).map_err(|err| {
+        let fd = syscalls::openat(dir, name, flags.bits(), perm.mode()).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "pathrs create_file".into(),
                 source: err,
             }
         })?;
 
-        Ok(Handle::from_file_unchecked(file))
+        Ok(Handle::from_fd_unchecked(fd))
     }
 
-    /// Within the [`Root`]'s tree, create a directory and any of its parent
-    /// component if they are missing. This is effectively equivalent to
-    /// [`std::fs::create_dir_all`], Go's [`os.MkdirAll`], or Unix's `mkdir -p`.
+    /// Within the [`RootRef`]'s tree, create a directory and any of its parent
+    /// component if they are missing.
+    ///
+    /// This is effectively equivalent to [`std::fs::create_dir_all`], Go's
+    /// [`os.MkdirAll`], or Unix's `mkdir -p`.
     ///
     /// The provided set of [`Permissions`] only applies to path components
     /// created by this function, existing components will not have their
@@ -453,18 +772,15 @@ impl Root {
 
         let (handle, remaining) = self
             .resolver
-            .resolve_partial(&self.inner, path.as_ref(), false)
+            .resolve_partial(self, path.as_ref(), false)
             .and_then(TryInto::try_into)?;
 
         // Re-open the handle with O_DIRECTORY to make sure it's a directory we
         // can use as well as to make sure we return
         // directoriy
-        let mut current = handle.reopen(OpenFlags::O_DIRECTORY).with_wrap(|| {
-            format!(
-                "cannot create directories in {}",
-                FrozenFd::from(handle.as_file().as_raw_fd())
-            )
-        })?;
+        let mut current = handle
+            .reopen(OpenFlags::O_DIRECTORY)
+            .with_wrap(|| format!("cannot create directories in {}", FrozenFd::from(handle)))?;
 
         // For the remaining
         let remaining_parts = remaining
@@ -513,7 +829,7 @@ impl Root {
             // a dangling symlink with only a trailing component missing), so we
             // can safely create the final component without worrying about
             // symlink-exchange attacks.
-            syscalls::mkdirat(current.as_raw_fd(), &part, perm.mode()).map_err(|err| {
+            syscalls::mkdirat(&current, &part, perm.mode()).map_err(|err| {
                 ErrorImpl::RawOsError {
                     operation: "create next directory component".into(),
                     source: err,
@@ -620,10 +936,10 @@ impl Root {
             current = next;
         }
 
-        Ok(Handle::from_file_unchecked(current))
+        Ok(Handle::from_fd_unchecked(current))
     }
 
-    /// Within the [`Root`]'s tree, remove the inode of type `inode_type` at
+    /// Within the [`RootRef`]'s tree, remove the inode of type `inode_type` at
     /// `path`.
     ///
     /// Any existing [`Handle`]s to `path` will continue to work as before,
@@ -635,7 +951,9 @@ impl Root {
     /// If the path does not exist, was not actually `inode_type`, or was a
     /// non-empty directory an error will be returned. In order to remove a path
     /// regardless of whether it exists, its type, or if it it's a non-empty
-    /// directory, you can use [`Root::remove_all`].
+    /// directory, you can use [`remove_all`].
+    ///
+    /// [`remove_all`]: Self::remove_all
     fn remove_inode(&self, path: &Path, inode_type: RemoveInodeType) -> Result<(), Error> {
         // unlinkat(2) doesn't let us remove an inode using just a handle (for
         // obvious reasons -- on Unix hardlinks mean that "unlink this file"
@@ -654,7 +972,7 @@ impl Root {
             RemoveInodeType::Regular => 0,
             RemoveInodeType::Directory => libc::AT_REMOVEDIR,
         };
-        syscalls::unlinkat(dir.as_raw_fd(), name, flags).map_err(|err| {
+        syscalls::unlinkat(dir, name, flags).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "pathrs remove".into(),
                 source: err,
@@ -663,7 +981,7 @@ impl Root {
         })
     }
 
-    /// Within the [`Root`]'s tree, remove the empty directory at `path`.
+    /// Within the [`RootRef`]'s tree, remove the empty directory at `path`.
     ///
     /// Any existing [`Handle`]s to `path` will continue to work as before,
     /// since Linux does not invalidate file handles to unlinked files (though,
@@ -673,15 +991,17 @@ impl Root {
     ///
     /// If the path does not exist, was not actually a directory, or was a
     /// non-empty directory an error will be returned. In order to remove a
-    /// directory and all of its children, you can use [`Root::remove_all`].
+    /// directory and all of its children, you can use [`remove_all`].
+    ///
+    /// [`remove_all`]: Self::remove_all
     #[doc(alias = "pathrs_rmdir")]
     #[inline]
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Directory)
     }
 
-    /// Within the [`Root`]'s tree, remove the file (any non-directory inode) at
-    /// `path`.
+    /// Within the [`RootRef`]'s tree, remove the file (any non-directory inode)
+    /// at `path`.
     ///
     /// Any existing [`Handle`]s to `path` will continue to work as before,
     /// since Linux does not invalidate file handles to unlinked files (though,
@@ -691,15 +1011,17 @@ impl Root {
     ///
     /// If the path does not exist or was actually a directory an error will be
     /// returned. In order to remove a path regardless of its type (even if it
-    /// is a non-empty directory), you can use [`Root::remove_all`].
+    /// is a non-empty directory), you can use [`remove_all`].
+    ///
+    /// [`remove_all`]: Self::remove_all
     #[doc(alias = "pathrs_unlink")]
     #[inline]
     pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Regular)
     }
 
-    /// Within the [`Root`]'s tree, recursively delete the provided `path` and
-    /// any children it contains if it is a directory. This is effectively
+    /// Within the [`RootRef`]'s tree, recursively delete the provided `path`
+    /// and any children it contains if it is a directory. This is effectively
     /// equivalent to [`std::fs::remove_dir_all`], Go's [`os.RemoveAll`], or
     /// Unix's `rm -r`.
     ///
@@ -713,6 +1035,7 @@ impl Root {
     /// deletion process an error will be returned.
     ///
     /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
+    #[doc(alias = "pathrs_remove_all")]
     pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         let (dir, name) = self
             .resolve_parent(path.as_ref())
@@ -727,8 +1050,8 @@ impl Root {
         utils::remove_all(&dir, name)
     }
 
-    /// Within the [`Root`]'s tree, perform a rename with the given `source` and
-    /// `directory`. The `flags` argument is passed directly to
+    /// Within the [`RootRef`]'s tree, perform a rename with the given `source`
+    /// and `directory`. The `flags` argument is passed directly to
     /// [`renameat2(2)`].
     ///
     /// # Errors
@@ -761,14 +1084,7 @@ impl Root {
             description: "rename destination path has trailing slash".into(),
         })?;
 
-        syscalls::renameat2(
-            src_dir.as_raw_fd(),
-            src_name,
-            dst_dir.as_raw_fd(),
-            dst_name,
-            rflags.bits(),
-        )
-        .map_err(|err| {
+        syscalls::renameat2(src_dir, src_name, dst_dir, dst_name, rflags.bits()).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "pathrs rename".into(),
                 source: err,
@@ -779,4 +1095,47 @@ impl Root {
 
     // TODO: implement a way to duplicate (and even serialise) Roots so that you
     //       can send them between processes (presumably with SCM_RIGHTS).
+}
+
+impl AsFd for RootRef<'_> {
+    /// Access the underlying file descriptor for a [`RootRef`].
+    ///
+    /// **Note**: This method is primarily intended to allow for tests and other
+    /// code to check the status of the underlying file descriptor. It is not
+    /// safe to use this [`BorrowedFd`] directly to do filesystem operations.
+    /// Please use the provided [`RootRef`] methods.
+    #[inline]
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Root, RootRef};
+
+    use std::os::unix::io::{AsFd, AsRawFd};
+
+    use anyhow::Error;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn from_fd_unchecked() -> Result<(), Error> {
+        let root = Root::open(".")?;
+        let root_ref1 = root.as_ref();
+        let root_ref2 = RootRef::from_fd_unchecked(root.as_fd());
+
+        assert_eq!(
+            root.as_fd().as_raw_fd(),
+            root_ref1.as_fd().as_raw_fd(),
+            "Root::as_ref should have the same underlying fd"
+        );
+        assert_eq!(
+            root.as_fd().as_raw_fd(),
+            root_ref2.as_fd().as_raw_fd(),
+            "RootRef::from_fd_unchecked should have the same underlying fd"
+        );
+
+        Ok(())
+    }
 }

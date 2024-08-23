@@ -21,9 +21,9 @@
 //! dangling symlinks.
 //!
 //! If we hit a non-existent path while resolving a symlink, we need to return
-//! the `(current: Rc<File>, remaining_components: PathBuf)` we had when we hit
-//! the symlink (effectively making the symlink resolution all-or-nothing). The
-//! set of `(current, remaining_components)` set is stored within the
+//! the `(current: Rc<OwnedFd>, remaining_components: PathBuf)` we had when we
+//! hit the symlink (effectively making the symlink resolution all-or-nothing).
+//! The set of `(current, remaining_components)` set is stored within the
 //! SymlinkStack and we add and or remove parts when we hit symlink and
 //! non-symlink components respectively. This needs to be implemented as a stack
 //! because of nested symlinks (if there is a dangling symlink 10 levels deep
@@ -72,7 +72,7 @@ pub(crate) struct SymlinkStack<F: fmt::Debug>(VecDeque<SymlinkStackEntry<F>>);
 
 impl<F: fmt::Debug> SymlinkStack<F> {
     fn do_push(&mut self, (dir, remaining): (&Rc<F>, PathBuf), link_target: PathBuf) {
-        // Get a proper Rc<File>.
+        // Get a proper Rc<OwnedFd>.
         let dir = Rc::clone(dir);
 
         // Split the link target and clean up any "" parts.

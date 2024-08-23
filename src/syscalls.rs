@@ -22,17 +22,16 @@
 
 use crate::{
     flags::OpenFlags,
-    utils::{RawFdExt, ToCString},
+    utils::{FdExt, ToCString},
 };
 
 use std::{
     ffi::{CString, OsStr},
     fmt,
-    fs::File,
     io::Error as IOError,
     os::unix::{
         ffi::OsStrExt,
-        io::{FromRawFd, RawFd},
+        io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
     },
     path::{Path, PathBuf},
     ptr,
@@ -47,11 +46,17 @@ use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
 //       syscalls::Error this might get a little complicated.
 // MSRV(1.65): Use std::backtrace::Backtrace.
 
+// SAFETY: AT_FDCWD is always a valid file descriptor.
+pub(crate) const AT_FDCWD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(libc::AT_FDCWD) };
+// SAFETY: BADFD is not a valid file descriptor, but it's not -1.
+#[cfg(test)]
+pub(crate) const BADFD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(-libc::EBADF) };
+
 // MSRV(1.70): Use OnceLock.
 // MSRV(1.80): Use LazyLock.
 lazy_static! {
     pub(crate) static ref OPENAT2_IS_SUPPORTED: bool =
-        openat2(libc::AT_FDCWD, ".", &Default::default()).is_ok();
+        openat2(AT_FDCWD, ".", &Default::default()).is_ok();
 }
 
 /// Representation of a file descriptor and its associated path at a given point
@@ -67,11 +72,11 @@ lazy_static! {
 pub(crate) struct FrozenFd(c_int, Option<PathBuf>);
 
 // TODO: Should probably be a pub(crate) impl.
-impl From<RawFd> for FrozenFd {
-    fn from(fd: RawFd) -> Self {
+impl<Fd: AsFd> From<Fd> for FrozenFd {
+    fn from(fd: Fd) -> Self {
         // SAFETY: as_unsafe_path is safe here since it is only used for
         //         pretty-printing error messages and no real logic.
-        Self(fd, fd.as_unsafe_path_unchecked().ok())
+        Self(fd.as_fd().as_raw_fd(), fd.as_unsafe_path_unchecked().ok())
     }
 }
 
@@ -291,9 +296,11 @@ impl Error {
 /// This is required because Rust automatically sets `O_CLOEXEC` on all new
 /// files, so we need to manually unset it when we return certain fds to the C
 /// FFI (in fairness, `O_CLOEXEC` is a good default).
-pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
+pub(crate) fn fcntl_unset_cloexec<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
+    let fd = fd.as_fd();
+
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let old = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    let old = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
     let err = IOError::last_os_error();
 
     if old < 0 {
@@ -309,7 +316,7 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
     }
 
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::fcntl(fd, libc::F_SETFD, new) };
+    let ret = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, new) };
     let err = IOError::last_os_error();
 
     if ret >= 0 {
@@ -327,22 +334,23 @@ pub(crate) fn fcntl_unset_cloexec(fd: RawFd) -> Result<(), Error> {
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn openat_follow<P: AsRef<Path>>(
-    dirfd: RawFd,
+pub(crate) fn openat_follow<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
     path: P,
     flags: c_int,
     mode: mode_t,
-) -> Result<File, Error> {
+) -> Result<OwnedFd, Error> {
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
     let flags = libc::O_CLOEXEC | libc::O_NOCTTY | flags;
 
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe { libc::openat(dirfd, path.to_c_string().as_ptr(), flags, mode) };
+    let fd = unsafe { libc::openat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), flags, mode) };
     let err = IOError::last_os_error();
 
     if fd >= 0 {
         // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { File::from_raw_fd(fd) })
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     } else {
         Err(Error::Openat {
             dirfd: dirfd.into(),
@@ -358,12 +366,12 @@ pub(crate) fn openat_follow<P: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn openat<P: AsRef<Path>>(
-    dirfd: RawFd,
+pub(crate) fn openat<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
     path: P,
     flags: c_int,
     mode: mode_t,
-) -> Result<File, Error> {
+) -> Result<OwnedFd, Error> {
     openat_follow(dirfd, path, libc::O_NOFOLLOW | flags, mode)
 }
 
@@ -372,7 +380,8 @@ pub(crate) fn openat<P: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `readlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
-pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBuf, Error> {
+pub(crate) fn readlinkat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<PathBuf, Error> {
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
 
     // If the contents of the symlink are larger than this, we raise a
@@ -382,7 +391,7 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
     // SAFETY: Obviously safe-to-use Linux syscall.
     let len = unsafe {
         libc::readlinkat(
-            dirfd,
+            dirfd.as_raw_fd(),
             path.to_c_string().as_ptr(),
             buffer.as_mut_ptr() as *mut i8,
             buffer.len(),
@@ -409,10 +418,15 @@ pub(crate) fn readlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<PathBu
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `mkdirat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn mkdirat<P: AsRef<Path>>(dirfd: RawFd, path: P, mode: mode_t) -> Result<(), Error> {
+pub(crate) fn mkdirat<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
+    path: P,
+    mode: mode_t,
+) -> Result<(), Error> {
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::mkdirat(dirfd, path.to_c_string().as_ptr(), mode) };
+    let ret = unsafe { libc::mkdirat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), mode) };
     let err = IOError::last_os_error();
 
     if ret >= 0 {
@@ -436,15 +450,16 @@ pub(crate) fn devmajorminor(dev: dev_t) -> (c_uint, c_uint) {
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `mknodat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn mknodat<P: AsRef<Path>>(
-    dirfd: RawFd,
+pub(crate) fn mknodat<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
     path: P,
     mode: mode_t,
     dev: dev_t,
 ) -> Result<(), Error> {
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::mknodat(dirfd, path.to_c_string().as_ptr(), mode, dev) };
+    let ret = unsafe { libc::mknodat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), mode, dev) };
     let err = IOError::last_os_error();
 
     if ret >= 0 {
@@ -466,10 +481,15 @@ pub(crate) fn mknodat<P: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `unlinkat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> Result<(), Error> {
+pub(crate) fn unlinkat<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
+    path: P,
+    flags: c_int,
+) -> Result<(), Error> {
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::unlinkat(dirfd, path.to_c_string().as_ptr(), flags) };
+    let ret = unsafe { libc::unlinkat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), flags) };
     let err = IOError::last_os_error();
 
     if ret >= 0 {
@@ -488,20 +508,21 @@ pub(crate) fn unlinkat<P: AsRef<Path>>(dirfd: RawFd, path: P, flags: c_int) -> R
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `linkat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn linkat<P1: AsRef<Path>, P2: AsRef<Path>>(
-    olddirfd: RawFd,
+pub(crate) fn linkat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
+    olddirfd: Fd1,
     oldpath: P1,
-    newdirfd: RawFd,
+    newdirfd: Fd2,
     newpath: P2,
     flags: c_int,
 ) -> Result<(), Error> {
+    let (olddirfd, newdirfd) = (olddirfd.as_fd(), newdirfd.as_fd());
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::linkat(
-            olddirfd,
+            olddirfd.as_raw_fd(),
             oldpath.to_c_string().as_ptr(),
-            newdirfd,
+            newdirfd.as_raw_fd(),
             newpath.to_c_string().as_ptr(),
             flags,
         )
@@ -527,17 +548,18 @@ pub(crate) fn linkat<P1: AsRef<Path>, P2: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `symlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
-pub(crate) fn symlinkat<P1: AsRef<Path>, P2: AsRef<Path>>(
+pub(crate) fn symlinkat<P1: AsRef<Path>, Fd: AsFd, P2: AsRef<Path>>(
     target: P1,
-    dirfd: RawFd,
+    dirfd: Fd,
     path: P2,
 ) -> Result<(), Error> {
+    let dirfd = dirfd.as_fd();
     let (target, path) = (target.as_ref(), path.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::symlinkat(
             target.to_c_string().as_ptr(),
-            dirfd,
+            dirfd.as_raw_fd(),
             path.to_c_string().as_ptr(),
         )
     };
@@ -559,19 +581,20 @@ pub(crate) fn symlinkat<P1: AsRef<Path>, P2: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `renameat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn renameat<P1: AsRef<Path>, P2: AsRef<Path>>(
-    olddirfd: RawFd,
+pub(crate) fn renameat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
+    olddirfd: Fd1,
     oldpath: P1,
-    newdirfd: RawFd,
+    newdirfd: Fd2,
     newpath: P2,
 ) -> Result<(), Error> {
+    let (olddirfd, newdirfd) = (olddirfd.as_fd(), newdirfd.as_fd());
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::renameat(
-            olddirfd,
+            olddirfd.as_raw_fd(),
             oldpath.to_c_string().as_ptr(),
-            newdirfd,
+            newdirfd.as_raw_fd(),
             newpath.to_c_string().as_ptr(),
         )
     };
@@ -595,9 +618,9 @@ pub(crate) fn renameat<P1: AsRef<Path>, P2: AsRef<Path>>(
 lazy_static! {
     pub(crate) static ref RENAME_FLAGS_SUPPORTED: bool = {
         match renameat2(
-            libc::AT_FDCWD,
+            AT_FDCWD,
             ".",
-            libc::AT_FDCWD,
+            AT_FDCWD,
             ".",
             libc::RENAME_EXCHANGE,
         ) {
@@ -612,10 +635,10 @@ lazy_static! {
 ///
 /// This is needed because Rust doesn't provide any interface for `renameat2(2)`
 /// (especially not an interface for the dirfd).
-pub(crate) fn renameat2<P1: AsRef<Path>, P2: AsRef<Path>>(
-    olddirfd: RawFd,
+pub(crate) fn renameat2<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
+    olddirfd: Fd1,
     oldpath: P1,
-    newdirfd: RawFd,
+    newdirfd: Fd2,
     newpath: P2,
     flags: c_uint,
 ) -> Result<(), Error> {
@@ -624,15 +647,14 @@ pub(crate) fn renameat2<P1: AsRef<Path>, P2: AsRef<Path>>(
         return renameat(olddirfd, oldpath, newdirfd, newpath);
     }
 
+    let (olddirfd, newdirfd) = (olddirfd.as_fd(), newdirfd.as_fd());
     let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
-        // (g)libc doesn't have a renameat2 wrapper in older versions.
-        libc::syscall(
-            libc::SYS_renameat2,
-            olddirfd,
+        libc::renameat2(
+            olddirfd.as_raw_fd(),
             oldpath.to_c_string().as_ptr(),
-            newdirfd,
+            newdirfd.as_raw_fd(),
             newpath.to_c_string().as_ptr(),
             flags,
         )
@@ -656,12 +678,13 @@ pub(crate) fn renameat2<P1: AsRef<Path>, P2: AsRef<Path>>(
 /// Wrapper for `fstatfs(2)`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatfs(2)`.
-pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
+pub(crate) fn fstatfs<Fd: AsFd>(fd: Fd) -> Result<statfs, Error> {
     // SAFETY: repr(C) struct without internal references is definitely valid. C
     //         callers are expected to zero it as well.
     let mut buf: statfs = unsafe { std::mem::zeroed() };
+    let fd = fd.as_fd();
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::fstatfs(fd, &mut buf as *mut statfs) };
+    let ret = unsafe { libc::fstatfs(fd.as_raw_fd(), &mut buf as *mut statfs) };
     let err = IOError::last_os_error();
 
     if ret >= 0 {
@@ -678,17 +701,18 @@ pub(crate) fn fstatfs(fd: RawFd) -> Result<statfs, Error> {
 /// AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatat(2)`.
-pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Error> {
+pub(crate) fn fstatat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<stat, Error> {
     // SAFETY: repr(C) struct without internal references is definitely valid. C
     //         callers are expected to zero it as well.
     let mut buf: stat = unsafe { std::mem::zeroed() };
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
     let flags = libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH;
 
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::fstatat(
-            dirfd,
+            dirfd.as_raw_fd(),
             path.to_c_string().as_ptr(),
             &mut buf as *mut stat,
             flags,
@@ -708,21 +732,22 @@ pub(crate) fn fstatat<P: AsRef<Path>>(dirfd: RawFd, path: P) -> Result<stat, Err
     }
 }
 
-pub(crate) fn statx<P: AsRef<Path>>(
-    dirfd: RawFd,
+pub(crate) fn statx<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
     path: P,
     mask: u32,
 ) -> Result<libc::statx, Error> {
     // SAFETY: repr(C) struct without internal references is definitely valid. C
     //         callers are expected to zero it as well.
     let mut buf: libc::statx = unsafe { std::mem::zeroed() };
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
     let flags = libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH;
 
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::statx(
-            dirfd,
+            dirfd.as_raw_fd(),
             path.to_c_string().as_ptr(),
             flags,
             mask,
@@ -769,7 +794,12 @@ impl fmt::Display for OpenHow {
     }
 }
 
-pub(crate) fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> Result<File, Error> {
+pub(crate) fn openat2<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
+    path: P,
+    how: &OpenHow,
+) -> Result<OwnedFd, Error> {
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
 
     // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
@@ -781,7 +811,7 @@ pub(crate) fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> R
     let fd = unsafe {
         libc::syscall(
             libc::SYS_openat2,
-            dirfd,
+            dirfd.as_raw_fd(),
             path.to_c_string().as_ptr(),
             &how as *const OpenHow,
             std::mem::size_of::<OpenHow>(),
@@ -791,7 +821,7 @@ pub(crate) fn openat2<P: AsRef<Path>>(dirfd: RawFd, path: P, how: &OpenHow) -> R
 
     if fd >= 0 {
         // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { File::from_raw_fd(fd) })
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     } else {
         Err(Error::Openat2 {
             dirfd: dirfd.into(),
@@ -864,17 +894,17 @@ enum FsconfigCmd {
     Reconfigure = 0x7,  // FSCONFIG_RECONFIGURE
 }
 
-pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<File, Error> {
+pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<OwnedFd, Error> {
     let fstype = fstype.as_ref();
     let c_fstype = CString::new(fstype).expect("fsopen argument should be valid C string");
 
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe { libc::syscall(libc::SYS_fsopen, c_fstype.as_ptr(), flags.bits()) as RawFd };
+    let fd = unsafe { libc::syscall(libc::SYS_fsopen, c_fstype.as_ptr(), flags.bits()) } as RawFd;
     let err = IOError::last_os_error();
 
     if fd >= 0 {
         // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { File::from_raw_fd(fd) })
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     } else {
         Err(Error::Fsopen {
             fstype: fstype.into(),
@@ -884,11 +914,12 @@ pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<Fil
     }
 }
 
-pub(crate) fn fsconfig_set_string<K: AsRef<str>, V: AsRef<str>>(
-    sfd: RawFd,
+pub(crate) fn fsconfig_set_string<Fd: AsFd, K: AsRef<str>, V: AsRef<str>>(
+    sfd: Fd,
     key: K,
     value: V,
 ) -> Result<(), Error> {
+    let sfd = sfd.as_fd();
     let key = key.as_ref();
     let c_key = CString::new(key).expect("fsconfig_set_string key should be valid C string");
     let value = value.as_ref();
@@ -898,7 +929,7 @@ pub(crate) fn fsconfig_set_string<K: AsRef<str>, V: AsRef<str>>(
     let ret = unsafe {
         libc::syscall(
             libc::SYS_fsconfig,
-            sfd,
+            sfd.as_raw_fd(),
             FsconfigCmd::SetString,
             c_key.as_ptr(),
             c_value.as_ptr(),
@@ -922,12 +953,13 @@ pub(crate) fn fsconfig_set_string<K: AsRef<str>, V: AsRef<str>>(
 // clippy doesn't understand that we need to specify a type for ptr::null() here
 // because libc::syscall() is variadic.
 #[allow(clippy::unnecessary_cast)]
-pub(crate) fn fsconfig_create(sfd: RawFd) -> Result<(), Error> {
+pub(crate) fn fsconfig_create<Fd: AsFd>(sfd: Fd) -> Result<(), Error> {
+    let sfd = sfd.as_fd();
     // SAFETY: Obviously safe-to-use Linux syscall.
     let ret = unsafe {
         libc::syscall(
             libc::SYS_fsconfig,
-            sfd,
+            sfd.as_raw_fd(),
             FsconfigCmd::Create,
             ptr::null() as *const (),
             ptr::null() as *const (),
@@ -946,14 +978,26 @@ pub(crate) fn fsconfig_create(sfd: RawFd) -> Result<(), Error> {
     }
 }
 
-pub(crate) fn fsmount(sfd: RawFd, flags: FsmountFlags, mount_attrs: u64) -> Result<File, Error> {
+pub(crate) fn fsmount<Fd: AsFd>(
+    sfd: Fd,
+    flags: FsmountFlags,
+    mount_attrs: u64,
+) -> Result<OwnedFd, Error> {
+    let sfd = sfd.as_fd();
     // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe { libc::syscall(libc::SYS_fsmount, sfd, flags.bits(), mount_attrs) as RawFd };
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_fsmount,
+            sfd.as_raw_fd(),
+            flags.bits(),
+            mount_attrs,
+        )
+    } as RawFd;
     let err = IOError::last_os_error();
 
     if fd >= 0 {
         // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { File::from_raw_fd(fd) })
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     } else {
         Err(Error::Fsmount {
             sfd: sfd.into(),
@@ -964,23 +1008,29 @@ pub(crate) fn fsmount(sfd: RawFd, flags: FsmountFlags, mount_attrs: u64) -> Resu
     }
 }
 
-pub(crate) fn open_tree<P: AsRef<Path>>(
-    dirfd: RawFd,
+pub(crate) fn open_tree<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
     path: P,
     flags: OpenTreeFlags,
-) -> Result<File, Error> {
+) -> Result<OwnedFd, Error> {
+    let dirfd = dirfd.as_fd();
     let path = path.as_ref();
     let c_path = path.to_c_string();
 
     // SAFETY: Obviously safe-to-use Linux syscall.
     let fd = unsafe {
-        libc::syscall(libc::SYS_open_tree, dirfd, c_path.as_ptr(), flags.bits()) as RawFd
-    };
+        libc::syscall(
+            libc::SYS_open_tree,
+            dirfd.as_raw_fd(),
+            c_path.as_ptr(),
+            flags.bits(),
+        )
+    } as RawFd;
     let err = IOError::last_os_error();
 
     if fd >= 0 {
         // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { File::from_raw_fd(fd) })
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     } else {
         Err(Error::OpenTree {
             dirfd: dirfd.into(),

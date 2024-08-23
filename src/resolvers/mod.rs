@@ -26,7 +26,7 @@ use crate::{
 };
 
 use std::{
-    fs::File,
+    os::unix::io::{AsFd, OwnedFd},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -124,7 +124,7 @@ impl TryInto<Handle> for PartialLookup<Handle> {
     }
 }
 
-impl TryInto<Handle> for PartialLookup<Rc<File>> {
+impl TryInto<Handle> for PartialLookup<Rc<OwnedFd>> {
     type Error = Error;
 
     fn try_into(self) -> Result<Handle, Self::Error> {
@@ -150,7 +150,7 @@ impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Handle> {
     }
 }
 
-impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Rc<File>> {
+impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Rc<OwnedFd>> {
     type Error = Error;
 
     fn try_into(self) -> Result<(Handle, Option<PathBuf>), Self::Error> {
@@ -158,8 +158,8 @@ impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Rc<File>> {
     }
 }
 
-impl From<PartialLookup<Rc<File>>> for PartialLookup<Handle> {
-    fn from(result: PartialLookup<Rc<File>>) -> Self {
+impl From<PartialLookup<Rc<OwnedFd>>> for PartialLookup<Handle> {
+    fn from(result: PartialLookup<Rc<OwnedFd>>) -> Self {
         let (rc, partial) = match result {
             PartialLookup::Complete(rc) => (rc, None),
             PartialLookup::Partial {
@@ -172,7 +172,7 @@ impl From<PartialLookup<Rc<File>>> for PartialLookup<Handle> {
         // We are now sure that there is only a single reference to whatever
         // current points to. There is nowhere else we could've stashed a
         // reference, and we only do Rc::clone for root (which we've dropped).
-        let handle = Handle::from_file_unchecked(
+        let handle = Handle::from_fd_unchecked(
             // MSRV(1.70): Use Rc::into_inner().
             Rc::try_unwrap(rc)
                 .expect("current handle in lookup should only have a single Rc reference"),
@@ -192,9 +192,9 @@ impl From<PartialLookup<Rc<File>>> for PartialLookup<Handle> {
 impl Resolver {
     /// Internal dispatcher to the relevant backend.
     #[inline]
-    pub(crate) fn resolve<P: AsRef<Path>>(
+    pub(crate) fn resolve<F: AsFd, P: AsRef<Path>>(
         &self,
-        root: &File,
+        root: F,
         path: P,
         no_follow_trailing: bool,
     ) -> Result<Handle, Error> {
@@ -209,9 +209,9 @@ impl Resolver {
     }
 
     #[inline]
-    pub(crate) fn resolve_partial<P: AsRef<Path>>(
+    pub(crate) fn resolve_partial<F: AsFd, P: AsRef<Path>>(
         &self,
-        root: &File,
+        root: F,
         path: P,
         no_follow_trailing: bool,
     ) -> Result<PartialLookup<Handle>, Error> {

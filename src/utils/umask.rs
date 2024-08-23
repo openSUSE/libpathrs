@@ -27,7 +27,6 @@ use crate::{
 use std::{
     env,
     io::{BufRead, BufReader},
-    os::unix::io::AsRawFd,
 };
 
 use libc::mode_t;
@@ -70,8 +69,8 @@ fn get_umask_procfs(procfs: &ProcfsHandle) -> Result<Option<mode_t>, Error> {
 fn get_umask_tmpfile() -> Result<mode_t, Error> {
     // O_TMPFILE was added in Linux v3.11. See commit 60545d0d4610 ("[O_TMPFILE]
     // it's still short a few helpers, but infrastructure should be OK now...").
-    let file = syscalls::openat(
-        libc::AT_FDCWD,
+    let fd = syscalls::openat(
+        syscalls::AT_FDCWD,
         env::temp_dir(),
         libc::O_TMPFILE | libc::O_RDWR,
         0o777,
@@ -85,7 +84,7 @@ fn get_umask_tmpfile() -> Result<mode_t, Error> {
     // O_TMPFILE would be supported by the tempfile crate, see this issue:
     // <https://github.com/Stebalien/tempfile/issues/292>
 
-    let actual_mode = syscalls::fstatat(file.as_raw_fd(), "")
+    let actual_mode = syscalls::fstatat(fd, "")
         .map_err(|err| ErrorImpl::RawOsError {
             operation: "fstat temporary file".into(),
             source: err,

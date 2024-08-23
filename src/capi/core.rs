@@ -18,23 +18,20 @@
  */
 
 use crate::{
-    capi::{
-        ret::{self, IntoCReturn},
-        utils,
-    },
-    error::ErrorImpl,
+    capi::{ret::IntoCReturn, utils},
+    error::{Error, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
     procfs::PROCFS_HANDLE,
     syscalls,
-    utils::RawFdExt,
-    InodeType, Root,
+    utils::FdExt,
+    InodeType, Root, RootRef,
 };
 
 use std::{
     fs::Permissions,
     os::unix::{
         fs::PermissionsExt,
-        io::{AsRawFd, RawFd},
+        io::{BorrowedFd, RawFd},
     },
 };
 
@@ -86,7 +83,7 @@ pub extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
+pub extern "C" fn pathrs_reopen(fd: BorrowedFd<'_>, flags: c_int) -> RawFd {
     let flags = OpenFlags::from_bits_retain(flags);
 
     fd.reopen(&PROCFS_HANDLE, flags)
@@ -94,11 +91,9 @@ pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
             // Rust sets O_CLOEXEC by default, without an opt-out. We need to
             // disable it if we weren't asked to do O_CLOEXEC.
             if !flags.contains(OpenFlags::O_CLOEXEC) {
-                syscalls::fcntl_unset_cloexec(file.as_raw_fd()).map_err(|err| {
-                    ErrorImpl::RawOsError {
-                        operation: "clear O_CLOEXEC on fd".into(),
-                        source: err,
-                    }
+                syscalls::fcntl_unset_cloexec(&file).map_err(|err| ErrorImpl::RawOsError {
+                    operation: "clear O_CLOEXEC on fd".into(),
+                    source: err,
                 })?;
             }
             Ok(file)
@@ -123,10 +118,12 @@ pub extern "C" fn pathrs_reopen(fd: RawFd, flags: c_int) -> RawFd {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_resolve(root_fd: RawFd, path: *const c_char) -> RawFd {
-    ret::with_fd(root_fd, |root: &mut Root| {
+pub extern "C" fn pathrs_resolve(root_fd: BorrowedFd<'_>, path: *const c_char) -> RawFd {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         root.resolve(utils::parse_path(path)?)
-    })
+    }()
+    .into_c_return()
 }
 
 /// pathrs_resolve_nofollow() is effectively an O_NOFOLLOW version of
@@ -144,10 +141,12 @@ pub extern "C" fn pathrs_resolve(root_fd: RawFd, path: *const c_char) -> RawFd {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_resolve_nofollow(root_fd: RawFd, path: *const c_char) -> RawFd {
-    ret::with_fd(root_fd, |root: &mut Root| {
+pub extern "C" fn pathrs_resolve_nofollow(root_fd: BorrowedFd<'_>, path: *const c_char) -> RawFd {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         root.resolve_nofollow(utils::parse_path(path)?)
-    })
+    }()
+    .into_c_return()
 }
 
 /// Get the target of a symlink within the rootfs referenced by root_fd.
@@ -187,15 +186,17 @@ pub extern "C" fn pathrs_resolve_nofollow(root_fd: RawFd, path: *const c_char) -
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_readlink(
-    root_fd: RawFd,
+    root_fd: BorrowedFd<'_>,
     path: *const c_char,
     linkbuf: *mut c_char,
     linkbuf_size: size_t,
 ) -> RawFd {
-    ret::with_fd(root_fd, |root: &mut Root| {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         let link_target = root.readlink(utils::parse_path(path)?)?;
         utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size)
-    })
+    }()
+    .into_c_return()
 }
 
 /// Rename a path within the rootfs referenced by root_fd. The flags argument is
@@ -211,15 +212,17 @@ pub extern "C" fn pathrs_readlink(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_rename(
-    root_fd: RawFd,
+    root_fd: BorrowedFd<'_>,
     src: *const c_char,
     dst: *const c_char,
     flags: u32,
 ) -> c_int {
-    ret::with_fd(root_fd, |root: &mut Root| {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         let rflags = RenameFlags::from_bits_retain(flags);
         root.rename(utils::parse_path(src)?, utils::parse_path(dst)?, rflags)
-    })
+    }()
+    .into_c_return()
 }
 
 /// Remove the empty directory at path within the rootfs referenced by root_fd.
@@ -237,10 +240,12 @@ pub extern "C" fn pathrs_rename(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_rmdir(root_fd: RawFd, path: *const c_char) -> c_int {
-    ret::with_fd(root_fd, |root: &mut Root| {
+pub extern "C" fn pathrs_rmdir(root_fd: BorrowedFd<'_>, path: *const c_char) -> c_int {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         root.remove_dir(utils::parse_path(path)?)
-    })
+    }()
+    .into_c_return()
 }
 
 /// Remove the file (a non-directory inode) at path within the rootfs referenced
@@ -258,10 +263,12 @@ pub extern "C" fn pathrs_rmdir(root_fd: RawFd, path: *const c_char) -> c_int {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_unlink(root_fd: RawFd, path: *const c_char) -> c_int {
-    ret::with_fd(root_fd, |root: &mut Root| {
+pub extern "C" fn pathrs_unlink(root_fd: BorrowedFd<'_>, path: *const c_char) -> c_int {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         root.remove_file(utils::parse_path(path)?)
-    })
+    }()
+    .into_c_return()
 }
 
 /// Recursively delete the path and any children it contains if it is a
@@ -276,10 +283,12 @@ pub extern "C" fn pathrs_unlink(root_fd: RawFd, path: *const c_char) -> c_int {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_remove_all(root_fd: RawFd, path: *const c_char) -> c_int {
-    ret::with_fd(root_fd, |root: &mut Root| {
+pub extern "C" fn pathrs_remove_all(root_fd: BorrowedFd<'_>, path: *const c_char) -> c_int {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         root.remove_all(utils::parse_path(path)?)
-    })
+    }()
+    .into_c_return()
 }
 
 // Within the root, create an inode at the path with the given mode. If the
@@ -317,12 +326,13 @@ pub extern "C" fn pathrs_remove_all(root_fd: RawFd, path: *const c_char) -> c_in
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_creat(
-    root_fd: RawFd,
+    root_fd: BorrowedFd<'_>,
     path: *const c_char,
     flags: c_int,
     mode: c_uint,
 ) -> RawFd {
-    ret::with_fd(root_fd, |root: &mut Root| {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
         root.create_file(
@@ -330,7 +340,8 @@ pub extern "C" fn pathrs_creat(
             OpenFlags::from_bits_retain(flags),
             &perm,
         )
-    })
+    }()
+    .into_c_return()
 }
 
 /// Create a new directory within the rootfs referenced by root_fd.
@@ -346,7 +357,11 @@ pub extern "C" fn pathrs_creat(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_mkdir(root_fd: RawFd, path: *const c_char, mode: c_uint) -> c_int {
+pub extern "C" fn pathrs_mkdir(
+    root_fd: BorrowedFd<'_>,
+    path: *const c_char,
+    mode: c_uint,
+) -> c_int {
     let mode = mode & !libc::S_IFMT;
     pathrs_mknod(root_fd, path, libc::S_IFDIR | mode, 0)
 }
@@ -364,12 +379,18 @@ pub extern "C" fn pathrs_mkdir(root_fd: RawFd, path: *const c_char, mode: c_uint
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_mkdir_all(root_fd: RawFd, path: *const c_char, mode: c_uint) -> RawFd {
-    ret::with_fd(root_fd, |root: &mut Root| {
+pub extern "C" fn pathrs_mkdir_all(
+    root_fd: BorrowedFd<'_>,
+    path: *const c_char,
+    mode: c_uint,
+) -> RawFd {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
         root.mkdir_all(utils::parse_path(path)?, &perm)
-    })
+    }()
+    .into_c_return()
 }
 
 /// Create a inode within the rootfs referenced by root_fd. The type of inode to
@@ -385,12 +406,13 @@ pub extern "C" fn pathrs_mkdir_all(root_fd: RawFd, path: *const c_char, mode: c_
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_mknod(
-    root_fd: RawFd,
+    root_fd: BorrowedFd<'_>,
     path: *const c_char,
     mode: c_uint,
     dev: dev_t,
 ) -> c_int {
-    ret::with_fd(root_fd, |root: &mut Root| {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         let fmt = mode & libc::S_IFMT;
         let perms = Permissions::from_mode(mode ^ fmt);
         let path = utils::parse_path(path)?;
@@ -409,7 +431,8 @@ pub extern "C" fn pathrs_mknod(
             })?,
         };
         root.create(path, &inode_type)
-    })
+    }()
+    .into_c_return()
 }
 
 /// Create a symlink within the rootfs referenced by root_fd. Note that the
@@ -425,15 +448,17 @@ pub extern "C" fn pathrs_mknod(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_symlink(
-    root_fd: RawFd,
+    root_fd: BorrowedFd<'_>,
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
-    ret::with_fd(root_fd, |root: &mut Root| {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
         root.create(path, &InodeType::Symlink(target.into()))
-    })
+    }()
+    .into_c_return()
 }
 
 /// Create a hardlink within the rootfs referenced by root_fd. Both the hardlink
@@ -449,13 +474,15 @@ pub extern "C" fn pathrs_symlink(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_hardlink(
-    root_fd: RawFd,
+    root_fd: BorrowedFd<'_>,
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
-    ret::with_fd(root_fd, |root: &mut Root| {
+    || -> Result<_, Error> {
+        let root = RootRef::from_fd_unchecked(root_fd);
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
         root.create(path, &InodeType::Hardlink(target.into()))
-    })
+    }()
+    .into_c_return()
 }

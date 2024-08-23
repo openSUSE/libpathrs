@@ -25,9 +25,7 @@ use crate::{
 
 use std::{
     collections::{hash_map::Entry as HashMapEntry, HashMap},
-    fs::File,
-    mem::ManuallyDrop,
-    os::unix::io::{FromRawFd, IntoRawFd, RawFd},
+    os::unix::io::{IntoRawFd, OwnedFd},
     sync::Mutex,
 };
 
@@ -65,6 +63,11 @@ fn store_error(err: Error) -> CReturn {
     }
 }
 
+// TODO: Is it possible for us to return an actual OwnedFd through FFI when we
+//       need to? Unfortunately, CReturn may end up returning -1 which is an
+//       invalid OwnedFd/BorrowedFd value...
+//       <https://users.rust-lang.org/t/what-is-the-reason-for-the-1-restriction-in-ownedfd-borrowedfd/116450>
+
 impl IntoCReturn for () {
     fn into_c_return(self) -> CReturn {
         0
@@ -77,21 +80,21 @@ impl IntoCReturn for CReturn {
     }
 }
 
+impl IntoCReturn for OwnedFd {
+    fn into_c_return(self) -> CReturn {
+        self.into_raw_fd()
+    }
+}
+
 impl IntoCReturn for Root {
     fn into_c_return(self) -> CReturn {
-        self.into_file().into_raw_fd()
+        OwnedFd::from(self).into_c_return()
     }
 }
 
 impl IntoCReturn for Handle {
     fn into_c_return(self) -> CReturn {
-        self.into_file().into_raw_fd()
-    }
-}
-
-impl IntoCReturn for File {
-    fn into_c_return(self) -> CReturn {
-        self.into_raw_fd()
+        OwnedFd::from(self).into_c_return()
     }
 }
 
@@ -106,37 +109,6 @@ where
             Err(err) => store_error(err),
         }
     }
-}
-
-pub(super) trait FromFileUnchecked {
-    fn from_file_unchecked(file: File) -> Self;
-}
-
-impl FromFileUnchecked for Handle {
-    fn from_file_unchecked(file: File) -> Self {
-        Self::from_file_unchecked(file)
-    }
-}
-
-impl FromFileUnchecked for Root {
-    fn from_file_unchecked(file: File) -> Self {
-        Self::from_file_unchecked(file)
-    }
-}
-
-pub(super) fn with_fd<F, H, R>(fd: RawFd, func: F) -> CReturn
-where
-    R: IntoCReturn,
-    H: FromFileUnchecked,
-    F: FnOnce(&mut H) -> R, /* Result<R, Error>? */
-{
-    // Wrap the converted file descriptor handle in a ManuallyDrop so it doesn't
-    // closed when it's dropped.
-    let mut arg = ManuallyDrop::new(H::from_file_unchecked(
-        // SAFETY: The C caller guarantees that the file descriptor is valid.
-        unsafe { File::from_raw_fd(fd) },
-    ));
-    func(&mut arg).into_c_return()
 }
 
 /// Retrieve error information about an error id returned by a pathrs operation.
