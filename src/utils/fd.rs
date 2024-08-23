@@ -26,35 +26,84 @@ use crate::{
 
 use std::{
     fs,
-    os::unix::io::{AsFd, AsRawFd, OwnedFd},
+    os::unix::{
+        fs::MetadataExt,
+        io::{AsFd, AsRawFd, OwnedFd},
+    },
     path::{Path, PathBuf},
 };
 
 pub(crate) struct Metadata(libc::stat);
 
-// TODO: Maybe we should just implement MetadataExt?
 impl Metadata {
-    pub(crate) fn mode(&self) -> u32 {
-        self.0.st_mode
+    pub(crate) fn is_symlink(&self) -> bool {
+        self.mode() & libc::S_IFMT == libc::S_IFLNK
+    }
+}
+
+impl MetadataExt for Metadata {
+    fn dev(&self) -> u64 {
+        self.0.st_dev
     }
 
-    #[cfg(test)]
-    pub(crate) fn rdev(&self) -> u64 {
-        self.0.st_rdev
-    }
-
-    #[cfg(test)]
-    pub(crate) fn ino(&self) -> u64 {
+    fn ino(&self) -> u64 {
         self.0.st_ino
     }
 
-    #[cfg(test)]
-    pub(crate) fn nlink(&self) -> u64 {
+    fn mode(&self) -> u32 {
+        self.0.st_mode
+    }
+
+    fn nlink(&self) -> u64 {
         self.0.st_nlink
     }
 
-    pub(crate) fn is_symlink(&self) -> bool {
-        self.mode() & libc::S_IFMT == libc::S_IFLNK
+    fn uid(&self) -> u32 {
+        self.0.st_uid
+    }
+
+    fn gid(&self) -> u32 {
+        self.0.st_gid
+    }
+
+    fn rdev(&self) -> u64 {
+        self.0.st_rdev
+    }
+
+    fn size(&self) -> u64 {
+        self.0.st_size as u64
+    }
+
+    fn atime(&self) -> i64 {
+        self.0.st_atime
+    }
+
+    fn atime_nsec(&self) -> i64 {
+        self.0.st_atime_nsec
+    }
+
+    fn mtime(&self) -> i64 {
+        self.0.st_mtime
+    }
+
+    fn mtime_nsec(&self) -> i64 {
+        self.0.st_mtime_nsec
+    }
+
+    fn ctime(&self) -> i64 {
+        self.0.st_ctime
+    }
+
+    fn ctime_nsec(&self) -> i64 {
+        self.0.st_ctime_nsec
+    }
+
+    fn blksize(&self) -> u64 {
+        self.0.st_blksize as u64
+    }
+
+    fn blocks(&self) -> u64 {
+        self.0.st_blocks as u64
     }
 }
 
@@ -236,11 +285,15 @@ pub(crate) fn fetch_mnt_id<Fd: AsFd, P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{procfs::PROCFS_HANDLE, syscalls, utils::FdExt};
+    use crate::{flags::OpenFlags, procfs::PROCFS_HANDLE, syscalls, utils::FdExt};
 
-    use std::{fs::File, os::unix::io::AsFd, path::Path};
+    use std::{
+        fs::File,
+        os::unix::{fs::MetadataExt, io::AsFd},
+        path::Path,
+    };
 
-    use anyhow::Error;
+    use anyhow::{Context, Error};
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
@@ -285,5 +338,81 @@ mod tests {
             syscalls::BADFD.as_unsafe_path(&PROCFS_HANDLE).is_err(),
             "as_unsafe_path should fail for bad file descriptor"
         );
+    }
+
+    #[test]
+    fn reopen_badfd() {
+        assert!(
+            syscalls::BADFD
+                .reopen(&PROCFS_HANDLE, OpenFlags::O_PATH)
+                .is_err(),
+            "reopen should fail for bad file descriptor"
+        );
+    }
+
+    #[test]
+    fn is_magiclink_filesystem() {
+        assert!(
+            !File::open("/")
+                .expect("should be able to open handle to /")
+                .is_magiclink_filesystem()
+                .expect("is_magiclink_filesystem should work on regular file"),
+            "/ is not a magic-link filesystem"
+        );
+    }
+
+    #[test]
+    fn is_magiclink_filesystem_badfd() {
+        assert!(
+            syscalls::BADFD.is_magiclink_filesystem().is_err(),
+            "is_magiclink_filesystem should fail for bad file descriptor"
+        );
+    }
+
+    #[test]
+    fn metadata_badfd() {
+        assert!(
+            syscalls::BADFD.metadata().is_err(),
+            "metadata should fail for bad file descriptor"
+        );
+    }
+
+    #[test]
+    fn metadata() -> Result<(), Error> {
+        let file = File::open("/").context("open dummy file")?;
+
+        let file_meta = file.metadata().context("fstat file")?;
+        let fd_meta = file.as_fd().metadata().context("fstat fd")?;
+
+        assert_eq!(file_meta.dev(), fd_meta.dev(), "dev must match");
+        assert_eq!(file_meta.ino(), fd_meta.ino(), "ino must match");
+        assert_eq!(file_meta.mode(), fd_meta.mode(), "mode must match");
+        assert_eq!(file_meta.nlink(), fd_meta.nlink(), "nlink must match");
+        assert_eq!(file_meta.uid(), fd_meta.uid(), "uid must match");
+        assert_eq!(file_meta.gid(), fd_meta.gid(), "gid must match");
+        assert_eq!(file_meta.rdev(), fd_meta.rdev(), "rdev must match");
+        assert_eq!(file_meta.size(), fd_meta.size(), "size must match");
+        assert_eq!(file_meta.atime(), fd_meta.atime(), "atime must match");
+        assert_eq!(
+            file_meta.atime_nsec(),
+            fd_meta.atime_nsec(),
+            "atime_nsec must match"
+        );
+        assert_eq!(file_meta.mtime(), fd_meta.mtime(), "mtime must match");
+        assert_eq!(
+            file_meta.mtime_nsec(),
+            fd_meta.mtime_nsec(),
+            "mtime_nsec must match"
+        );
+        assert_eq!(file_meta.ctime(), fd_meta.ctime(), "ctime must match");
+        assert_eq!(
+            file_meta.ctime_nsec(),
+            fd_meta.ctime_nsec(),
+            "ctime_nsec must match"
+        );
+        assert_eq!(file_meta.blksize(), fd_meta.blksize(), "blksize must match");
+        assert_eq!(file_meta.blocks(), fd_meta.blocks(), "blocks must match");
+
+        Ok(())
     }
 }

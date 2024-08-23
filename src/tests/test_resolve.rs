@@ -791,12 +791,12 @@ resolve_tests! {
 }
 
 mod utils {
-    use std::path::Path;
-
     use crate::{
         error::ErrorKind, flags::OpenFlags, resolvers::PartialLookup, syscalls, utils::FdExt,
         Handle, Root,
     };
+
+    use std::{os::unix::fs::MetadataExt, path::Path};
 
     use anyhow::Error;
     use errno::Errno;

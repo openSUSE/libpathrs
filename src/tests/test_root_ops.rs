@@ -340,7 +340,7 @@ mod utils {
     use std::{
         fs::Permissions,
         os::unix::{
-            fs::PermissionsExt,
+            fs::{MetadataExt, PermissionsExt},
             io::{AsFd, OwnedFd},
         },
         path::{Path, PathBuf},
