@@ -119,6 +119,7 @@
 #![cfg(target_os = "linux")]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(clippy::all)]
+#![deny(missing_debug_implementations)]
 // We use this the coverage_attribute when doing coverage runs.
 // <https://github.com/rust-lang/rust/issues/84605>
 #![cfg_attr(coverage, feature(coverage_attribute))]
