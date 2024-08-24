@@ -45,8 +45,6 @@
  * access on those older kernels.
  *
  * NOTE: Currently, operating on /proc/... directly is not supported.
- *
- * [`ProcfsHandle`]: struct.ProcfsHandle.html
  */
 typedef enum {
     /**

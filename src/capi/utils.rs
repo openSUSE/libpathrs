@@ -22,12 +22,57 @@ use crate::error::{Error, ErrorImpl, ErrorKind};
 use std::{
     cmp,
     ffi::{CStr, CString, OsStr},
-    os::unix::ffi::OsStrExt,
+    marker::PhantomData,
+    os::unix::{
+        ffi::OsStrExt,
+        io::{BorrowedFd, RawFd},
+    },
     path::Path,
     ptr,
 };
 
 use libc::{c_char, c_int, size_t};
+
+/// Equivalent to [`BorrowedFd`], except that there are no restrictions on what
+/// value the inner [`RawFd`] can take. This is necessary because C callers
+/// could reasonably pass `-1` as a file descriptor value and we need to verify
+/// that the value is valid to avoid UB.
+///
+/// This type is FFI-safe and is intended for use in `extern "C" fn` signatures.
+/// While [`BorrowedFd`] (and `Option<BorrowedFd>`) are technically FFI-safe,
+/// apparently using them in `extern "C" fn` signatures directly is not
+/// recommended for the above reason.
+#[derive(Debug, Copy, Clone)]
+#[repr(transparent)]
+pub struct CBorrowedFd<'fd> {
+    inner: RawFd,
+    _phantom: PhantomData<BorrowedFd<'fd>>,
+}
+
+impl<'fd> CBorrowedFd<'fd> {
+    /// Take a [`CBorrowedFd`] from C FFI and convert it to a proper [`BorrowedFd`]
+    /// after making sure that it has a valid value (ie. is not negative).
+    pub(crate) fn try_as_borrowed_fd(&self) -> Result<BorrowedFd<'fd>, Error> {
+        // TODO: We might want to support AT_FDCWD in the future. The
+        //       openat2 resolver handles it correctly, but the O_PATH
+        //       resolver and try_clone() probably need some work.
+        // MSRV(1.66): Use match ..0?
+        if self.inner.is_negative() {
+            Err(ErrorImpl::InvalidArgument {
+                // TODO: Should this error be EBADF?
+                name: "fd".into(),
+                description: "passed file descriptors must not be negative".into(),
+            }
+            .into())
+        } else {
+            // SAFETY: The C caller guarantees that the file descriptor is valid for
+            //         the lifetime of CBorrowedFd (which is the same lifetime as
+            //         BorrowedFd). We verify that the file descriptor is not
+            //         negative, so it is definitely valid.
+            Ok(unsafe { BorrowedFd::borrow_raw(self.inner) })
+        }
+    }
+}
 
 pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     if path.is_null() {

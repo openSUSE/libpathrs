@@ -70,6 +70,9 @@ aligned_n = "__CBINDGEN_ALIGNED"
 
 [export]
 exclude = [
+	# Don't generate a "typedef" for CBorrowedFd -- FFI-wise, CBorrowedFd is
+	# just an int.
+	"CBorrowedFd",
 	# CReturn is a rust-only typedef.
 	"CReturn",
 	# Don't export the RESOLVE_* definitions.
@@ -89,3 +92,5 @@ exclude = [
 
 # The bare return values used for "kernel-like" APIs.
 "RawFd" = "int"
+"BorrowedFd" = "int"
+"CBorrowedFd" = "int"

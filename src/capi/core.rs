@@ -18,7 +18,10 @@
  */
 
 use crate::{
-    capi::{ret::IntoCReturn, utils},
+    capi::{
+        ret::IntoCReturn,
+        utils::{self, CBorrowedFd},
+    },
     error::{Error, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
     procfs::PROCFS_HANDLE,
@@ -29,10 +32,7 @@ use crate::{
 
 use std::{
     fs::Permissions,
-    os::unix::{
-        fs::PermissionsExt,
-        io::{BorrowedFd, RawFd},
-    },
+    os::unix::{fs::PermissionsExt, io::RawFd},
 };
 
 use libc::{c_char, c_int, c_uint, dev_t, size_t};
@@ -83,22 +83,25 @@ pub extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_reopen(fd: BorrowedFd<'_>, flags: c_int) -> RawFd {
+pub extern "C" fn pathrs_reopen(fd: CBorrowedFd<'_>, flags: c_int) -> RawFd {
     let flags = OpenFlags::from_bits_retain(flags);
 
-    fd.reopen(&PROCFS_HANDLE, flags)
-        .and_then(|file| {
-            // Rust sets O_CLOEXEC by default, without an opt-out. We need to
-            // disable it if we weren't asked to do O_CLOEXEC.
-            if !flags.contains(OpenFlags::O_CLOEXEC) {
-                syscalls::fcntl_unset_cloexec(&file).map_err(|err| ErrorImpl::RawOsError {
-                    operation: "clear O_CLOEXEC on fd".into(),
-                    source: err,
-                })?;
-            }
-            Ok(file)
-        })
-        .into_c_return()
+    || -> Result<_, Error> {
+        fd.try_as_borrowed_fd()?
+            .reopen(&PROCFS_HANDLE, flags)
+            .and_then(|file| {
+                // Rust sets O_CLOEXEC by default, without an opt-out. We need to
+                // disable it if we weren't asked to do O_CLOEXEC.
+                if !flags.contains(OpenFlags::O_CLOEXEC) {
+                    syscalls::fcntl_unset_cloexec(&file).map_err(|err| ErrorImpl::RawOsError {
+                        operation: "clear O_CLOEXEC on fd".into(),
+                        source: err,
+                    })?;
+                }
+                Ok(file)
+            })
+    }()
+    .into_c_return()
 }
 
 /// Resolve the given path within the rootfs referenced by root_fd. The path
@@ -118,8 +121,9 @@ pub extern "C" fn pathrs_reopen(fd: BorrowedFd<'_>, flags: c_int) -> RawFd {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_resolve(root_fd: BorrowedFd<'_>, path: *const c_char) -> RawFd {
+pub extern "C" fn pathrs_resolve(root_fd: CBorrowedFd<'_>, path: *const c_char) -> RawFd {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         root.resolve(utils::parse_path(path)?)
     }()
@@ -141,8 +145,9 @@ pub extern "C" fn pathrs_resolve(root_fd: BorrowedFd<'_>, path: *const c_char) -
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_resolve_nofollow(root_fd: BorrowedFd<'_>, path: *const c_char) -> RawFd {
+pub extern "C" fn pathrs_resolve_nofollow(root_fd: CBorrowedFd<'_>, path: *const c_char) -> RawFd {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         root.resolve_nofollow(utils::parse_path(path)?)
     }()
@@ -186,12 +191,13 @@ pub extern "C" fn pathrs_resolve_nofollow(root_fd: BorrowedFd<'_>, path: *const 
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_readlink(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     linkbuf: *mut c_char,
     linkbuf_size: size_t,
 ) -> RawFd {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         let link_target = root.readlink(utils::parse_path(path)?)?;
         utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size)
@@ -212,12 +218,13 @@ pub extern "C" fn pathrs_readlink(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_rename(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     src: *const c_char,
     dst: *const c_char,
     flags: u32,
 ) -> c_int {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         let rflags = RenameFlags::from_bits_retain(flags);
         root.rename(utils::parse_path(src)?, utils::parse_path(dst)?, rflags)
@@ -240,8 +247,9 @@ pub extern "C" fn pathrs_rename(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_rmdir(root_fd: BorrowedFd<'_>, path: *const c_char) -> c_int {
+pub extern "C" fn pathrs_rmdir(root_fd: CBorrowedFd<'_>, path: *const c_char) -> c_int {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         root.remove_dir(utils::parse_path(path)?)
     }()
@@ -263,8 +271,9 @@ pub extern "C" fn pathrs_rmdir(root_fd: BorrowedFd<'_>, path: *const c_char) -> 
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_unlink(root_fd: BorrowedFd<'_>, path: *const c_char) -> c_int {
+pub extern "C" fn pathrs_unlink(root_fd: CBorrowedFd<'_>, path: *const c_char) -> c_int {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         root.remove_file(utils::parse_path(path)?)
     }()
@@ -283,8 +292,9 @@ pub extern "C" fn pathrs_unlink(root_fd: BorrowedFd<'_>, path: *const c_char) ->
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_remove_all(root_fd: BorrowedFd<'_>, path: *const c_char) -> c_int {
+pub extern "C" fn pathrs_remove_all(root_fd: CBorrowedFd<'_>, path: *const c_char) -> c_int {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         root.remove_all(utils::parse_path(path)?)
     }()
@@ -326,12 +336,13 @@ pub extern "C" fn pathrs_remove_all(root_fd: BorrowedFd<'_>, path: *const c_char
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_creat(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     flags: c_int,
     mode: c_uint,
 ) -> RawFd {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
@@ -358,7 +369,7 @@ pub extern "C" fn pathrs_creat(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_mkdir(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     mode: c_uint,
 ) -> c_int {
@@ -380,11 +391,12 @@ pub extern "C" fn pathrs_mkdir(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_mkdir_all(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     mode: c_uint,
 ) -> RawFd {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
@@ -406,12 +418,13 @@ pub extern "C" fn pathrs_mkdir_all(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_mknod(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     mode: c_uint,
     dev: dev_t,
 ) -> c_int {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         let fmt = mode & libc::S_IFMT;
         let perms = Permissions::from_mode(mode ^ fmt);
@@ -448,11 +461,12 @@ pub extern "C" fn pathrs_mknod(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_symlink(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
@@ -474,11 +488,12 @@ pub extern "C" fn pathrs_symlink(
 /// pathrs_errorinfo().
 #[no_mangle]
 pub extern "C" fn pathrs_hardlink(
-    root_fd: BorrowedFd<'_>,
+    root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     target: *const c_char,
 ) -> c_int {
     || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
         let path = utils::parse_path(path)?;
         let target = utils::parse_path(target)?;
