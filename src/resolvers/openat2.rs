@@ -121,8 +121,8 @@ pub(crate) fn resolve_partial<F: AsFd>(
     // Fall back to returning (root, path) if there was no path found.
     //
     // TODO: In theory you should never hit this case because
-    // partial_ancestors() always returns a "root" value. This should probably
-    // be unreachable!()...
+    //       partial_ancestors() always returns a "root" value. This should
+    //       probably be unreachable!()...
     Ok(PartialLookup::Partial {
         handle: root
             .try_clone_to_owned()

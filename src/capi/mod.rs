@@ -22,6 +22,7 @@
 #![allow(unsafe_code)]
 // None of this code is reachable from rust, so including it in coverage doesn't
 // make sense.
+// TODO: We might want to test the cffi bindings from Rust at some point?
 #![cfg_attr(coverage, coverage(off))]
 
 /// Core pathrs function wrappers.

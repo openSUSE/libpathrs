@@ -132,6 +132,7 @@ macro_rules! resolve_tests {
 }
 
 resolve_tests! {
+    // Test the magic-link-related handling.
     [Path::new("/proc")] {
         proc_pseudo_magiclink: resolve("self/sched") => Ok(("{{/proc/self}}/sched", libc::S_IFREG));
         proc_pseudo_magiclink_nosym1: resolve("self", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));

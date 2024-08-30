@@ -285,10 +285,10 @@ impl Error {
     }
 }
 
-// XXX: We might want to switch to nix at some point, but the interfaces
-//      provided by nix are slightly non-ergonomic. I much prefer these simpler
-//      C-like bindings. We also have the ability to check for support of each
-//      syscall.
+// TODO: We probably want to switch to rustix for most of these wrappers, though
+//       the interfaces provided by rustix are slightly non-ergonomic. I much
+//       prefer these simpler C-like bindings. We also have the ability to check
+//       for support of each syscall.
 
 /// Wrapper for `fcntl(F_GETFD)` followed by `fcntl(F_SETFD)`, clearing the
 /// `FD_CLOEXEC` bit.

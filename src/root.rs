@@ -776,8 +776,8 @@ impl RootRef<'_> {
             .and_then(TryInto::try_into)?;
 
         // Re-open the handle with O_DIRECTORY to make sure it's a directory we
-        // can use as well as to make sure we return
-        // directoriy
+        // can use as well as to make sure we return an O_DIRECTORY regardless
+        // of whether there are any remaining components (for consistency).
         let mut current = handle
             .reopen(OpenFlags::O_DIRECTORY)
             .with_wrap(|| format!("cannot create directories in {}", FrozenFd::from(handle)))?;
@@ -1092,9 +1092,6 @@ impl RootRef<'_> {
             .into()
         })
     }
-
-    // TODO: implement a way to duplicate (and even serialise) Roots so that you
-    //       can send them between processes (presumably with SCM_RIGHTS).
 }
 
 impl AsFd for RootRef<'_> {

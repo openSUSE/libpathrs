@@ -27,9 +27,6 @@
 //! be used within the `pathrs::procfs` helpers that are used by other parts of
 //! libpathrs.
 
-// TODO: So much of this code is a copy of opath::resolver, maybe we can merge
-// them somehow?
-
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, ResolverFlags},
@@ -318,9 +315,9 @@ fn opath_resolve<F: AsFd, P: AsRef<Path>>(
         // We need a limit on the number of symlinks we traverse to avoid
         // hitting filesystem loops and DoSing.
         //
-        // Given all of the other restrictions of this lookup code, it seems unlikely
-        // that you could even run into a symlink loop (procfs doesn't have
-        // regular symlink loops). But for procfs can
+        // Given all of the other restrictions of this lookup code, it seems
+        // unlikely that you could even run into a symlink loop (procfs doesn't
+        // have regular symlink loops) but we should avoid it just in case.
         symlink_traversals += 1;
         if symlink_traversals >= MAX_SYMLINK_TRAVERSALS {
             Err(ErrorImpl::OsError {
