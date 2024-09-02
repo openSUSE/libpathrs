@@ -49,10 +49,13 @@ lazy_static! {
 fn store_error(err: Error) -> CReturn {
     let mut err_map = ERROR_MAP.lock().unwrap();
 
-    // Try to find a negative error value we can use.
+    // Try to find a negative error value we can use. We avoid using anything in
+    // 0..4096 to avoid users interpreting the return value as an -errno (at the
+    // moment, the largest errno is ~150 but the kernel currently reserves
+    // 4096 values as possible ERR_PTR values).
     let mut g = rand::thread_rng();
     loop {
-        let idx = g.gen_range(CReturn::MIN..=-1);
+        let idx = g.gen_range(CReturn::MIN..=-4096);
         match err_map.entry(idx) {
             HashMapEntry::Occupied(_) => continue,
             HashMapEntry::Vacant(slot) => {
