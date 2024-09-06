@@ -20,11 +20,15 @@
 use std::env;
 
 fn main() {
-    // Add DT_SONAME to our cdylibs.
-    let name = "pathrs";
-    let major = env::var("CARGO_PKG_VERSION_MAJOR").unwrap();
-    println!(
-        "cargo:rustc-cdylib-link-arg=-Wl,-soname,lib{}.so.{}",
-        name, major
-    );
+    // Add DT_SONAME to our cdylibs. We can't check the crate-type here
+    // directly, but we can at least avoid needless warnings for "cargo build"
+    // by only emitting this when the capi feature is enabled.
+    if cfg!(feature = "capi") {
+        let name = "pathrs";
+        let major = env::var("CARGO_PKG_VERSION_MAJOR").unwrap();
+        println!(
+            "cargo:rustc-cdylib-link-arg=-Wl,-soname,lib{}.so.{}",
+            name, major
+        );
+    }
 }

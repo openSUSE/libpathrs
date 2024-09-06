@@ -56,6 +56,7 @@ impl Error {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ErrorImpl {
+    #[allow(dead_code)]
     #[error("feature {feature} is not implemented")]
     NotImplemented { feature: Cow<'static, str> },
 

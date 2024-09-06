@@ -156,6 +156,7 @@ pub use resolvers::{Resolver, ResolverBackend};
 pub mod procfs;
 
 // C API.
+#[cfg(feature = "capi")]
 mod capi;
 
 // Internally used helpers.

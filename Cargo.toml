@@ -31,12 +31,13 @@ rust-version = "1.63"
 
 [badges]
 maintenance = { status = "experimental" }
-travis-ci = { repository = "openSUSE/libpathrs" }
 
 [lib]
-crate-type = ["rlib", "cdylib", "staticlib"]
+# When building the CAPI, our Makefile adds --crate-type={cdylib,staticlib}.
+crate-type = ["rlib"]
 
 [features]
+capi = ["dep:rand"]
 # Only used for tests.
 _test_as_root = []
 
@@ -55,7 +56,7 @@ itertools = "^0.13"
 lazy_static = "^1"
 libc = "^0.2"
 memchr = "^2"
-rand = "^0.8"
+rand = { version = "^0.8", optional = true }
 # MSRV(1.65): Use regex >= 1.10.
 regex = "1.9.*"
 rustix = { version = "^0.38", features = ["fs"] }
@@ -72,5 +73,9 @@ pretty_assertions = "^1"
 rustix = { version = "^0.38", features = ["process"] }
 
 [lints.rust]
-# We have special handling for coverage runs (which set cfg(coverage)).
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+	# We have special handling for coverage runs (which set cfg(coverage)).
+	'cfg(coverage)',
+	# We set these cfgs when building with --features=capi.
+	'cfg(cdylib)', 'cfg(staticlib)'
+] }
