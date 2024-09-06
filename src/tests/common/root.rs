@@ -25,6 +25,7 @@ use std::{
 };
 
 use anyhow::{Context, Error};
+use rustix::fs::{self as rustix_fs, OFlags};
 use tempfile::TempDir;
 
 fn mknod<P: AsRef<Path>>(path: P, mode: libc::mode_t, dev: libc::dev_t) -> Result<(), io::Error> {
@@ -43,11 +44,12 @@ fn mknod<P: AsRef<Path>>(path: P, mode: libc::mode_t, dev: libc::dev_t) -> Resul
 macro_rules! create_inode {
     // "/foo/bar" => dir
     ($path:expr => dir) => {
-        fs::create_dir($path).with_context(|| format!("mkdir {}", $path.display()))
+        rustix_fs::mkdir($path, 0o755.into()).with_context(|| format!("mkdir {}", $path.display()))
     };
     // "/foo/bar" => file
     ($path:expr => file) => {
-        fs::write($path, b"").with_context(|| format!("mkfile {}", $path.display()))
+        rustix_fs::open($path, OFlags::CREATE, 0o644.into())
+            .with_context(|| format!("mkfile {}", $path.display()))
     };
     // "/foo/bar" => fifo
     ($path:expr => fifo) => {
