@@ -22,10 +22,9 @@ use crate::{
         ret::IntoCReturn,
         utils::{self, CBorrowedFd},
     },
-    error::{Error, ErrorImpl},
+    error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
     procfs::PROCFS_HANDLE,
-    syscalls,
     utils::FdExt,
     InodeType, Root, RootRef,
 };
@@ -90,13 +89,10 @@ pub extern "C" fn pathrs_reopen(fd: CBorrowedFd<'_>, flags: c_int) -> RawFd {
         fd.try_as_borrowed_fd()?
             .reopen(&PROCFS_HANDLE, flags)
             .and_then(|file| {
-                // Rust sets O_CLOEXEC by default, without an opt-out. We need to
-                // disable it if we weren't asked to do O_CLOEXEC.
+                // Rust sets O_CLOEXEC by default, without an opt-out. We need
+                // to disable it if we weren't asked to do O_CLOEXEC.
                 if !flags.contains(OpenFlags::O_CLOEXEC) {
-                    syscalls::fcntl_unset_cloexec(&file).map_err(|err| ErrorImpl::RawOsError {
-                        operation: "clear O_CLOEXEC on fd".into(),
-                        source: err,
-                    })?;
+                    utils::fcntl_unset_cloexec(&file).wrap("clear O_CLOEXEC on reopened fd")?;
                 }
                 Ok(file)
             })

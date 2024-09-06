@@ -31,7 +31,10 @@ pub mod core;
 /// procfs-related function wrappers.
 pub mod procfs;
 
-/// Helpers for converting Result<...> into C-style int returns.
+/// C-friendly [`Error`](crate::error::Error) representation and helpers.
+pub mod error;
+
+/// Helpers for converting [`Result`] into C-style int returns.
 pub mod ret;
 
 mod utils;

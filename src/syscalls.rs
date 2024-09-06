@@ -104,16 +104,6 @@ impl fmt::Display for FrozenFd {
 /// [`Error`]: crate::error::Error
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
-    #[error("fcntl({fd}, F_GETFD)")]
-    FcntlGetFlags { fd: FrozenFd, source: IOError },
-
-    #[error("fcntl({fd}, F_SETFD, 0x{flags:x})")]
-    FcntlSetFlags {
-        fd: FrozenFd,
-        flags: i32,
-        source: IOError,
-    },
-
     #[error("openat({dirfd}, {path}, 0x{flags:x}, 0o{mode:o})")]
     Openat {
         dirfd: FrozenFd,
@@ -261,8 +251,6 @@ impl Error {
     pub(crate) fn root_cause(&self) -> &IOError {
         // XXX: This should probably be a macro...
         match self {
-            Error::FcntlGetFlags { source, .. } => source,
-            Error::FcntlSetFlags { source, .. } => source,
             Error::Openat { source, .. } => source,
             Error::Openat2 { source, .. } => source,
             Error::Readlinkat { source, .. } => source,
@@ -289,46 +277,6 @@ impl Error {
 //       the interfaces provided by rustix are slightly non-ergonomic. I much
 //       prefer these simpler C-like bindings. We also have the ability to check
 //       for support of each syscall.
-
-/// Wrapper for `fcntl(F_GETFD)` followed by `fcntl(F_SETFD)`, clearing the
-/// `FD_CLOEXEC` bit.
-///
-/// This is required because Rust automatically sets `O_CLOEXEC` on all new
-/// files, so we need to manually unset it when we return certain fds to the C
-/// FFI (in fairness, `O_CLOEXEC` is a good default).
-pub(crate) fn fcntl_unset_cloexec<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
-    let fd = fd.as_fd();
-
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let old = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
-    let err = IOError::last_os_error();
-
-    if old < 0 {
-        Err(Error::FcntlGetFlags {
-            fd: fd.into(),
-            source: err,
-        })?
-    }
-
-    let new = old & !libc::FD_CLOEXEC;
-    if new == old {
-        return Ok(());
-    }
-
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, new) };
-    let err = IOError::last_os_error();
-
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::FcntlSetFlags {
-            fd: fd.into(),
-            flags: new,
-            source: err,
-        })
-    }
-}
 
 /// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
 ///
@@ -856,10 +804,8 @@ pub(crate) fn getegid() -> libc::gid_t {
 
 #[cfg(test)]
 pub(crate) fn getcwd() -> Result<PathBuf, anyhow::Error> {
-    use rustix::process;
-
     let buffer = Vec::with_capacity(libc::PATH_MAX as usize);
-    Ok(OsStr::from_bytes(process::getcwd(buffer)?.to_bytes()).into())
+    Ok(OsStr::from_bytes(rustix::process::getcwd(buffer)?.to_bytes()).into())
 }
 
 bitflags! {

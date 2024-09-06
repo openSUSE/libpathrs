@@ -44,7 +44,7 @@ use std::{
 };
 
 use libc::dev_t;
-use rustix::fs::{self, Dir, SeekFrom};
+use rustix::fs::{self as rustix_fs, Dir, SeekFrom};
 
 /// An inode type to be created with [`Root::create`].
 #[derive(Clone, Debug)]
@@ -927,7 +927,7 @@ impl RootRef<'_> {
             // half-read directory iterator. We have to do this manually rather
             // than using Dir::rewind() because Dir::rewind() just marks the
             // iterator so it is rewinded when the next iteration happens.
-            fs::seek(&next, SeekFrom::Start(0)).map_err(|err| ErrorImpl::OsError {
+            rustix_fs::seek(&next, SeekFrom::Start(0)).map_err(|err| ErrorImpl::OsError {
                 operation: "reset offset of directory handle".into(),
                 source: err.into(),
             })?;

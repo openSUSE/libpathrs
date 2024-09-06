@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{Error, ErrorImpl, ErrorKind};
+use crate::error::{Error, ErrorImpl};
 
 use std::{
     cmp,
@@ -25,13 +25,14 @@ use std::{
     marker::PhantomData,
     os::unix::{
         ffi::OsStrExt,
-        io::{BorrowedFd, RawFd},
+        io::{AsFd, BorrowedFd, RawFd},
     },
     path::Path,
     ptr,
 };
 
 use libc::{c_char, c_int, size_t};
+use rustix::io as rustix_io;
 
 /// Equivalent to [`BorrowedFd`], except that there are no restrictions on what
 /// value the inner [`RawFd`] can take. This is necessary because C callers
@@ -50,8 +51,9 @@ pub struct CBorrowedFd<'fd> {
 }
 
 impl<'fd> CBorrowedFd<'fd> {
-    /// Take a [`CBorrowedFd`] from C FFI and convert it to a proper [`BorrowedFd`]
-    /// after making sure that it has a valid value (ie. is not negative).
+    /// Take a [`CBorrowedFd`] from C FFI and convert it to a proper
+    /// [`BorrowedFd`] after making sure that it has a valid value (ie. is not
+    /// negative).
     pub(crate) fn try_as_borrowed_fd(&self) -> Result<BorrowedFd<'fd>, Error> {
         // TODO: We might want to support AT_FDCWD in the future. The
         //       openat2 resolver handles it correctly, but the O_PATH
@@ -72,6 +74,30 @@ impl<'fd> CBorrowedFd<'fd> {
             Ok(unsafe { BorrowedFd::borrow_raw(self.inner) })
         }
     }
+}
+
+/// Wrapper for `fcntl(F_GETFD)` followed by `fcntl(F_SETFD)`, clearing the
+/// `FD_CLOEXEC` bit.
+///
+/// This is required because Rust automatically sets `O_CLOEXEC` on all new
+/// files, so we need to manually unset it when we return certain fds to the C
+/// FFI (in fairness, `O_CLOEXEC` is a good default).
+pub(crate) fn fcntl_unset_cloexec<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
+    let fd = fd.as_fd();
+
+    let old = rustix_io::fcntl_getfd(fd).map_err(|err| ErrorImpl::OsError {
+        operation: "fcntl(F_GETFD)".into(),
+        source: err.into(),
+    })?;
+    let new = old.difference(rustix_io::FdFlags::CLOEXEC);
+
+    rustix_io::fcntl_setfd(fd, new).map_err(|err| {
+        ErrorImpl::OsError {
+            operation: "fcntl(F_SETFD)".into(),
+            source: err.into(),
+        }
+        .into()
+    })
 }
 
 pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
@@ -110,125 +136,29 @@ pub(crate) fn copy_path_into_buffer<P: AsRef<Path>>(
     Ok(path.to_bytes().len() as c_int)
 }
 
-pub(crate) trait Leakable {
+pub(crate) trait Leakable: Sized {
     /// Leak a structure such that it can be passed through C-FFI.
-    fn leak(self) -> &'static mut Self;
+    fn leak(self) -> &'static mut Self {
+        Box::leak(Box::new(self))
+    }
 
     /// Given a structure leaked through Leakable::leak, un-leak it.
     ///
     /// SAFETY: Callers must be sure to only ever call this once on a given
     /// pointer (otherwise memory corruption will occur).
-    unsafe fn unleak(&'static mut self) -> Self;
+    unsafe fn unleak(&'static mut self) -> Self {
+        // SAFETY: Box::from_raw is safe because the caller guarantees that
+        // the pointer we get is the same one we gave them, and it will only
+        // ever be called once with the same pointer.
+        *unsafe { Box::from_raw(self as *mut Self) }
+    }
 
     /// Shorthand for `std::mem::drop(self.unleak())`.
     ///
     /// SAFETY: Same unsafety issue as `self.unleak()`.
-    unsafe fn free(&'static mut self);
-}
-
-/// A macro to implement the trivial methods of Leakable -- due to a restriction
-/// of the Rust compiler (you cannot have default trait methods that use Self
-/// directly, because the size of Self is not known by the trait).
-///
-/// ```ignore
-/// leakable!{ impl Leakable for CError; }
-/// leakable!{ impl<T> Leakable for CVec<T>; }
-/// ```
-macro_rules! leakable {
-    // Inner implementation.
-    (...) => {
-        fn leak(self) -> &'static mut Self {
-            Box::leak(Box::new(self))
-        }
-
-        unsafe fn unleak(&'static mut self) -> Self {
-            // SAFETY: Box::from_raw is safe because the caller guarantees that
-            // the pointer we get is the same one we gave them, and it will only
-            // ever be called once with the same pointer.
-            *unsafe { Box::from_raw(self as *mut Self) }
-        }
-
-        unsafe fn free(&'static mut self) {
-            // SAFETY: Caller guarantees this is safe to do.
-            let _ = unsafe { self.unleak() };
-            // drop Self
-        }
-    };
-
-    (impl Leakable for $type:ty ;) => {
-        impl Leakable for $type {
-            leakable!(...);
-        }
-    };
-
-    (impl<$($generics:tt),+> Leakable for $type:ty ;) => {
-        impl<$($generics),+> Leakable for $type {
-            leakable!(...);
-        }
-    };
-}
-
-/// Attempts to represent a Rust Error type in C. This structure must be freed
-/// using pathrs_errorinfo_free().
-// NOTE: This API is exposed to library users in a read-only manner with memory
-//       management done by libpathrs -- so you may only ever append to it.
-#[repr(align(8), C)]
-pub struct CError {
-    /// Raw errno(3) value of the underlying error (or 0 if the source of the
-    /// error was not due to a syscall error).
-    // We can't call this field "errno" because glibc defines errno(3) as a
-    // macro, causing all sorts of problems if you have a struct with an "errno"
-    // field. Best to avoid those headaches.
-    pub saved_errno: u64,
-
-    /// Textual description of the error.
-    pub description: *const c_char,
-}
-
-leakable! {
-    impl Leakable for CError;
-}
-
-impl From<&Error> for CError {
-    /// Construct a new CError struct based on the given error. The description
-    /// is pretty-printed in a C-like manner (causes are appended to one another
-    /// with separating colons). In addition, if the root-cause of the error is
-    /// an IOError then errno is populated with that value.
-    fn from(err: &Error) -> Self {
-        let desc = err.iter_chain_hotfix().fold(String::new(), |mut s, next| {
-            if !s.is_empty() {
-                s.push_str(": ");
-            }
-            s.push_str(&next.to_string());
-            s
-        });
-
-        // Create a C-compatible string for CError.description.
-        let desc =
-            CString::new(desc).expect("CString::new(description) failed in CError generation");
-
-        let errno = match err.kind() {
-            ErrorKind::OsError(Some(err)) => err.abs(),
-            _ => 0,
-        };
-
-        CError {
-            saved_errno: errno.try_into().unwrap_or(0),
-            description: desc.into_raw(),
-        }
-    }
-}
-
-impl Drop for CError {
-    fn drop(&mut self) {
-        if !self.description.is_null() {
-            let description = self.description as *mut c_char;
-            // Clear the pointer to avoid double-frees.
-            self.description = ptr::null_mut();
-            // SAFETY: CString::from_raw is safe because the C caller guarantees
-            //         that the pointer we get is the same one we gave them.
-            let _ = unsafe { CString::from_raw(description) };
-            // drop the CString
-        }
+    unsafe fn free(&'static mut self) {
+        // SAFETY: Caller guarantees this is safe to do.
+        let _ = unsafe { self.unleak() };
+        // drop Self
     }
 }
