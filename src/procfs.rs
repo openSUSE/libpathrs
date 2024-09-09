@@ -335,19 +335,20 @@ impl ProcfsHandle {
     /// a magic-link to be a path component (ie. `/proc/self/root/etc/passwd`).
     /// This method *only* permits *trailing* symlinks.
     #[doc(alias = "pathrs_proc_open")]
-    pub fn open_follow<P: AsRef<Path>>(
+    pub fn open_follow<P: AsRef<Path>, F: Into<OpenFlags>>(
         &self,
         base: ProcfsBase,
         subpath: P,
-        mut flags: OpenFlags,
+        oflags: F,
     ) -> Result<File, Error> {
         let subpath = subpath.as_ref();
+        let mut oflags = oflags.into();
 
         // Drop any trailing /-es.
         let (subpath, trailing_slash) = utils::path_strip_trailing_slash(subpath);
         if trailing_slash {
             // A trailing / implies we want O_DIRECTORY.
-            flags.insert(OpenFlags::O_DIRECTORY);
+            oflags.insert(OpenFlags::O_DIRECTORY);
         }
 
         // If the target is not a symlink, use an O_NOFOLLOW open. This defends
@@ -363,7 +364,7 @@ impl ProcfsHandle {
         //       being a magic-link and then another thing being mounted on top.
         //       This is the same race as below.
         if self.readlink(base, subpath).is_err() {
-            return self.open(base, subpath, flags).map(File::from);
+            return self.open(base, subpath, oflags).map(File::from);
         }
 
         // Get a no-follow handle to the parent of the magic-link.
@@ -381,7 +382,7 @@ impl ProcfsHandle {
         // for the ProcfsHandle::{new_fsopen,new_open_tree} cases.
         self.check_mnt_id(&parent, trailing)?;
 
-        syscalls::openat_follow(parent, trailing, flags.bits(), 0)
+        syscalls::openat_follow(parent, trailing, oflags.bits(), 0)
             .map(File::from)
             .map_err(|err| {
                 ErrorImpl::RawOsError {
@@ -426,20 +427,22 @@ impl ProcfsHandle {
     ///
     /// [`openat2(2)`]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
     #[doc(alias = "pathrs_proc_open")]
-    pub fn open<P: AsRef<Path>>(
+    pub fn open<P: AsRef<Path>, F: Into<OpenFlags>>(
         &self,
         base: ProcfsBase,
         subpath: P,
-        mut flags: OpenFlags,
+        oflags: F,
     ) -> Result<File, Error> {
+        let mut oflags = oflags.into();
+
         // Force-set O_NOFOLLOW, though NO_FOLLOW_TRAILING should be sufficient.
-        flags.insert(OpenFlags::O_NOFOLLOW);
+        oflags.insert(OpenFlags::O_NOFOLLOW);
 
         // Do a basic lookup.
         let base = self.open_base(base)?;
         let fd = self
             .resolver
-            .resolve(&base, subpath, flags, ResolverFlags::empty())?;
+            .resolve(&base, subpath, oflags, ResolverFlags::empty())?;
 
         // Detect if the file we landed is in a bind-mount.
         self.check_mnt_id(&fd, "")?;
