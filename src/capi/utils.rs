@@ -25,7 +25,7 @@ use std::{
     marker::PhantomData,
     os::unix::{
         ffi::OsStrExt,
-        io::{AsFd, BorrowedFd, RawFd},
+        io::{AsFd, AsRawFd, BorrowedFd, RawFd},
     },
     path::Path,
     ptr,
@@ -76,6 +76,18 @@ impl<'fd> CBorrowedFd<'fd> {
     }
 }
 
+impl<'fd> From<BorrowedFd<'fd>> for CBorrowedFd<'fd> {
+    fn from(fd: BorrowedFd<'_>) -> CBorrowedFd<'_> {
+        CBorrowedFd {
+            inner: fd.as_raw_fd(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+// TODO: An AsFd impl would be even nicer but I suspect the lifetimes can't be
+//       expressed.
+
 /// Wrapper for `fcntl(F_GETFD)` followed by `fcntl(F_SETFD)`, clearing the
 /// `FD_CLOEXEC` bit.
 ///
@@ -100,7 +112,7 @@ pub(crate) fn fcntl_unset_cloexec<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
     })
 }
 
-pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
+pub(crate) unsafe fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     if path.is_null() {
         Err(ErrorImpl::InvalidArgument {
             name: "path".into(),
@@ -112,7 +124,7 @@ pub(crate) fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     Ok(OsStr::from_bytes(bytes).as_ref())
 }
 
-pub(crate) fn copy_path_into_buffer<P: AsRef<Path>>(
+pub(crate) unsafe fn copy_path_into_buffer<P: AsRef<Path>>(
     path: P,
     buf: *mut c_char,
     bufsize: size_t,

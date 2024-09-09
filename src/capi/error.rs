@@ -167,7 +167,7 @@ impl Drop for CError {
 /// returned describing the error. Use pathrs_errorinfo_free() to free the
 /// associated memory once you are done with the error.
 #[no_mangle]
-pub extern "C" fn pathrs_errorinfo(err_id: c_int) -> Option<&'static mut CError> {
+pub unsafe extern "C" fn pathrs_errorinfo(err_id: c_int) -> Option<&'static mut CError> {
     let mut err_map = ERROR_MAP.lock().unwrap();
 
     err_map
@@ -179,7 +179,7 @@ pub extern "C" fn pathrs_errorinfo(err_id: c_int) -> Option<&'static mut CError>
 
 /// Free the pathrs_error_t object returned by pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_errorinfo_free(ptr: *mut CError) {
+pub unsafe extern "C" fn pathrs_errorinfo_free(ptr: *mut CError) {
     if ptr.is_null() {
         return;
     }

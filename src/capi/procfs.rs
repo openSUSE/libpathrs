@@ -98,9 +98,13 @@ impl From<CProcfsBase> for ProcfsBase {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_proc_open(base: CProcfsBase, path: *const c_char, flags: c_int) -> RawFd {
+pub unsafe extern "C" fn pathrs_proc_open(
+    base: CProcfsBase,
+    path: *const c_char,
+    flags: c_int,
+) -> RawFd {
     || -> Result<_, Error> {
-        let path = utils::parse_path(path)?;
+        let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let oflags = OpenFlags::from_bits_retain(flags);
 
         match oflags.contains(OpenFlags::O_NOFOLLOW) {
@@ -149,18 +153,18 @@ pub extern "C" fn pathrs_proc_open(base: CProcfsBase, path: *const c_char, flags
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub extern "C" fn pathrs_proc_readlink(
+pub unsafe extern "C" fn pathrs_proc_readlink(
     base: CProcfsBase,
     path: *const c_char,
     linkbuf: *mut c_char,
     linkbuf_size: size_t,
 ) -> c_int {
     || -> Result<_, Error> {
-        let path = utils::parse_path(path)?;
-
+        let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let link_target = PROCFS_HANDLE.readlink(base.into(), path)?;
-
-        utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size)
+        // SAFETY: C caller guarantees buffer is at least linkbuf_size and can
+        // be written to.
+        unsafe { utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size) }
     }()
     .into_c_return()
 }
