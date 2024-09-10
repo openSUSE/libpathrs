@@ -19,6 +19,9 @@
 
 pub(crate) mod common;
 
+pub(in crate::tests) mod traits;
+
 mod test_procfs;
 mod test_resolve;
+mod test_resolve_partial;
 mod test_root_ops;

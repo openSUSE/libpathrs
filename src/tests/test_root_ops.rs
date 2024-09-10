@@ -42,10 +42,39 @@ macro_rules! root_op_tests {
 
             $(#[$meta])*
             #[test]
+            fn [<rootref_ $test_name>]() -> Result<(), Error> {
+                let root_dir = tests_common::create_basic_tree()?;
+                let root = Root::open(&root_dir)?;
+                let $root_var = root.as_ref();
+
+                $body
+            }
+
+            $(#[$meta])*
+            #[test]
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let mut $root_var = Root::open(&root_dir)?;
                 $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
+                if !$root_var.resolver.backend.supported() {
+                    // Skip if not supported.
+                    return Ok(());
+                }
+
+                $body
+            }
+
+            $(#[$meta])*
+            #[test]
+            fn [<rootref_ $test_name _openat2>]() -> Result<(), Error> {
+                let root_dir = tests_common::create_basic_tree()?;
+                let root = Root::open(&root_dir)?;
+                let mut $root_var = root.as_ref();
+                $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
+                if !$root_var.resolver.backend.supported() {
+                    // Skip if not supported.
+                    return Ok(());
+                }
 
                 $body
             }
@@ -56,6 +85,27 @@ macro_rules! root_op_tests {
                 let root_dir = tests_common::create_basic_tree()?;
                 let mut $root_var = Root::open(&root_dir)?;
                 $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
+                // EmulatedOpath is always supported.
+                assert!(
+                    $root_var.resolver.backend.supported(),
+                    "emulated opath is always supported",
+                );
+
+                $body
+            }
+
+            $(#[$meta])*
+            #[test]
+            fn [<rootref_ $test_name _opath>]() -> Result<(), Error> {
+                let root_dir = tests_common::create_basic_tree()?;
+                let root = Root::open(&root_dir)?;
+                let mut $root_var = root.as_ref();
+                $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
+                // EmulatedOpath is always supported.
+                assert!(
+                    $root_var.resolver.backend.supported(),
+                    "emulated opath is always supported",
+                );
 
                 $body
             }
@@ -328,13 +378,14 @@ root_op_tests! {
 
 mod utils {
     use crate::{
-        error::{Error as PathrsError, ErrorExt, ErrorKind},
+        error::{ErrorExt, ErrorKind},
         flags::{OpenFlags, RenameFlags},
         procfs::PROCFS_HANDLE,
         resolvers::PartialLookup,
         syscalls,
+        tests::traits::{ErrorImpl, RootImpl},
         utils::{self, FdExt, PathIterExt},
-        InodeType, Root,
+        InodeType,
     };
 
     use std::{
@@ -350,21 +401,20 @@ mod utils {
     use libc::mode_t;
     use pretty_assertions::{assert_eq, assert_ne};
 
-    fn root_roundtrip(root: &Root) -> Result<Root, Error> {
+    fn root_roundtrip<R: RootImpl>(root: R) -> Result<R::Cloned, Error> {
         let root_clone = root.try_clone()?;
         assert_eq!(
-            root.resolver, root_clone.resolver,
+            root.resolver(),
+            root_clone.resolver(),
             "cloned root should have the same resolver settings"
         );
         let root_fd: OwnedFd = root_clone.into();
 
-        let mut new_root = Root::from_fd_unchecked(root_fd);
-        new_root.resolver = root.resolver;
-        Ok(new_root)
+        Ok(R::from_fd_unchecked(root_fd, root.resolver()))
     }
 
-    pub(super) fn check_root_create<P: AsRef<Path>>(
-        root: &Root,
+    pub(super) fn check_root_create<R: RootImpl, P: AsRef<Path>>(
+        root: R,
         path: P,
         inode_type: InodeType,
         expected_result: Result<(&str, mode_t), ErrorKind>,
@@ -430,8 +480,8 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_create_file<P: AsRef<Path>>(
-        root: &Root,
+    pub(super) fn check_root_create_file<R: RootImpl, P: AsRef<Path>>(
+        root: R,
         path: P,
         oflags: OpenFlags,
         perm: &Permissions,
@@ -497,22 +547,22 @@ mod utils {
         Ok(())
     }
 
-    fn check_root_remove<F>(
-        root: &Root,
+    fn check_root_remove<R: RootImpl, F>(
+        root: R,
         path: &Path,
         remove_fn: F,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error>
     where
-        F: FnOnce(&Root, &Path) -> Result<(), PathrsError>,
+        F: FnOnce(&R, &Path) -> Result<(), R::Error>,
     {
         // Get a handle before we remove the path, to make sure the actual inode
         // was unlinked.
         let handle = root.resolve_nofollow(path); // do not unwrap
 
-        let res = remove_fn(root, path);
+        let res = remove_fn(&root, path);
         assert_eq!(
-            res.as_ref().err().map(PathrsError::kind),
+            res.as_ref().err().map(R::Error::kind),
             expected_result.err(),
             "unexpected result {res:?}"
         );
@@ -526,7 +576,7 @@ mod utils {
             let root = root_roundtrip(root)?;
             let new_lookup = root.resolve_nofollow(path);
             assert_eq!(
-                new_lookup.as_ref().map_err(PathrsError::kind).err(),
+                new_lookup.as_ref().map_err(R::Error::kind).err(),
                 Some(ErrorKind::OsError(Some(libc::ENOENT))),
                 "path should not exist after deletion, got {new_lookup:?}"
             );
@@ -534,8 +584,8 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_remove_dir<P: AsRef<Path>>(
-        root: &Root,
+    pub(super) fn check_root_remove_dir<R: RootImpl, P: AsRef<Path>>(
+        root: R,
         path: P,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
@@ -547,8 +597,8 @@ mod utils {
         )
     }
 
-    pub(super) fn check_root_remove_file<P: AsRef<Path>>(
-        root: &Root,
+    pub(super) fn check_root_remove_file<R: RootImpl, P: AsRef<Path>>(
+        root: R,
         path: P,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
@@ -560,8 +610,8 @@ mod utils {
         )
     }
 
-    pub(super) fn check_root_remove_all<P: AsRef<Path>>(
-        root: &Root,
+    pub(super) fn check_root_remove_all<R: RootImpl, P: AsRef<Path>>(
+        root: R,
         path: P,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
@@ -573,8 +623,8 @@ mod utils {
         )
     }
 
-    pub(super) fn check_root_rename<P1: AsRef<Path>, P2: AsRef<Path>>(
-        root: &Root,
+    pub(super) fn check_root_rename<R: RootImpl, P1: AsRef<Path>, P2: AsRef<Path>>(
+        root: R,
         src_path: P1,
         dst_path: P2,
         rflags: RenameFlags,
@@ -598,7 +648,7 @@ mod utils {
 
         let res = root.rename(src_path, dst_path, rflags);
         assert_eq!(
-            res.as_ref().err().map(PathrsError::kind),
+            res.as_ref().err().map(R::Error::kind),
             expected_result.err(),
             "unexpected result {res:?}"
         );
@@ -664,17 +714,18 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_mkdir_all<P: AsRef<Path>>(
-        root: &Root,
+    pub(super) fn check_root_mkdir_all<R: RootImpl, P: AsRef<Path>>(
+        root: R,
         unsafe_path: P,
         perm: Permissions,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
+        let root = &root;
         let unsafe_path = unsafe_path.as_ref();
 
         // Before trying to create the directory tree, figure out what
         // components don't exist yet so we can check them later.
-        let before_partial_lookup = root.resolver.resolve_partial(root, unsafe_path, false)?;
+        let before_partial_lookup = root.resolver().resolve_partial(root, unsafe_path, false)?;
 
         let expected_mode = match expected_result {
             Ok(_) => Some(libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&PROCFS_HANDLE))?)),
@@ -685,7 +736,7 @@ mod utils {
             .mkdir_all(unsafe_path, &perm)
             .with_wrap(|| format!("mkdir_all {unsafe_path:?}"));
         assert_eq!(
-            res.as_ref().err().map(PathrsError::kind),
+            res.as_ref().err().map(R::Error::kind),
             expected_result.err(),
             "unexpected result {:?}",
             res.map_err(|err| err.to_string())
