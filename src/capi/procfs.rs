@@ -61,6 +61,15 @@ impl From<CProcfsBase> for ProcfsBase {
     }
 }
 
+impl From<ProcfsBase> for CProcfsBase {
+    fn from(base: ProcfsBase) -> Self {
+        match base {
+            ProcfsBase::ProcSelf => CProcfsBase::PATHRS_PROC_SELF,
+            ProcfsBase::ProcThreadSelf => CProcfsBase::PATHRS_PROC_THREAD_SELF,
+        }
+    }
+}
+
 /// Safely open a path inside a `/proc` handle.
 ///
 /// Any bind-mounts or other over-mounts will (depending on what kernel features

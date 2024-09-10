@@ -17,6 +17,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(feature = "capi")]
+use crate::tests::capi::CapiRoot;
 use crate::{
     error::ErrorKind, flags::ResolverFlags, tests::common as tests_common, ResolverBackend, Root,
 };
@@ -32,7 +34,7 @@ macro_rules! resolve_tests {
     //          test_err: resolve(...) => Err(ErrorKind::...)
     //      }
     // }
-    ([$root_dir:expr] fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
+    ([$root_dir:expr] rust-fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
         paste::paste! {
             #[test]
             fn [<root_ $test_name _default>]() -> Result<(), Error> {
@@ -133,13 +135,47 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
+    ([$root_dir:expr] capi-fn $test_name:ident ($root_var:ident : CapiRoot) $body:block => $expected:expr) => {
+        paste::paste! {
+            #[cfg(feature = "capi")]
+            #[test]
+            fn [<capi_root_ $test_name>]() -> Result<(), Error> {
+                let root_dir = $root_dir;
+                let $root_var = CapiRoot::open(&root_dir)?;
+
+                { $body }
+
+                // Make sure root_dir is not dropped earlier.
+                let _root_dir = root_dir;
+                Ok(())
+            }
+        }
+    };
+
+    ([$root_dir:expr] @rust-impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
         paste::paste! {
             resolve_tests! {
                 [$root_dir]
-                fn [<$op_name _ $test_name>](mut root: Root) {
+                rust-fn [<$op_name _ $test_name>](mut root: Root) {
                     root.resolver.flags = $rflags;
 
+                    let expected = $expected;
+                    utils::[<check_root_ $op_name>](
+                        &root,
+                        $path,
+                        $no_follow_trailing,
+                        expected,
+                    )?;
+                } => $expected
+            }
+        }
+    };
+
+    ([$root_dir:expr] @capi-impl $test_name:ident $op_name:ident ($path:expr, $no_follow_trailing:expr) => $expected:expr) => {
+        paste::paste! {
+            resolve_tests! {
+                [$root_dir]
+                capi-fn [<$op_name _ $test_name>](root: CapiRoot) {
                     let expected = $expected;
                     utils::[<check_root_ $op_name>](
                         &root,
@@ -155,21 +191,30 @@ macro_rules! resolve_tests {
     ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
-            @impl $test_name $op_name($path, $(ResolverFlags::$rflag)|*, false) => $expected
+            @rust-impl $test_name $op_name($path, $(ResolverFlags::$rflag)|*, false) => $expected
         }
+        // The C API doesn't support custom ResolverFlags.
     };
 
     ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
-            @impl $test_name $op_name($path, ResolverFlags::empty(), $no_follow_trailing) => $expected
+            @rust-impl $test_name $op_name($path, ResolverFlags::empty(), $no_follow_trailing) => $expected
+        }
+        resolve_tests! {
+            [$root_dir]
+            @capi-impl $test_name $op_name($path, $no_follow_trailing) => $expected
         }
     };
 
     ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
-            @impl $test_name $op_name($path, ResolverFlags::empty(), false) => $expected
+            @rust-impl $test_name $op_name($path, ResolverFlags::empty(), false) => $expected
+        }
+        resolve_tests! {
+            [$root_dir]
+            @capi-impl $test_name $op_name($path, false) => $expected
         }
     };
 

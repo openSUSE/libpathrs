@@ -17,13 +17,15 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-pub(crate) mod common;
+#![allow(unsafe_code)]
 
-#[cfg(feature = "capi")]
-pub(in crate::tests) mod capi;
-pub(in crate::tests) mod traits;
+mod utils;
 
-mod test_procfs;
-mod test_resolve;
-mod test_resolve_partial;
-mod test_root_ops;
+mod root;
+pub(in crate::tests) use root::*;
+
+mod handle;
+pub(in crate::tests) use handle::*;
+
+mod procfs;
+pub(in crate::tests) use procfs::*;

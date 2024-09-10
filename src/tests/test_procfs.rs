@@ -17,6 +17,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(feature = "capi")]
+use crate::tests::capi::CapiProcfsHandle;
 use crate::{
     error::ErrorKind,
     flags::OpenFlags,
@@ -30,7 +32,7 @@ use anyhow::Error;
 
 macro_rules! procfs_tests {
     // Create the actual test functions.
-    (@fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
+    (@rust-fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
         paste::paste! {
             #[test]
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
@@ -81,35 +83,62 @@ macro_rules! procfs_tests {
         }
     };
 
+    // Create the actual test function for the C API.
+    (@capi-fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
+        paste::paste! {
+            #[test]
+            #[cfg(feature = "capi")]
+            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            fn [<procfs_overmounts_ $func_prefix $test_name>]() -> Result<(), Error> {
+                utils::[<check_proc_ $procfs_op>](
+                    || $procfs_inst,
+                    $($args,)*
+                    $over_mounts,
+                    ExpectedResult::$expect_error,
+                )
+            }
+        }
+    };
+
     // Create a test for each ProcfsHandle::new_* method.
     (@impl $test_name:ident $procfs_var:ident . $procfs_op:ident ($($args:tt)*) => ($($tt:tt)*) ;) => {
         procfs_tests! {
-            @fn [<new_ $test_name>]
+            @rust-fn [<new_ $test_name>]
                 { ProcfsHandle::new() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<new_fsopen_ $test_name>]
+            @rust-fn [<new_fsopen_ $test_name>]
                 { ProcfsHandle::new_fsopen() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<new_open_tree_ $test_name>]
+            @rust-fn [<new_open_tree_ $test_name>]
                 {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE)
                 }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<new_open_tree_recursive_ $test_name>]
+            @rust-fn [<new_open_tree_recursive_ $test_name>]
                 {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE | OpenTreeFlags::AT_RECURSIVE)
                 }.$procfs_op($($args)*) => (over_mounts: true, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<new_unsafe_open_ $test_name>]
+            @rust-fn [<new_unsafe_open_ $test_name>]
                 { ProcfsHandle::new_unsafe_open() }.$procfs_op($($args)*) => (over_mounts: true, $($tt)*);
+        }
+
+        // Assume that PROCFS_HANDLE is fsopen(2)-based.
+        //
+        // TODO: Figure out the fd type of PROCFS_HANDLE. In principle we would
+        // expect to be able to do fsopen(2) (otherwise the fsopen(2) tests will
+        // fail) but it would be nice to avoid possible spurrious errors.
+        procfs_tests! {
+            @capi-fn [<capi_ $test_name>]
+                { Ok(CapiProcfsHandle) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
     };
 

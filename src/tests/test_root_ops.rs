@@ -17,6 +17,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(feature = "capi")]
+use crate::tests::capi;
 use crate::{
     error::ErrorKind,
     flags::{OpenFlags, RenameFlags},
@@ -106,6 +108,16 @@ macro_rules! root_op_tests {
                     $root_var.resolver.backend.supported(),
                     "emulated opath is always supported",
                 );
+
+                $body
+            }
+
+            $(#[$meta])*
+            #[cfg(feature = "capi")]
+            #[test]
+            fn [<capi_root_ $test_name>]() -> Result<(), Error> {
+                let root_dir = tests_common::create_basic_tree()?;
+                let $root_var = capi::CapiRoot::open(&root_dir)?;
 
                 $body
             }
