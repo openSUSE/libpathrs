@@ -481,16 +481,49 @@ mod utils {
             libc::S_IFDIR => {
                 tests_common::check_reopen(&handle, OpenFlags::O_RDONLY, None)?;
                 tests_common::check_reopen(&handle, OpenFlags::O_DIRECTORY, None)?;
+                // Forcefully set O_CLOEXEC.
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_RDONLY | OpenFlags::O_CLOEXEC,
+                    None,
+                )?;
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_DIRECTORY | OpenFlags::O_CLOEXEC,
+                    None,
+                )?;
             }
             libc::S_IFREG => {
                 tests_common::check_reopen(&handle, OpenFlags::O_RDWR, None)?;
                 tests_common::check_reopen(&handle, OpenFlags::O_DIRECTORY, Some(libc::ENOTDIR))?;
+                // Forcefully set O_CLOEXEC.
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_RDWR | OpenFlags::O_CLOEXEC,
+                    None,
+                )?;
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_DIRECTORY | OpenFlags::O_CLOEXEC,
+                    Some(libc::ENOTDIR),
+                )?;
             }
             _ => {
                 tests_common::check_reopen(&handle, OpenFlags::O_PATH, None)?;
                 tests_common::check_reopen(
                     &handle,
                     OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
+                    Some(libc::ENOTDIR),
+                )?;
+                // Forcefully set O_CLOEXEC.
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_CLOEXEC,
+                    None,
+                )?;
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_DIRECTORY | OpenFlags::O_CLOEXEC,
                     Some(libc::ENOTDIR),
                 )?;
             }

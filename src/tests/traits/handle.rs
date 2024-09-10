@@ -28,6 +28,10 @@ pub(in crate::tests) trait HandleImpl: AsFd + std::fmt::Debug + Sized {
     type Cloned: HandleImpl<Error = Self::Error> + Into<OwnedFd>;
     type Error: ErrorImpl;
 
+    // Does the implementation force O_CLOEXEC for reopen() even if the user
+    // didn't ask for it?
+    const FORCED_CLOEXEC: bool;
+
     // NOTE: We return Self::Cloned so that we can share types with HandleRef.
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned;
 
@@ -39,6 +43,9 @@ pub(in crate::tests) trait HandleImpl: AsFd + std::fmt::Debug + Sized {
 impl HandleImpl for Handle {
     type Cloned = Handle;
     type Error = Error;
+
+    // Rust impl forces O_CLOEXEC by default.
+    const FORCED_CLOEXEC: bool = true;
 
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
         Self::Cloned::from_fd_unchecked(fd)
@@ -57,6 +64,9 @@ impl HandleImpl for &Handle {
     type Cloned = Handle;
     type Error = Error;
 
+    // Rust impl forces O_CLOEXEC by default.
+    const FORCED_CLOEXEC: bool = true;
+
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
         Self::Cloned::from_fd_unchecked(fd)
     }
@@ -74,6 +84,9 @@ impl HandleImpl for HandleRef<'_> {
     type Cloned = Handle;
     type Error = Error;
 
+    // Rust impl forces O_CLOEXEC by default.
+    const FORCED_CLOEXEC: bool = true;
+
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
         Self::Cloned::from_fd_unchecked(fd)
     }
@@ -90,6 +103,9 @@ impl HandleImpl for HandleRef<'_> {
 impl HandleImpl for &HandleRef<'_> {
     type Cloned = Handle;
     type Error = Error;
+
+    // Rust impl forces O_CLOEXEC by default.
+    const FORCED_CLOEXEC: bool = true;
 
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
         Self::Cloned::from_fd_unchecked(fd)
