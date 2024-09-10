@@ -30,74 +30,86 @@ use anyhow::Error;
 
 macro_rules! procfs_tests {
     // Create the actual test functions.
-    (@fn [<$func_prefix:ident $test_name:ident>] $procfs_var:ident = { $procfs_inst:expr } <- $do_test:expr => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
+    (@fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
         paste::paste! {
             #[test]
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
-            fn [<$func_prefix $test_name>]() -> Result<(), Error> {
-                utils::in_mnt_ns_with_overmounts($over_mounts, ExpectedResult::$expect_error, || {
-                    let $procfs_var = { $procfs_inst } ?;
-                    $do_test
-                })
+            fn [<procfs_overmounts_ $func_prefix $test_name>]() -> Result<(), Error> {
+                utils::[<check_proc_ $procfs_op>](
+                    || $procfs_inst,
+                    $($args,)*
+                    $over_mounts,
+                    ExpectedResult::$expect_error,
+                )
             }
 
             #[test]
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
-            fn [<$func_prefix openat2_ $test_name>]() -> Result<(), Error> {
+            fn [<procfs_overmounts_ $func_prefix openat2_ $test_name>]() -> Result<(), Error> {
                 if !*syscalls::OPENAT2_IS_SUPPORTED {
                     // skip this test
                     return Ok(());
                 }
-                utils::in_mnt_ns_with_overmounts($over_mounts, ExpectedResult::$expect_error, || {
-                    let mut $procfs_var = { $procfs_inst } ?;
-                    // Force openat2 resolver.
-                    $procfs_var.resolver = ProcfsResolver::Openat2;
-                    $do_test
-                })
+                utils::[<check_proc_ $procfs_op>](
+                    || {
+                        let mut proc = $procfs_inst ?;
+                        // Force openat2 resolver.
+                        proc.resolver = ProcfsResolver::Openat2;
+                        Ok(proc)
+                    },
+                    $($args,)*
+                    $over_mounts,
+                    ExpectedResult::$expect_error,
+                )
             }
 
             #[test]
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
-            fn [<$func_prefix opath_ $test_name>]() -> Result<(), Error> {
-                utils::in_mnt_ns_with_overmounts($over_mounts, ExpectedResult::$expect_error, || {
-                    let mut $procfs_var = { $procfs_inst } ?;
-                    // Force opath resolver.
-                    $procfs_var.resolver = ProcfsResolver::RestrictedOpath;
-                    $do_test
-                })
+            fn [<procfs_overmounts_ $func_prefix opath_ $test_name>]() -> Result<(), Error> {
+                utils::[<check_proc_ $procfs_op>](
+                    || {
+                        let mut proc = $procfs_inst ?;
+                        // Force opath resolver.
+                        proc.resolver = ProcfsResolver::RestrictedOpath;
+                        Ok(proc)
+                    },
+                    $($args,)*
+                    $over_mounts,
+                    ExpectedResult::$expect_error,
+                )
             }
         }
     };
 
     // Create a test for each ProcfsHandle::new_* method.
-    (@impl $test_name:ident $procfs_var:ident <- $do_test:expr => ($($tt:tt)*) ;) => {
+    (@impl $test_name:ident $procfs_var:ident . $procfs_op:ident ($($args:tt)*) => ($($tt:tt)*) ;) => {
         procfs_tests! {
-            @fn [<procfs_overmounts_new_ $test_name>]
-                $procfs_var = { ProcfsHandle::new() } <- $do_test => (over_mounts: false, $($tt)*);
+            @fn [<new_ $test_name>]
+                { ProcfsHandle::new() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<procfs_overmounts_new_fsopen_ $test_name>]
-                $procfs_var = { ProcfsHandle::new_fsopen() } <- $do_test => (over_mounts: false, $($tt)*);
+            @fn [<new_fsopen_ $test_name>]
+                { ProcfsHandle::new_fsopen() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<procfs_overmounts_new_open_tree_ $test_name>]
-                $procfs_var = {
+            @fn [<new_open_tree_ $test_name>]
+                {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE)
-                } <- $do_test => (over_mounts: false, $($tt)*);
+                }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<procfs_overmounts_new_open_tree_recursive_ $test_name>]
-                $procfs_var = {
+            @fn [<new_open_tree_recursive_ $test_name>]
+                {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE | OpenTreeFlags::AT_RECURSIVE)
-                } <- $do_test => (over_mounts: true, $($tt)*);
+                }.$procfs_op($($args)*) => (over_mounts: true, $($tt)*);
         }
 
         procfs_tests! {
-            @fn [<procfs_overmounts_new_unsafe_open $test_name>]
-                $procfs_var = { ProcfsHandle::new_unsafe_open() } <- $do_test => (over_mounts: true, $($tt)*);
+            @fn [<new_unsafe_open_ $test_name>]
+                { ProcfsHandle::new_unsafe_open() }.$procfs_op($($args)*) => (over_mounts: true, $($tt)*);
         }
     };
 
@@ -106,11 +118,11 @@ macro_rules! procfs_tests {
         paste::paste! {
             procfs_tests! {
                 @impl [<self_readlink_ $test_name>]
-                    procfs <- procfs.readlink(ProcfsBase::ProcSelf, $path) => ($($tt)*);
+                    procfs.readlink(ProcfsBase::ProcSelf, $path) => ($($tt)*);
             }
             procfs_tests! {
                 @impl [<threadself_readlink_ $test_name>]
-                    procfs <- procfs.readlink(ProcfsBase::ProcThreadSelf, $path) => ($($tt)*);
+                    procfs.readlink(ProcfsBase::ProcThreadSelf, $path) => ($($tt)*);
             }
         }
     };
@@ -120,11 +132,11 @@ macro_rules! procfs_tests {
         paste::paste! {
             procfs_tests! {
                 @impl [<self_open_ $test_name>]
-                    procfs <- procfs.open(ProcfsBase::ProcSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
+                    procfs.open(ProcfsBase::ProcSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }
             procfs_tests! {
                 @impl [<threadself_open_ $test_name>]
-                    procfs <- procfs.open(ProcfsBase::ProcThreadSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
+                    procfs.open(ProcfsBase::ProcThreadSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }
         }
     };
@@ -134,11 +146,11 @@ macro_rules! procfs_tests {
         paste::paste! {
             procfs_tests! {
                 @impl [<self_open_follow_ $test_name>]
-                    procfs <- procfs.open_follow(ProcfsBase::ProcSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
+                    procfs.open_follow(ProcfsBase::ProcSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }
             procfs_tests! {
                 @impl [<threadself_open_follow_ $test_name>]
-                    procfs <- procfs.open_follow(ProcfsBase::ProcThreadSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
+                    procfs.open_follow(ProcfsBase::ProcThreadSelf, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }
         }
     };
@@ -183,7 +195,9 @@ procfs_tests! {
     // TODO: root can always open procfs files with O_RDWR even if writes fail.
     // proc_nowrite: open("status", O_RDWR) => (error: Err(ErrorKind::OsError(Some(libc::EACCES))));
     proc_dotdot_escape: open_follow("../..", O_PATH) => (error: Err(ErrorKind::OsError(Some(libc::EXDEV))));
-    // TODO: openat2(RESOLVE_BENEATH) seems to handle "fd/../.." incorrectly (-EAGAIN), and "fd/.." is allowed.
+    // TODO: openat2(RESOLVE_BENEATH) does not block all ".." components unlike
+    //       our custom resolver, so "fd/.." has different results based on the
+    //       resolver.
     // proc_dotdot_escape: open_follow("fd/../..", O_PATH) => (error: Err(ErrorKind::OsError(Some(libc::EXDEV))));
     // proc_dotdot: open_follow("fd/..", O_PATH) => (error: Err(ErrorKind::OsError(Some(libc::EXDEV))));
     proc_magic_component: open("root/etc/passwd", O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ELOOP))));
@@ -196,11 +210,19 @@ procfs_tests! {
 }
 
 mod utils {
-    use std::{fmt::Debug, path::PathBuf};
+    use std::{
+        fmt::Debug,
+        path::{Path, PathBuf},
+    };
 
     use crate::{
-        error::{Error as PathrsError, ErrorKind},
-        tests::common::{self as tests_common, MountType},
+        error::ErrorKind,
+        flags::OpenFlags,
+        procfs::ProcfsBase,
+        tests::{
+            common::{self as tests_common, MountType},
+            traits::{ErrorImpl, ProcfsHandleImpl},
+        },
     };
 
     use anyhow::Error;
@@ -212,8 +234,8 @@ mod utils {
         ErrOvermount(ErrorKind),
     }
 
-    fn check_proc_error<T: Debug>(
-        res: Result<T, PathrsError>,
+    fn check_proc_error<T: Debug, E: ErrorImpl>(
+        res: Result<T, E>,
         over_mounts: bool,
         expected: ExpectedResult,
     ) {
@@ -229,7 +251,7 @@ mod utils {
             }
         };
         assert_eq!(
-            res.as_ref().err().map(PathrsError::kind),
+            res.as_ref().err().map(E::kind),
             want_error,
             "unexpected result for overmounts={} got {:?} (expected error {:?})",
             over_mounts,
@@ -238,14 +260,15 @@ mod utils {
         );
     }
 
-    pub(super) fn in_mnt_ns_with_overmounts<T, F>(
+    fn in_mnt_ns_with_overmounts<T, E, F>(
         are_over_mounts_visible: bool,
         expected: ExpectedResult,
         func: F,
     ) -> Result<(), Error>
     where
         T: Debug,
-        F: FnOnce() -> Result<T, PathrsError>,
+        E: ErrorImpl,
+        F: FnOnce() -> Result<T, E>,
     {
         tests_common::in_mnt_ns(|| {
             // Add some overmounts to /proc/self and /proc/thread-self.
@@ -287,6 +310,56 @@ mod utils {
             let res = func();
             check_proc_error(res, are_over_mounts_visible, expected);
             Ok(())
+        })
+    }
+
+    pub(super) fn check_proc_open<Proc, ProcFn, P: AsRef<Path>, F: Into<OpenFlags>>(
+        proc_fn: ProcFn,
+        base: ProcfsBase,
+        path: P,
+        oflags: F,
+        are_over_mounts_visible: bool,
+        expected: ExpectedResult,
+    ) -> Result<(), Error>
+    where
+        Proc: ProcfsHandleImpl,
+        ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
+    {
+        in_mnt_ns_with_overmounts(are_over_mounts_visible, expected, || {
+            proc_fn()?.open(base, path, oflags)
+        })
+    }
+
+    pub(super) fn check_proc_open_follow<Proc, ProcFn, P: AsRef<Path>, F: Into<OpenFlags>>(
+        proc_fn: ProcFn,
+        base: ProcfsBase,
+        path: P,
+        oflags: F,
+        are_over_mounts_visible: bool,
+        expected: ExpectedResult,
+    ) -> Result<(), Error>
+    where
+        Proc: ProcfsHandleImpl,
+        ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
+    {
+        in_mnt_ns_with_overmounts(are_over_mounts_visible, expected, || {
+            proc_fn()?.open_follow(base, path, oflags)
+        })
+    }
+
+    pub(super) fn check_proc_readlink<Proc, ProcFn, P: AsRef<Path>>(
+        proc_fn: ProcFn,
+        base: ProcfsBase,
+        path: P,
+        are_over_mounts_visible: bool,
+        expected: ExpectedResult,
+    ) -> Result<(), Error>
+    where
+        Proc: ProcfsHandleImpl,
+        ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
+    {
+        in_mnt_ns_with_overmounts(are_over_mounts_visible, expected, || {
+            proc_fn()?.readlink(base, path)
         })
     }
 }

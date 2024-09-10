@@ -26,5 +26,8 @@ pub(in crate::tests) use root::*;
 mod handle;
 pub(in crate::tests) use handle::*;
 
+mod procfs;
+pub(in crate::tests) use procfs::*;
+
 mod error;
 pub(in crate::tests) use error::*;
