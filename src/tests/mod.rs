@@ -19,6 +19,11 @@
 
 pub(crate) mod common;
 
+#[cfg(feature = "capi")]
+pub(in crate::tests) mod capi;
+pub(in crate::tests) mod traits;
+
 mod test_procfs;
 mod test_resolve;
+mod test_resolve_partial;
 mod test_root_ops;

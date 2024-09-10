@@ -17,11 +17,17 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod root;
-pub(crate) use root::*;
+// TODO: Unless we can figure out a way to get Deref working, we might want to
+//       have these traits be included in the actual library...
 
-mod mntns;
-pub(in crate::tests) use mntns::*;
+mod root;
+pub(in crate::tests) use root::*;
 
 mod handle;
 pub(in crate::tests) use handle::*;
+
+mod procfs;
+pub(in crate::tests) use procfs::*;
+
+mod error;
+pub(in crate::tests) use error::*;

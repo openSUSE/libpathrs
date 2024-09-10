@@ -136,6 +136,12 @@ includedir="${includedir:-$prefix/include}"
 libdir="${libdir:-$(find_libdir "$exec_prefix")}"
 pkgconfigdir="${pkgconfigdir:-$libdir/pkgconfig}"
 
+# TODO: These flags come from RUSTFLAGS="--print=native-static-libs".
+# Unfortunately, getting this information from cargo is incredibly unergonomic
+# and will hopefully be fixed at some point.
+# <https://github.com/rust-lang/rust/pull/43067#issuecomment-330625316>
+native_static_libs="-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc"
+
 echo "[pkg-config] generating pathrs pkg-config"
 cat >"pathrs.pc" <<EOF
 # libpathrs: safe path resolution on Linux
@@ -165,6 +171,7 @@ Description: Safe path resolution library for Linux
 URL: https://github.com/openSUSE/libpathrs
 Cflags: -I\${includedir}
 Libs: -L\${libdir} -lpathrs
+Libs.private: $native_static_libs
 EOF
 
 echo "[install] installing libpathrs into DESTDIR=${DESTDIR:-/}"

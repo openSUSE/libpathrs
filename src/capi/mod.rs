@@ -20,10 +20,6 @@
 // We need to permit unsafe code because we are exposing C APIs over FFI and
 // thus need to interact with C callers.
 #![allow(unsafe_code)]
-// None of this code is reachable from rust, so including it in coverage doesn't
-// make sense.
-// TODO: We might want to test the cffi bindings from Rust at some point?
-#![cfg_attr(coverage, coverage(off))]
 
 /// Core pathrs function wrappers.
 pub mod core;
@@ -31,7 +27,10 @@ pub mod core;
 /// procfs-related function wrappers.
 pub mod procfs;
 
-/// Helpers for converting Result<...> into C-style int returns.
+/// C-friendly [`Error`](crate::error::Error) representation and helpers.
+pub mod error;
+
+/// Helpers for converting [`Result`] into C-style int returns.
 pub mod ret;
 
 mod utils;

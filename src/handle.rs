@@ -110,7 +110,7 @@ impl Handle {
     /// [`Root::create`]: crate::Root::create
     #[doc(alias = "pathrs_reopen")]
     #[inline]
-    pub fn reopen<Fd: Into<OpenFlags>>(&self, flags: Fd) -> Result<File, Error> {
+    pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
         self.as_ref().reopen(flags)
     }
 }

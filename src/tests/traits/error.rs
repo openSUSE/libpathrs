@@ -17,11 +17,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod root;
-pub(crate) use root::*;
+use crate::error::{Error, ErrorExt, ErrorKind};
 
-mod mntns;
-pub(in crate::tests) use mntns::*;
+pub(in crate::tests) trait ErrorImpl:
+    std::error::Error + ErrorExt + Send + Sync + 'static
+{
+    fn kind(&self) -> ErrorKind;
+}
 
-mod handle;
-pub(in crate::tests) use handle::*;
+impl ErrorImpl for Error {
+    fn kind(&self) -> ErrorKind {
+        self.kind()
+    }
+}

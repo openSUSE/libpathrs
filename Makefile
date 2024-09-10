@@ -19,17 +19,26 @@ CARGO_NIGHTLY ?= cargo +nightly
 
 SRC_FILES = $(shell find . -name '*.rs')
 
+.DEFAULT: debug
 .PHONY: debug
 debug: target/debug
 
 target/debug: $(SRC_FILES)
-	$(CARGO) build
+	# For some reason, --crate-types needs separate invocations. We can't use
+	# #![crate_type] unfortunately, as using it with #![cfg_attr] has been
+	# deprecated. <https://github.com/rust-lang/rust/issues/91632>
+	$(CARGO) rustc --features=capi --crate-type=cdylib
+	$(CARGO) rustc --features=capi --crate-type=staticlib
 
 .PHONY: release
 release: target/release
 
 target/release: $(SRC_FILES)
-	$(CARGO) build --release
+	# For some reason, --crate-types needs separate invocations. We can't use
+	# #![crate_type] unfortunately, as using it with #![cfg_attr] has been
+	# deprecated. <https://github.com/rust-lang/rust/issues/91632>
+	$(CARGO) rustc --features=capi --crate-type=cdylib --release
+	$(CARGO) rustc --features=capi --crate-type=staticlib --release
 
 .PHONY: smoke-test
 smoke-test:
@@ -50,11 +59,11 @@ lint-rust:
 
 .PHONY: test-rust-doctest
 test-rust-doctest:
-	$(CARGO_NIGHTLY) llvm-cov --no-report --branch --doc
+	$(CARGO_NIGHTLY) llvm-cov --no-report --branch --all-features --doc
 
 .PHONY: test-rust-unpriv
 test-rust-unpriv:
-	$(CARGO_NIGHTLY) llvm-cov --no-report --branch nextest --no-fail-fast
+	$(CARGO_NIGHTLY) llvm-cov --no-report --branch --features capi nextest --no-fail-fast
 
 .PHONY: test-rust-root
 test-rust-root:
@@ -64,7 +73,7 @@ test-rust-root:
 #       support cfg(feature=...) for target runner configs.
 #       See <https://github.com/rust-lang/cargo/issues/14306>.
 	CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -E' \
-		$(CARGO_NIGHTLY) llvm-cov --no-report --branch --features _test_as_root nextest --no-fail-fast
+		$(CARGO_NIGHTLY) llvm-cov --no-report --branch --features capi,_test_as_root nextest --no-fail-fast
 
 .PHONY: test-rust
 test-rust:
@@ -78,7 +87,7 @@ test: test-rust
 
 .PHONY: docs
 docs:
-	$(CARGO) doc --document-private-items --open
+	$(CARGO) doc --all-features --document-private-items --open
 
 .PHONY: install
 install: release

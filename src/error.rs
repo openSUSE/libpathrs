@@ -29,7 +29,7 @@
 
 use crate::{resolvers::opath::SymlinkStackError, syscalls::Error as SyscallError};
 
-use std::{borrow::Cow, error::Error as StdError, io::Error as IOError};
+use std::{borrow::Cow, io::Error as IOError};
 
 // TODO: Add a backtrace to Error. We would just need to add an automatic
 //       Backtrace::capture() in From. But it's not clear whether we want to
@@ -56,6 +56,7 @@ impl Error {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ErrorImpl {
+    #[allow(dead_code)]
     #[error("feature {feature} is not implemented")]
     NotImplemented { feature: Cow<'static, str> },
 
@@ -167,37 +168,5 @@ impl<T, E: ErrorExt> ErrorExt for Result<T, E> {
         F: FnOnce() -> String,
     {
         self.map_err(|err| err.with_wrap(context_fn))
-    }
-}
-
-/// A backport of the nightly-only [`Chain`]. This method
-/// will be removed as soon as that is stabilised.
-///
-/// [`Chain`]: https://doc.rust-lang.org/nightly/std/error/struct.Chain.html
-// XXX: https://github.com/rust-lang/rust/issues/58520
-pub(crate) struct Chain<'a> {
-    current: Option<&'a (dyn StdError + 'static)>,
-}
-
-impl<'a> Iterator for Chain<'a> {
-    type Item = &'a (dyn StdError + 'static);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current;
-        self.current = self.current.and_then(StdError::source);
-        current
-    }
-}
-
-impl Error {
-    /// A backport of the nightly-only [`Error::chain`]. This method
-    /// will be removed as soon as that is stabilised.
-    ///
-    /// [`Error::chain`]: https://doc.rust-lang.org/nightly/std/error/trait.Error.html#method.chain
-    // XXX: https://github.com/rust-lang/rust/issues/58520
-    pub(crate) fn iter_chain_hotfix(&self) -> Chain {
-        Chain {
-            current: Some(self),
-        }
     }
 }

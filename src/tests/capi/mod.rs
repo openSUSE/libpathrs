@@ -17,11 +17,15 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod root;
-pub(crate) use root::*;
+#![allow(unsafe_code)]
 
-mod mntns;
-pub(in crate::tests) use mntns::*;
+mod utils;
+
+mod root;
+pub(in crate::tests) use root::*;
 
 mod handle;
 pub(in crate::tests) use handle::*;
+
+mod procfs;
+pub(in crate::tests) use procfs::*;
