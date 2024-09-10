@@ -398,7 +398,6 @@ pub extern "C" fn pathrs_mkdir_all(
     || -> Result<_, Error> {
         let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd_unchecked(root_fd);
-        let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
         root.mkdir_all(utils::parse_path(path)?, &perm)
     }()
