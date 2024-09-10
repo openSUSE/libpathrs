@@ -59,7 +59,7 @@ pub(crate) enum MountType {
     Bind { src: PathBuf },
 }
 
-pub(crate) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> {
+pub(in crate::tests) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> {
     let dst = dst.as_ref();
     let dst_file = syscalls::openat(syscalls::AT_FDCWD, dst, libc::O_NOFOLLOW | libc::O_PATH, 0)?;
     let dst_path = CString::new(format!("/proc/self/fd/{}", dst_file.as_raw_fd()))?;
@@ -100,7 +100,7 @@ pub(crate) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> 
     }
 }
 
-pub(crate) fn in_mnt_ns<F, T>(func: F) -> Result<T, Error>
+pub(in crate::tests) fn in_mnt_ns<F, T>(func: F) -> Result<T, Error>
 where
     F: FnOnce() -> Result<T, Error>,
 {
