@@ -31,6 +31,7 @@ use std::{
         io::{FromRawFd, OwnedFd},
     },
     path::{Path, PathBuf},
+    ptr,
 };
 
 use errno::Errno;
@@ -142,18 +143,28 @@ pub(in crate::tests) fn call_capi_readlink<Func>(func: Func) -> Result<PathBuf, 
 where
     Func: Fn(*mut libc::c_char, libc::size_t) -> libc::c_int,
 {
-    // Start with a small buffer so we can exercise the retry logic.
+    // Get the actual size by passing NULL.
+    let mut actual_size = {
+        // Try zero-size.
+        let size1 = fetch_error(func(123 as *mut _, 0))? as usize;
+        // Try NULL ptr.
+        let size2 = fetch_error(func(ptr::null_mut(), 1000))? as usize;
+        assert_eq!(size1, size2, "readlink size should be the same");
+        size1
+    };
+
+    // Start with a smaller buffer so we can exercise the trimming logic.
     let mut linkbuf: Vec<u8> = Vec::with_capacity(0);
-    let mut realsize = 8;
-    while realsize > linkbuf.capacity() {
-        linkbuf.reserve(realsize);
-        realsize = fetch_error(func(
+    actual_size /= 2;
+    while actual_size > linkbuf.capacity() {
+        linkbuf.reserve(actual_size);
+        actual_size = fetch_error(func(
             linkbuf.as_mut_ptr() as *mut libc::c_char,
             linkbuf.capacity(),
         ))? as usize;
     }
-    // SAFETY: The C code guarantees that realsize is how many bytes are filled.
-    unsafe { linkbuf.set_len(realsize) };
+    // SAFETY: The C code guarantees that actual_size is how many bytes are filled.
+    unsafe { linkbuf.set_len(actual_size) };
 
     Ok(PathBuf::from(OsStr::from_bytes(
         // readlink does *not* append a null terminator!
