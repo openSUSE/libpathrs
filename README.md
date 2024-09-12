@@ -3,7 +3,9 @@
 [![rust-ci build status](https://github.com/openSUSE/libpathrs/actions/workflows/rust.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/rust.yml)
 [![bindings-ci build status](https://github.com/openSUSE/libpathrs/actions/workflows/bindings.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/bindings.yml)
 [![docs](https://docs.rs/pathrs/badge.svg)](https://docs.rs/pathrs/)
+
 [![dependency status](https://deps.rs/repo/github/openSUSE/libpathrs/status.svg)](https://deps.rs/repo/github/openSUSE/libpathrs)
+[![msrv](https://shields.io/crates/msrv/pathrs)](Cargo.toml)
 
 This library implements a set of C-friendly APIs (written in Rust) to make path
 resolution within a potentially-untrusted directory safe on GNU/Linux. There
