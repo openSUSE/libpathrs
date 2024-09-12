@@ -20,7 +20,7 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    error::{Error, ErrorImpl},
+    error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, ResolverFlags},
     resolvers::procfs::ProcfsResolver,
     syscalls::{self, FsmountFlags, FsopenFlags, OpenTreeFlags},
@@ -29,6 +29,7 @@ use crate::{
 
 use std::{
     fs::File,
+    io::Error as IOError,
     os::unix::io::{AsFd, BorrowedFd, OwnedFd},
     path::{Path, PathBuf},
 };
@@ -172,7 +173,9 @@ impl ProcfsHandle {
         // Try to configure hidepid=ptraceable,subset=pid if possible, but
         // ignore errors.
         let _ = syscalls::fsconfig_set_string(&sfd, "hidepid", "ptraceable");
-        let _ = syscalls::fsconfig_set_string(&sfd, "subset", "pid");
+        // TODO: Maybe we can set this initially and unset it with fspick() if
+        //       we ever do ProcfsHandle::open_raw?
+        //let _ = syscalls::fsconfig_set_string(&sfd, "subset", "pid");
 
         syscalls::fsconfig_create(&sfd).map_err(|err| ErrorImpl::RawOsError {
             operation: "instantiate procfs superblock".into(),
@@ -262,40 +265,6 @@ impl ProcfsHandle {
             .or_else(|_| Self::new_unsafe_open())
     }
 
-    fn check_is_procfs<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
-        let fs_type = syscalls::fstatfs(fd)
-            .map_err(|err| ErrorImpl::RawOsError {
-                operation: "fstatfs proc handle".into(),
-                source: err,
-            })?
-            .f_type;
-        if fs_type != libc::PROC_SUPER_MAGIC {
-            Err(ErrorImpl::SafetyViolation {
-                description: format!(
-                    "/proc is not procfs (f_type is 0x{fs_type:X}, not 0x{:X})",
-                    libc::PROC_SUPER_MAGIC
-                )
-                .into(),
-            })?
-        }
-        Ok(())
-    }
-
-    fn check_mnt_id<Fd: AsFd, P: AsRef<Path>>(&self, dirfd: Fd, path: P) -> Result<(), Error> {
-        let mnt_id = utils::fetch_mnt_id(dirfd, path)?;
-        if self.mnt_id != mnt_id {
-            Err(ErrorImpl::SafetyViolation {
-                // TODO: Include the full path in the error.
-                description: format!(
-                    "mount id mismatch for procfs subpath (mnt_id is {mnt_id:?}, not procfs {:?})",
-                    self.mnt_id
-                )
-                .into(),
-            })?
-        }
-        Ok(())
-    }
-
     fn open_base(&self, base: ProcfsBase) -> Result<OwnedFd, Error> {
         let proc_rootfd = self.inner.as_fd();
         let fd = self.resolver.resolve(
@@ -304,13 +273,7 @@ impl ProcfsHandle {
             OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
             ResolverFlags::empty(),
         )?;
-        // Detect if the file we landed is in a bind-mount.
-        self.check_mnt_id(&fd, "")?;
-        // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
-        // do is check the fs_type to avoid mounts non-procfs filesystems.
-        // Unfortunately, attackers can bind-mount procfs files and still
-        // cause damage so this protection is marginal at best.
-        Self::check_is_procfs(&fd)?;
+        self.verify_same_procfs_mnt(&fd)?;
         Ok(fd)
     }
 
@@ -377,10 +340,15 @@ impl ProcfsHandle {
         let parent = self.open(base, parent, OpenFlags::O_PATH | OpenFlags::O_DIRECTORY)?;
 
         // Detect if the magic-link we are about to open is actually a
-        // bind-mount.
+        // bind-mount. There is no "statfsat" so we can't check that the f_type
+        // is PROC_SUPER_MAGIC. However, an attacker can construct any
+        // magic-link they like with procfs (as well as files that contain any
+        // data they like and are no-op writeable), so it seems unlikely that
+        // such a check would do anything in this case.
+        //
         // NOTE: This check is only safe if there are no racing mounts, so only
         // for the ProcfsHandle::{new_fsopen,new_open_tree} cases.
-        self.check_mnt_id(&parent, trailing)?;
+        verify_same_mnt(self.mnt_id, &parent, trailing)?;
 
         syscalls::openat_follow(parent, trailing, oflags.bits(), 0)
             .map(File::from)
@@ -435,7 +403,7 @@ impl ProcfsHandle {
     ) -> Result<File, Error> {
         let mut oflags = oflags.into();
 
-        // Force-set O_NOFOLLOW, though NO_FOLLOW_TRAILING should be sufficient.
+        // Force-set O_NOFOLLOW.
         oflags.insert(OpenFlags::O_NOFOLLOW);
 
         // Do a basic lookup.
@@ -444,13 +412,7 @@ impl ProcfsHandle {
             .resolver
             .resolve(&base, subpath, oflags, ResolverFlags::empty())?;
 
-        // Detect if the file we landed is in a bind-mount.
-        self.check_mnt_id(&fd, "")?;
-        // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
-        // do is check the fs_type to avoid mounts non-procfs filesystems.
-        // Unfortunately, attackers can bind-mount procfs files and still
-        // cause damage so this protection is marginal at best.
-        Self::check_is_procfs(&fd)?;
+        self.verify_same_procfs_mnt(&fd)?;
 
         Ok(fd.into())
     }
@@ -475,6 +437,16 @@ impl ProcfsHandle {
         })
     }
 
+    fn verify_same_procfs_mnt<Fd: AsFd>(&self, fd: Fd) -> Result<(), Error> {
+        // Detect if the file we landed on is from a bind-mount.
+        verify_same_mnt(self.mnt_id, &fd, "")?;
+        // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
+        // do is check the fs_type to avoid mounts non-procfs filesystems.
+        // Unfortunately, attackers can bind-mount procfs files and still
+        // cause damage so this protection is marginal at best.
+        verify_is_procfs(&fd)
+    }
+
     /// Try to convert a regular [`File`] handle to a [`ProcfsHandle`]. This
     /// method will return an error if the file handle is not actually the root
     /// of a procfs mount.
@@ -482,7 +454,7 @@ impl ProcfsHandle {
         let inner = inner.into();
 
         // Make sure the file is actually a procfs handle.
-        Self::check_is_procfs(&inner)?;
+        verify_is_procfs(&inner)?;
 
         // And make sure it's the root of procfs. The root directory is
         // guaranteed to have an inode number of PROC_ROOT_INO. If this check
@@ -509,6 +481,48 @@ impl ProcfsHandle {
             resolver,
         })
     }
+}
+
+pub(crate) fn verify_is_procfs<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
+    let fs_type = syscalls::fstatfs(fd)
+        .map_err(|err| ErrorImpl::RawOsError {
+            operation: "fstatfs proc handle".into(),
+            source: err,
+        })?
+        .f_type;
+    if fs_type != libc::PROC_SUPER_MAGIC {
+        Err(ErrorImpl::OsError {
+            operation: "verify lookup is still on a procfs mount".into(),
+            source: IOError::from_raw_os_error(libc::EXDEV),
+        })
+        .wrap(format!(
+            "fstype mismatch in restricted procfs resolver (f_type is 0x{fs_type:X}, not 0x{:X})",
+            libc::PROC_SUPER_MAGIC,
+        ))?
+    }
+    Ok(())
+}
+
+pub(crate) fn verify_same_mnt<Fd: AsFd, P: AsRef<Path>>(
+    root_mnt_id: Option<u64>,
+    dirfd: Fd,
+    path: P,
+) -> Result<(), Error> {
+    let mnt_id = utils::fetch_mnt_id(dirfd, path)?;
+    // We the file we landed on a bind-mount / other procfs?
+    if root_mnt_id != mnt_id {
+        // Emulate RESOLVE_NO_XDEV's errors so that any failure looks like an
+        // openat2(2) failure, as this function is used by the emulated procfs
+        // resolver as well.
+        Err(ErrorImpl::OsError {
+            operation: "verify lookup is still in the same mount".into(),
+            source: IOError::from_raw_os_error(libc::EXDEV),
+        })
+        .wrap(format!(
+            "mount id mismatch in restricted procfs resolver (mnt_id is {mnt_id:?}, not procfs {root_mnt_id:?})",
+        ))?
+    }
+    Ok(())
 }
 
 #[cfg(test)]

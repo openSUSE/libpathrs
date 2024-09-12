@@ -30,6 +30,7 @@
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, ResolverFlags},
+    procfs,
     resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls::{self, OpenHow},
     utils::{self, FdExt, PathIterExt},
@@ -128,20 +129,6 @@ fn openat2_resolve<F: AsFd, P: AsRef<Path>>(
     })
 }
 
-fn check_mnt_id<Fd: AsFd>(root_mnt_id: Option<u64>, file: Fd) -> Result<(), Error> {
-    let got_mnt_id = utils::fetch_mnt_id(file, "")?;
-    if got_mnt_id != root_mnt_id {
-        Err(ErrorImpl::OsError {
-            operation: "emulated RESOLVE_NO_XDEV".into(),
-            source: IOError::from_raw_os_error(libc::EXDEV),
-        })
-        .wrap(format!(
-            "mount id mismatch in restricted procfs resolver (mnt_id is {got_mnt_id:?}, not procfs {root_mnt_id:?})",
-        ))?
-    }
-    Ok(())
-}
-
 fn opath_resolve<F: AsFd, P: AsRef<Path>>(
     root: F,
     path: P,
@@ -198,7 +185,9 @@ fn opath_resolve<F: AsFd, P: AsRef<Path>>(
         // Check that the next component is on the same mountpoint.
         // NOTE: If the root is the host /proc mount, this is only safe if there
         // are no racing mounts.
-        check_mnt_id(root_mnt_id, &next).with_wrap(|| format!("open next component {part:?}"))?;
+        procfs::verify_same_mnt(root_mnt_id, &next, "")
+            .with_wrap(|| format!("open next component {part:?}"))
+            .wrap("emulated procfs resolver RESOLVE_NO_XDEV")?;
 
         let next_meta = next.metadata().wrap("fstat of next component")?;
 
@@ -264,7 +253,9 @@ fn opath_resolve<F: AsFd, P: AsRef<Path>>(
             match syscalls::openat(&current, &part, oflags.bits() | libc::O_NOFOLLOW, 0) {
                 Ok(final_reopen) => {
                     // Re-verify the next component is on the same mount.
-                    check_mnt_id(root_mnt_id, &final_reopen).wrap("open final component")?;
+                    procfs::verify_same_mnt(root_mnt_id, &final_reopen, "")
+                        .wrap("re-open final component")
+                        .wrap("emulated procfs resolver RESOLVE_NO_XDEV")?;
                     return Ok(final_reopen);
                 }
                 Err(err) => {
