@@ -754,26 +754,20 @@ mod utils {
             }
 
             (Err(err), Ok(expected)) => {
-                anyhow::bail!(
-                    "unexpected error '{}', expected successful {:?}",
-                    err,
-                    expected,
-                )
+                anyhow::bail!("unexpected error '{err:?}', expected successful {expected:?}",)
             }
 
             (Ok((_, lookup_result)), Err(want_err)) => anyhow::bail!(
-                "expected to get io::Error {} but instead got result {:?}",
+                "expected to get io::Error {} but instead got result {lookup_result:?}",
                 tests_common::errno_description(want_err),
-                lookup_result,
             ),
 
             (Err(err), Err(want_err)) => {
                 assert_eq!(
                     err.kind(),
                     want_err,
-                    "expected io::Error {}, got '{}'",
+                    "expected io::Error {}, got '{err:?}'",
                     tests_common::errno_description(want_err),
-                    err,
                 );
                 return Ok(());
             }
