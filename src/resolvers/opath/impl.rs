@@ -42,7 +42,7 @@ use crate::{
     procfs::GLOBAL_PROCFS_HANDLE,
     resolvers::{opath::SymlinkStack, PartialLookup, MAX_SYMLINK_TRAVERSALS},
     syscalls,
-    utils::{FdExt, PathIterExt},
+    utils::{self, FdExt, PathIterExt},
     Handle,
 };
 
@@ -53,6 +53,7 @@ use std::{
     iter,
     os::unix::{
         ffi::OsStrExt,
+        fs::MetadataExt,
         io::{AsFd, OwnedFd},
     },
     path::{Path, PathBuf},
@@ -127,6 +128,51 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     }
 
     Ok(())
+}
+
+// MSRV(1.70): Use OnceLock.
+// MSRV(1.80): Use LazyLock.
+lazy_static! {
+    /// Cached copy of `fs.protected_symlinks` sysctl.
+    // TODO: In theory this value could change during the lifetime of the
+    // program, but there's no nice way of detecting that, and the overhead of
+    // checking this for every symlink lookup is more likely to be an issue.
+    // TODO: Maybe we should make a private ProcfsHandle just for this so that
+    // we can use subset=pid for GLOBAL_PROCFS_HANDLE?
+    static ref PROTECTED_SYMLINKS_SYSCTL: u32 =
+        utils::sysctl_read_parse(&GLOBAL_PROCFS_HANDLE, "fs.protected_symlinks")
+            .expect("should be able to parse fs.protected_symlinks");
+}
+
+/// Verify that we should follow the symlink as per `fs.protected_symlinks`.
+///
+/// Because we emulate symlink following in userspace, the kernel cannot apply
+/// `fs.protected_symlinks` restrictions so we need to emulate them ourselves.
+fn may_follow_link<DirFd: AsFd, Fd: AsFd>(dir: DirFd, link: Fd) -> Result<(), Error> {
+    // Skip doing checks if the fs.protected_symlinks sysctl is disabled.
+    let fsuid = syscalls::geteuid();
+    let dir_meta = dir.metadata().wrap("fetch directory metadata")?;
+    let link_meta = link.metadata().wrap("fetch symlink metadata")?;
+
+    const STICKY_WRITABLE: libc::mode_t = libc::S_ISVTX | libc::S_IWOTH;
+
+    // We only do this if fs.protected_symlinks is enabled.
+    if *PROTECTED_SYMLINKS_SYSCTL == 0 ||
+        // Allowed if owner and follower match.
+        link_meta.uid() == fsuid ||
+        // Allowed if the directory is not sticky and world-writable.
+        dir_meta.mode() & STICKY_WRITABLE != STICKY_WRITABLE ||
+        // Allowed if parent directory and link owner match.
+        link_meta.uid() == dir_meta.uid()
+    {
+        Ok(())
+    } else {
+        Err(ErrorImpl::OsError {
+            operation: "emulated fs.protected_symlinks".into(),
+            source: IOError::from_raw_os_error(libc::EACCES),
+        }
+        .into())
+    }
 }
 
 /// Common implementation used by `resolve_partial()` and `resolve()`. The main
@@ -297,6 +343,14 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
                             .into(),
                         });
                     }
+
+                    // Verify that we can follow the link.
+                    // MSRV(1.69): Remove &*.
+                    may_follow_link(&*current, &next).with_wrap(|| {
+                        format!(
+                            "component {part:?} is an unsafe symlink that is blocked by fs.protected_symlinks"
+                        )
+                    })?;
 
                     // We need a limit on the number of symlinks we traverse to
                     // avoid hitting filesystem loops and DoSing.

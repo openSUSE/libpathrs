@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   - `mkdir_all` so that Go users can switch from `os.MkdirAll`. This is based
     on similar work done in [filepath-securejoin][].
 
+- opath resolver: We now emulate `fs.protected_symlinks` when resolving
+  symlinks using the emulated opath resolver. This is only done if
+  `fs.protected_symlinks` is enabled on the system (to mirror the behaviour of
+  `openat2`).
+
 - tests: Add a large number of integration tests, mainly based on the test
   suite in [filepath-securejoin][]. This test suite tests all of the Rust code
   and the C FFI code from within Rust, giving us ~89% test coverage.

@@ -25,7 +25,9 @@ use std::{
 };
 
 use anyhow::{Context, Error};
-use rustix::fs::{self as rustix_fs, OFlags};
+use rustix::fs::{self as rustix_fs, AtFlags, OFlags, CWD};
+#[cfg(feature = "_test_as_root")]
+use rustix::process::{Gid, Uid};
 use tempfile::TempDir;
 
 fn mknod<P: AsRef<Path>>(path: P, mode: libc::mode_t, dev: libc::dev_t) -> Result<(), io::Error> {
@@ -42,34 +44,96 @@ fn mknod<P: AsRef<Path>>(path: P, mode: libc::mode_t, dev: libc::dev_t) -> Resul
 }
 
 macro_rules! create_inode {
+    // "/foo/bar" @ chmod 0o755
+    (@do $path:expr, chmod $mode:expr) => {
+        // rustix returns -EOPNOTSUPP if you use AT_SYMLINK_NOFOLLOW.
+        rustix_fs::chmodat(CWD, $path, $mode.into(), AtFlags::empty())
+            .with_context(|| format!("chmod 0o{:o} {}", $mode, $path.display()))?;
+    };
+
+    // "/foo/bar" @ chown 0:0
+    (@do $path:expr, chown $uid:literal : $gid:literal) => {
+        rustix_fs::chownat(
+            CWD,
+            $path,
+            // SAFETY: We pick valid uids and gids for this.
+            Some(unsafe { Uid::from_raw($uid) }),
+            Some(unsafe { Gid::from_raw($gid) }),
+            AtFlags::SYMLINK_NOFOLLOW,
+        )
+        .with_context(|| format!("chown {}:{} {}", $uid, $gid, $path.display()))?;
+    };
+
+    // "/foo/bar" @ chown 0:
+    (@do $path:expr, chown $uid:literal :) => {
+        rustix_fs::chownat(
+            CWD,
+            $path,
+            // SAFETY: We pick valid uids and gids for this.
+            Some(unsafe { Uid::from_raw($uid) }),
+            None,
+            AtFlags::SYMLINK_NOFOLLOW,
+        )
+        .with_context(|| format!("chown {}:<none> {}", $uid, $path.display()))?;
+    };
+
+    // "/foo/bar" @ chown :0
+    (@do $path:expr, chown : $gid:literal) => {
+        rustix_fs::chownat(
+            CWD,
+            $path,
+            // SAFETY: We pick valid uids and gids for this.
+            None,
+            Some(unsafe { Gid::from_raw($gid) }),
+            AtFlags::SYMLINK_NOFOLLOW,
+        )
+        .with_context(|| format!("chown <none>:{} {}", $gid, $path.display()))?;
+    };
+
     // "/foo/bar" => dir
-    ($path:expr => dir) => {
-        rustix_fs::mkdir($path, 0o755.into()).with_context(|| format!("mkdir {}", $path.display()))
+    ($path:expr => dir $(,{$($extra:tt)*})*) => {
+        rustix_fs::mkdir($path, 0o755.into())
+            .with_context(|| format!("mkdir {}", $path.display()))?;
+        $(
+            create_inode!(@do $path, $($extra)*);
+        )*
     };
     // "/foo/bar" => file
-    ($path:expr => file) => {
+    ($path:expr => file $(,{$($extra:tt)*})*) => {
         rustix_fs::open($path, OFlags::CREATE, 0o644.into())
-            .with_context(|| format!("mkfile {}", $path.display()))
+            .with_context(|| format!("mkfile {}", $path.display()))?;
+        $(
+            create_inode!(@do $path, $($extra)*);
+        )*
     };
     // "/foo/bar" => fifo
-    ($path:expr => fifo) => {
+    ($path:expr => fifo $(, {$($extra:tt)*})*) => {
         mknod($path, libc::S_IFIFO | 0o644, 0)
-            .with_context(|| format!("mkfifo {}", $path.display()))
+            .with_context(|| format!("mkfifo {}", $path.display()))?;
+        $(
+            create_inode!(@do $path, $($extra)*);
+        )*
     };
     // "/foo/bar" => sock
-    ($path:expr => sock) => {
+    ($path:expr => sock $(,{$($extra:tt)*})*) => {
         mknod($path, libc::S_IFSOCK | 0o644, 0)
-            .with_context(|| format!("mksock {}", $path.display()))
+            .with_context(|| format!("mksock {}", $path.display()))?;
+        $(
+            create_inode!(@do $path, $($extra)*);
+        )*
     };
     // "/foo/bar" => symlink -> "target"
-    ($path:expr => symlink -> $target:expr) => {
+    ($path:expr => symlink -> $target:expr $(,{$($extra:tt)*})*) => {
         unixfs::symlink($target, $path)
-            .with_context(|| format!("symlink {} -> {}", $path.display(), $target))
+            .with_context(|| format!("symlink {} -> {}", $path.display(), $target))?;
+        $(
+            create_inode!(@do $path, $($extra)*);
+        )*
     };
     // "/foo/bar" => hardlink -> "target"
     ($path:expr => hardlink -> $target:expr) => {
         fs::hard_link($target, $path)
-            .with_context(|| format!("hardlink {} -> {}", $path.display(), $target))
+            .with_context(|| format!("hardlink {} -> {}", $path.display(), $target))?;
     };
 }
 
@@ -79,10 +143,11 @@ macro_rules! create_tree {
     //     "a/b/c" => (file);
     //     "b-link" => (symlink -> "a/b");
     // }
-    ($($subpath:expr => ($($inner:tt)*));+ $(;)*) => {
+    ($($subpath:expr => $(#[$meta:meta])* ($($inner:tt)*));+ $(;)*) => {
         {
             let root = TempDir::new()?;
             $(
+                $(#[$meta])*
                 {
                     let root_dir: &Path = root.as_ref();
                     let subpath = $subpath;
@@ -90,7 +155,7 @@ macro_rules! create_tree {
                     if let Some(parent) = path.parent() {
                         fs::create_dir_all(parent).with_context(|| format!("mkdirall {}", path.display()))?;
                     }
-                    create_inode!(&path => $($inner)*)?;
+                    create_inode!(&path => $($inner)*);
                 }
             )*
             Ok(root)
@@ -157,5 +222,22 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         "loop/d" => (symlink -> "e");
         "loop/e/link" => (symlink -> "../a/link");
         "loop/link" => (symlink -> "a/link");
+        // Symlinks in a world-writable directory (fs.protected_symlinks).
+        // ... owned by us.
+        "tmpfs-self" => (dir, {chmod 0o1777});
+        "tmpfs-self/file" => (file);
+        "tmpfs-self/link-self" => (symlink -> "file");
+        "tmpfs-self/link-otheruid" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 12345:});
+        "tmpfs-self/link-othergid" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown :12345});
+        "tmpfs-self/link-other" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 12345:12345});
+        // ... owned by another user.
+        "tmpfs-other" => #[cfg(feature = "_test_as_root")] (dir, {chown 12345:12345}, {chmod 0o1777});
+        "tmpfs-other/file" => #[cfg(feature = "_test_as_root")] (file);
+        "tmpfs-other/link-self" => #[cfg(feature = "_test_as_root")] (symlink -> "file");
+        "tmpfs-other/link-selfuid" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown :11111});
+        "tmpfs-other/link-owner" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 12345:12345});
+        "tmpfs-other/link-otheruid" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 11111:12345});
+        "tmpfs-other/link-othergid" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 12345:11111});
+        "tmpfs-other/link-other" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 11111:11111});
     }
 }

@@ -40,11 +40,11 @@ use std::{borrow::Cow, io::Error as IOError};
 #[error(transparent)]
 pub struct Error(#[from] Box<ErrorImpl>);
 
-impl From<ErrorImpl> for Error {
+impl<E: Into<ErrorImpl>> From<E> for Error {
     // TODO: Is there a way to make this not be exported at all?
     #[doc(hidden)]
-    fn from(err: ErrorImpl) -> Self {
-        Self(Box::new(err))
+    fn from(err: E) -> Self {
+        Self(Box::new(err.into()))
     }
 }
 
@@ -90,6 +90,9 @@ pub(crate) enum ErrorImpl {
         source: SyscallError,
     },
 
+    #[error("integer parsing failed")]
+    ParseIntError(#[from] std::num::ParseIntError),
+
     #[error("{context}")]
     Wrapped {
         context: Cow<'static, str>,
@@ -106,6 +109,7 @@ pub(crate) enum ErrorKind {
     InvalidArgument,
     SafetyViolation,
     BadSymlinkStack,
+    ParseError,
     // TODO: We might want to use Option<std::io::ErrorKind>?
     OsError(Option<i32>),
 }
@@ -118,6 +122,7 @@ impl ErrorImpl {
             Self::InvalidArgument { .. } => ErrorKind::InvalidArgument,
             Self::SafetyViolation { .. } => ErrorKind::SafetyViolation,
             Self::BadSymlinkStackError { .. } => ErrorKind::BadSymlinkStack,
+            Self::ParseIntError(_) => ErrorKind::ParseError,
             Self::OsError { source, .. } => ErrorKind::OsError(source.raw_os_error()),
             Self::RawOsError { source, .. } => {
                 ErrorKind::OsError(source.root_cause().raw_os_error())

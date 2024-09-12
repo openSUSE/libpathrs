@@ -34,9 +34,10 @@ macro_rules! resolve_tests {
     //          test_err: resolve(...) => Err(ErrorKind::...)
     //      }
     // }
-    ([$root_dir:expr] rust-fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
+    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* rust-fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
         paste::paste! {
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _default>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
@@ -49,6 +50,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _default>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let root = Root::open(&root_dir)?;
@@ -62,6 +64,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
@@ -79,6 +82,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let root = Root::open(&root_dir)?;
@@ -97,6 +101,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
@@ -115,6 +120,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let root = Root::open(&root_dir)?;
@@ -135,10 +141,11 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] capi-fn $test_name:ident ($root_var:ident : CapiRoot) $body:block => $expected:expr) => {
+    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* capi-fn $test_name:ident ($root_var:ident : CapiRoot) $body:block => $expected:expr) => {
         paste::paste! {
             #[cfg(feature = "capi")]
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<capi_root_ $test_name>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let $root_var = CapiRoot::open(&root_dir)?;
@@ -152,10 +159,11 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] @rust-impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
+    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @rust-impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
         paste::paste! {
             resolve_tests! {
                 [$root_dir]
+                $(#[cfg($ignore_meta)])*
                 rust-fn [<$op_name _ $test_name>](mut root: Root) {
                     root.resolver.flags = $rflags;
 
@@ -171,10 +179,11 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] @capi-impl $test_name:ident $op_name:ident ($path:expr, $no_follow_trailing:expr) => $expected:expr) => {
+    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @capi-impl $test_name:ident $op_name:ident ($path:expr, $no_follow_trailing:expr) => $expected:expr) => {
         paste::paste! {
             resolve_tests! {
                 [$root_dir]
+                $(#[cfg($ignore_meta)])*
                 capi-fn [<$op_name _ $test_name>](root: CapiRoot) {
                     let expected = $expected;
                     utils::[<check_root_ $op_name>](
@@ -188,40 +197,46 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
+    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
+            $(#[cfg($ignore_meta)])*
             @rust-impl $test_name $op_name($path, $(ResolverFlags::$rflag)|*, false) => $expected
         }
         // The C API doesn't support custom ResolverFlags.
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
+    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
+            $(#[cfg($ignore_meta)])*
             @rust-impl $test_name $op_name($path, ResolverFlags::empty(), $no_follow_trailing) => $expected
         }
         resolve_tests! {
             [$root_dir]
+            $(#[cfg($ignore_meta)])*
             @capi-impl $test_name $op_name($path, $no_follow_trailing) => $expected
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
+    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
         resolve_tests! {
             [$root_dir]
+            $(#[cfg($ignore_meta)])*
             @rust-impl $test_name $op_name($path, ResolverFlags::empty(), false) => $expected
         }
         resolve_tests! {
             [$root_dir]
+            $(#[cfg($ignore_meta)])*
             @capi-impl $test_name $op_name($path, false) => $expected
         }
     };
 
-    ($([$root_dir:expr] { $($test_name:ident : $op_name:ident ($($args:tt)*) => $expected:expr);* $(;)? });* $(;)?) => {
+    ($([$root_dir:expr] { $($(#[cfg($ignore_meta:meta)])* $test_name:ident : $op_name:ident ($($args:tt)*) => $expected:expr);* $(;)? });* $(;)?) => {
         $( $(
             resolve_tests! {
                 [$root_dir]
+                $(#[cfg($ignore_meta)])*
                 @impl $test_name $op_name ($($args)*) => $expected
             }
         )* )*
@@ -394,6 +409,46 @@ resolve_tests! {
         symlink_component_nosym1: resolve("e/f", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
         symlink_component_nosym2: resolve("link2/link1_abs/target_rel", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
         loop_nosym: resolve("loop/link", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        // fs.protected_symlinks for a directory owned by us.
+        protected_symlinks_selfdir_selfsym: resolve("tmpfs-self/link-self") => Ok(("tmpfs-self/file", libc::S_IFREG));
+        protected_symlinks_selfdir_selfsym_nofollow: resolve("tmpfs-self/link-self", no_follow_trailing = true) => Ok(("tmpfs-self/link-self", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_selfdir_otheruidsym: resolve("tmpfs-self/link-otheruid") => Err(ErrorKind::OsError(Some(libc::EACCES)));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_selfdir_otheruidsym_nofollow: resolve("tmpfs-self/link-otheruid", no_follow_trailing = true) => Ok(("tmpfs-self/link-otheruid", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_selfdir_othergidsym: resolve("tmpfs-self/link-othergid") => Ok(("tmpfs-self/file", libc::S_IFREG));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_selfdir_othergidsym_nofollow: resolve("tmpfs-self/link-othergid", no_follow_trailing = true) => Ok(("tmpfs-self/link-othergid", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_selfdir_othersym: resolve("tmpfs-self/link-other") => Err(ErrorKind::OsError(Some(libc::EACCES)));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_selfdir_othersym_nofollow: resolve("tmpfs-self/link-other", no_follow_trailing = true) => Ok(("tmpfs-self/link-other", libc::S_IFLNK));
+        // fs.protected_symlinks for a directory owned by someone else.
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_selfsym: resolve("tmpfs-other/link-self") => Ok(("tmpfs-other/file", libc::S_IFREG));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_selfsym_nofollow: resolve("tmpfs-other/link-self", no_follow_trailing = true) => Ok(("tmpfs-other/link-self", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_selfuidsym: resolve("tmpfs-other/link-selfuid") => Ok(("tmpfs-other/file", libc::S_IFREG));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_selfuidsym_nofollow: resolve("tmpfs-other/link-selfuid", no_follow_trailing = true) => Ok(("tmpfs-other/link-selfuid", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_ownersym: resolve("tmpfs-other/link-owner") => Ok(("tmpfs-other/file", libc::S_IFREG));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_ownersym_nofollow: resolve("tmpfs-other/link-owner", no_follow_trailing = true) => Ok(("tmpfs-other/link-owner", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_otheruidsym: resolve("tmpfs-other/link-otheruid") => Err(ErrorKind::OsError(Some(libc::EACCES)));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_otheruidsym_nofollow: resolve("tmpfs-other/link-otheruid", no_follow_trailing = true) => Ok(("tmpfs-other/link-otheruid", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_othergidsym: resolve("tmpfs-other/link-othergid") => Ok(("tmpfs-other/file", libc::S_IFREG));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_othergidsym_nofollow: resolve("tmpfs-other/link-othergid", no_follow_trailing = true) => Ok(("tmpfs-other/link-othergid", libc::S_IFLNK));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_othersym: resolve("tmpfs-other/link-other") => Err(ErrorKind::OsError(Some(libc::EACCES)));
+        #[cfg(feature = "_test_as_root")]
+        protected_symlinks_otherdir_othersym_nofollow: resolve("tmpfs-other/link-other", no_follow_trailing = true) => Ok(("tmpfs-other/link-other", libc::S_IFLNK));
     }
 }
 
@@ -440,11 +495,7 @@ mod utils {
             ),
 
             (Err(err), Ok((expected_path, _))) => {
-                anyhow::bail!(
-                    "unexpected error '{}', expected file {}",
-                    err,
-                    expected_path
-                )
+                anyhow::bail!("unexpected error '{err:?}', expected file {expected_path:?}",)
             }
 
             (Ok(handle), Err(want_err)) => anyhow::bail!(
@@ -457,9 +508,8 @@ mod utils {
                 assert_eq!(
                     err.kind(),
                     want_err,
-                    "expected io::Error {}, got '{}'",
+                    "expected io::Error {}, got '{err:?}'",
                     tests_common::errno_description(want_err),
-                    err,
                 );
                 return Ok(());
             }

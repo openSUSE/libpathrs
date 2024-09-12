@@ -425,6 +425,29 @@ impl ProcfsHandle {
         Ok(fd.into())
     }
 
+    /// Safely open a path inside the root of `procfs`.
+    ///
+    /// **This is only intended to be used internally for now.**
+    // TODO: Remove this once we get ProcfsBase::Root.
+    pub(crate) fn open_raw<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        subpath: P,
+        oflags: F,
+    ) -> Result<File, Error> {
+        let mut oflags = oflags.into();
+
+        // Force-set O_NOFOLLOW.
+        oflags.insert(OpenFlags::O_NOFOLLOW);
+
+        let fd = self
+            .resolver
+            .resolve(&self.inner, subpath, oflags, ResolverFlags::empty())?;
+
+        self.verify_same_procfs_mnt(&fd)?;
+
+        Ok(fd.into())
+    }
+
     /// Safely read the contents of a symlink inside `procfs`.
     ///
     /// This method is effectively shorthand for doing [`readlinkat(2)`] on the

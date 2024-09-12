@@ -61,6 +61,7 @@ impl From<CProcfsBase> for ProcfsBase {
     }
 }
 
+#[cfg(test)]
 impl From<ProcfsBase> for CProcfsBase {
     fn from(base: ProcfsBase) -> Self {
         match base {
