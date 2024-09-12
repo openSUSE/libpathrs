@@ -37,9 +37,12 @@ use std::{
 // MSRV(1.70): Use OnceLock.
 // MSRV(1.80): Use LazyLock.
 lazy_static! {
-    /// A `procfs` handle to which is used globally by libpathrs.
-    // TODO: Export this?
-    pub(crate) static ref PROCFS_HANDLE: ProcfsHandle =
+    /// A lazy-allocated `procfs` handle which is used globally by libpathrs.
+    ///
+    /// As creating `procfs` handles can be somewhat expensive, library users
+    /// are recommended to make use of this handle for `procfs` operations if
+    /// possible.
+    pub static ref GLOBAL_PROCFS_HANDLE: ProcfsHandle =
         ProcfsHandle::new().expect("should be able to get some /proc handle");
 }
 
@@ -154,6 +157,11 @@ pub struct ProcfsHandle {
     mnt_id: Option<u64>,
     pub(crate) resolver: ProcfsResolver,
 }
+
+// TODO: Implement Into<OwnedFd> or AsFd? In theory someone could use this to
+// modify the configuration of GLOBAL_PROCFS_HANDLE (or even dup2 over it), but
+// that would be kind of hard to do by accident and would allow for users to use
+// the procfs handle directly for more complicated things...
 
 impl ProcfsHandle {
     // This is part of Linux's ABI.

@@ -131,9 +131,9 @@ macro_rules! procfs_tests {
                 { ProcfsHandle::new_unsafe_open() }.$procfs_op($($args)*) => (over_mounts: true, $($tt)*);
         }
 
-        // Assume that PROCFS_HANDLE is fsopen(2)-based.
+        // Assume that GLOBAL_PROCFS_HANDLE is fsopen(2)-based.
         //
-        // TODO: Figure out the fd type of PROCFS_HANDLE. In principle we would
+        // TODO: Figure out the fd type of GLOBAL_PROCFS_HANDLE. In principle we would
         // expect to be able to do fsopen(2) (otherwise the fsopen(2) tests will
         // fail) but it would be nice to avoid possible spurrious errors.
         procfs_tests! {

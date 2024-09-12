@@ -22,7 +22,7 @@
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
-    procfs::PROCFS_HANDLE,
+    procfs::GLOBAL_PROCFS_HANDLE,
     resolvers::Resolver,
     syscalls::{self, FrozenFd},
     utils::{self, PathIterExt},
@@ -821,7 +821,7 @@ impl RootRef<'_> {
         // to be used for shells when spawning subprocesses.
         let (want_uid, want_gid) = (syscalls::geteuid(), syscalls::getegid());
         let want_mode = libc::S_IFDIR
-            | (perm.mode() & !utils::get_umask(Some(&PROCFS_HANDLE)).unwrap_or(0o022));
+            | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE)).unwrap_or(0o022));
 
         // For the remaining components, create a each component one-by-one.
         for part in remaining_parts {

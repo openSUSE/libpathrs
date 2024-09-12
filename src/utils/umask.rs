@@ -116,22 +116,22 @@ pub(crate) fn get_umask(procfs: Option<&ProcfsHandle>) -> Result<mode_t, Error> 
 #[cfg(test)]
 mod tests {
     use super::{get_umask, get_umask_procfs, get_umask_tmpfile};
-    use crate::procfs::PROCFS_HANDLE;
+    use crate::procfs::GLOBAL_PROCFS_HANDLE;
 
     #[test]
     fn umask_default() {
         assert_eq!(
             get_umask_tmpfile().unwrap(),
-            get_umask_procfs(&PROCFS_HANDLE).unwrap().unwrap(),
+            get_umask_procfs(&GLOBAL_PROCFS_HANDLE).unwrap().unwrap(),
             "tmpfile and procfs should give same results"
         );
         assert_eq!(
             get_umask(None).unwrap(),
-            get_umask_procfs(&PROCFS_HANDLE).unwrap().unwrap(),
+            get_umask_procfs(&GLOBAL_PROCFS_HANDLE).unwrap().unwrap(),
             "default and procfs should give same results"
         );
         assert_eq!(
-            get_umask(Some(&PROCFS_HANDLE)).unwrap(),
+            get_umask(Some(&GLOBAL_PROCFS_HANDLE)).unwrap(),
             get_umask_tmpfile().unwrap(),
             "default and tmpfile should give same results"
         );

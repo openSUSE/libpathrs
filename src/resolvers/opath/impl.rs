@@ -39,7 +39,7 @@
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::ResolverFlags,
-    procfs::PROCFS_HANDLE,
+    procfs::GLOBAL_PROCFS_HANDLE,
     resolvers::{opath::SymlinkStack, PartialLookup, MAX_SYMLINK_TRAVERSALS},
     syscalls,
     utils::{FdExt, PathIterExt},
@@ -72,7 +72,7 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     //         path will be re-checked after the unsafe "current_path" is
     //         generated.
     let root_path = root
-        .as_unsafe_path(&PROCFS_HANDLE)
+        .as_unsafe_path(&GLOBAL_PROCFS_HANDLE)
         .wrap("get root path to construct expected path")?;
 
     // Combine the root path and our expected_path to get the full path to
@@ -97,7 +97,7 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     // SAFETY: as_unsafe_path is safe here since we're explicitly doing a
     //         string-based check to see whether the path we want is correct.
     let current_path = current
-        .as_unsafe_path(&PROCFS_HANDLE)
+        .as_unsafe_path(&GLOBAL_PROCFS_HANDLE)
         .wrap("check fd against expected path")?;
 
     // The paths should be identical.
@@ -118,7 +118,7 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     // SAFETY: as_unsafe_path path is safe here because it's just used in a
     //         string check -- and it's known that this check isn't perfect.
     let new_root_path = root
-        .as_unsafe_path(&PROCFS_HANDLE)
+        .as_unsafe_path(&GLOBAL_PROCFS_HANDLE)
         .wrap("get root path to double-check it hasn't moved")?;
     if root_path != new_root_path {
         Err(ErrorImpl::SafetyViolation {

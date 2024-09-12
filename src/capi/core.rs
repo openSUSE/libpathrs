@@ -24,7 +24,7 @@ use crate::{
     },
     error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
-    procfs::PROCFS_HANDLE,
+    procfs::GLOBAL_PROCFS_HANDLE,
     utils::FdExt,
     InodeType, Root, RootRef,
 };
@@ -89,7 +89,7 @@ pub extern "C" fn pathrs_reopen(fd: CBorrowedFd<'_>, flags: c_int) -> RawFd {
 
     || -> Result<_, Error> {
         fd.try_as_borrowed_fd()?
-            .reopen(&PROCFS_HANDLE, flags)
+            .reopen(&GLOBAL_PROCFS_HANDLE, flags)
             .and_then(|file| {
                 // Rust sets O_CLOEXEC by default, without an opt-out. We need
                 // to disable it if we weren't asked to do O_CLOEXEC.

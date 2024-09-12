@@ -32,7 +32,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// NOTE: The C API only lets us access the global PROCFS_HANDLE reference.
+// NOTE: The C API only lets us access the global GLOBAL_PROCFS_HANDLE
+// reference.
 #[derive(Debug)]
 pub struct CapiProcfsHandle;
 

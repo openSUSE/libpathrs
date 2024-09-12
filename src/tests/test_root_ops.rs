@@ -392,7 +392,7 @@ mod utils {
     use crate::{
         error::{ErrorExt, ErrorKind},
         flags::{OpenFlags, RenameFlags},
-        procfs::PROCFS_HANDLE,
+        procfs::GLOBAL_PROCFS_HANDLE,
         resolvers::PartialLookup,
         syscalls,
         tests::traits::{ErrorImpl, RootImpl},
@@ -740,7 +740,9 @@ mod utils {
         let before_partial_lookup = root.resolver().resolve_partial(root, unsafe_path, false)?;
 
         let expected_mode = match expected_result {
-            Ok(_) => Some(libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&PROCFS_HANDLE))?)),
+            Ok(_) => Some(
+                libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE))?),
+            ),
             Err(_) => None,
         };
 

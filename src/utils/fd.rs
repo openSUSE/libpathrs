@@ -285,7 +285,7 @@ pub(crate) fn fetch_mnt_id<Fd: AsFd, P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{flags::OpenFlags, procfs::PROCFS_HANDLE, syscalls, utils::FdExt};
+    use crate::{flags::OpenFlags, procfs::GLOBAL_PROCFS_HANDLE, syscalls, utils::FdExt};
 
     use std::{
         fs::File,
@@ -307,7 +307,7 @@ mod tests {
             "expected as_unsafe_path_unchecked to give the correct path"
         );
         // ProcfsHandle-based lookup.
-        let got_path = fd.as_unsafe_path(&PROCFS_HANDLE)?;
+        let got_path = fd.as_unsafe_path(&GLOBAL_PROCFS_HANDLE)?;
         assert_eq!(
             got_path, want_path,
             "expected as_unsafe_path to give the correct path"
@@ -335,7 +335,9 @@ mod tests {
             "as_unsafe_path_unchecked should fail for bad file descriptor"
         );
         assert!(
-            syscalls::BADFD.as_unsafe_path(&PROCFS_HANDLE).is_err(),
+            syscalls::BADFD
+                .as_unsafe_path(&GLOBAL_PROCFS_HANDLE)
+                .is_err(),
             "as_unsafe_path should fail for bad file descriptor"
         );
     }
@@ -344,7 +346,7 @@ mod tests {
     fn reopen_badfd() {
         assert!(
             syscalls::BADFD
-                .reopen(&PROCFS_HANDLE, OpenFlags::O_PATH)
+                .reopen(&GLOBAL_PROCFS_HANDLE, OpenFlags::O_PATH)
                 .is_err(),
             "reopen should fail for bad file descriptor"
         );
