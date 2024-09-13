@@ -406,6 +406,10 @@ root_op_tests! {
     loop_trailing: mkdir_all("loop/link", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     loop_basic: mkdir_all("loop/link/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     loop_dotdot: mkdir_all("loop/link/../foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+    // Make sure the S_ISGID handling is correct.
+    setgid_selfdir: mkdir_all("setgid-self/a/b/c/d", 0o711) => Ok(());
+    #[cfg(feature = "_test_as_root")]
+    setgid_otherdir: mkdir_all("setgid-other/a/b/c/d", 0o711) => Ok(());
 }
 
 mod utils {
@@ -417,7 +421,7 @@ mod utils {
         syscalls,
         tests::traits::{ErrorImpl, RootImpl},
         utils::{self, FdExt, PathIterExt},
-        InodeType,
+        Handle, InodeType,
     };
 
     use std::{
@@ -759,11 +763,22 @@ mod utils {
         // components don't exist yet so we can check them later.
         let before_partial_lookup = root.resolver().resolve_partial(root, unsafe_path, false)?;
 
-        let expected_mode = match expected_result {
-            Ok(_) => Some(
-                libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE))?),
-            ),
+        let expected_subdir_state: Option<((_, _), _)> = match expected_result {
             Err(_) => None,
+            Ok(_) => {
+                let expected_uid = syscalls::geteuid();
+                let mut expected_gid = syscalls::getegid();
+                let mut expected_mode =
+                    libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE))?);
+
+                let handle: &Handle = before_partial_lookup.as_ref();
+                let dir_meta = handle.metadata()?;
+                if dir_meta.mode() & libc::S_ISGID == libc::S_ISGID {
+                    expected_gid = dir_meta.gid();
+                    expected_mode |= libc::S_ISGID;
+                }
+                Some(((expected_uid, expected_gid), expected_mode))
+            }
         };
 
         let res = root
@@ -803,21 +818,21 @@ mod utils {
             // Verify that the remaining paths match the mode we expect (either
             // they don't exist or it matches the mode we requested).
             for subpath in subpaths {
-                let got_mode = syscalls::fstatat(&handle, &subpath)
-                    .map(|st| st.st_mode)
+                let got = syscalls::fstatat(&handle, &subpath)
+                    .map(|st| ((st.st_uid, st.st_gid), st.st_mode))
                     .ok();
-                match expected_mode {
+                match expected_subdir_state {
                     // We expect there to be a directory with the exact mode.
-                    Some(mode) => {
+                    Some(want) => {
                         assert_eq!(
-                            got_mode, Some(mode),
-                            "unexpected file mode for newly-created directory {subpath:?} for mkdir_all({unsafe_path:?})"
+                            got, Some(want),
+                            "unexpected owner + file mode for newly-created directory {subpath:?} for mkdir_all({unsafe_path:?})"
                         );
                     }
                     // Make sure there isn't directory (even errors are fine!).
                     None => {
                         assert_ne!(
-                            got_mode,
+                            got.map(|((_, _), mode)| mode & libc::S_IFMT),
                             Some(libc::S_IFDIR),
                             "unexpected directory {subpath:?} for mkdir_all({unsafe_path:?}) that failed"
                         );

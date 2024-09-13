@@ -831,9 +831,26 @@ impl RootRef<'_> {
         // errors, but it seems to me that a multithreaded program setting its
         // own umask() is probably not safe in general anyway. umask() is meant
         // to be used for shells when spawning subprocesses.
-        let (want_uid, want_gid) = (syscalls::geteuid(), syscalls::getegid());
-        let want_mode = libc::S_IFDIR
-            | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE)).unwrap_or(0o022));
+        let (want_uid, want_gid, want_mode) = {
+            let want_uid = syscalls::geteuid();
+            let mut want_gid = syscalls::getegid();
+            let mut want_mode = libc::S_IFDIR
+                | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE)).unwrap_or(0o022));
+
+            // The setgid bit is inherited to child directories and affects the
+            // group owner of any inodes created in said directory, so if the
+            // starting directory has it set we need to adjust our expected mode
+            // and owner to match.
+            let dir_meta = current.metadata().map_err(|err| ErrorImpl::OsError {
+                operation: "get starting directory metadata".into(),
+                source: err,
+            })?;
+            if dir_meta.st_mode() & libc::S_ISGID == libc::S_ISGID {
+                want_gid = dir_meta.st_gid();
+                want_mode |= libc::S_ISGID;
+            }
+            (want_uid, want_gid, want_mode)
+        };
 
         // For the remaining components, create a each component one-by-one.
         for part in remaining_parts {
