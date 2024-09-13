@@ -204,8 +204,8 @@ impl ProcfsHandle {
             }
             .into()
         })
-        // NOTE: from_fd checks this is an actual procfs root.
-        .and_then(Self::from_fd)
+        // NOTE: try_from_fd checks this is an actual procfs root.
+        .and_then(Self::try_from_fd)
     }
 
     /// Create a new `open_tree(2)`-based [`ProcfsHandle`]. This handle is
@@ -224,8 +224,8 @@ impl ProcfsHandle {
             }
             .into()
         })
-        // NOTE: from_fd checks this is an actual procfs root.
-        .and_then(Self::from_fd)
+        // NOTE: try_from_fd checks this is an actual procfs root.
+        .and_then(Self::try_from_fd)
     }
 
     /// Create a plain `open(2)`-style [`ProcfsHandle`].
@@ -245,8 +245,8 @@ impl ProcfsHandle {
             }
             .into()
         })
-        // NOTE: from_fd checks this is an actual procfs root.
-        .and_then(Self::from_fd)
+        // NOTE: try_from_fd checks this is an actual procfs root.
+        .and_then(Self::try_from_fd)
     }
 
     /// Create a new handle that references a safe `/proc`.
@@ -483,7 +483,7 @@ impl ProcfsHandle {
     /// Try to convert a regular [`File`] handle to a [`ProcfsHandle`]. This
     /// method will return an error if the file handle is not actually the root
     /// of a procfs mount.
-    pub fn from_fd<Fd: Into<OwnedFd>>(inner: Fd) -> Result<Self, Error> {
+    pub fn try_from_fd<Fd: Into<OwnedFd>>(inner: Fd) -> Result<Self, Error> {
         let inner = inner.into();
 
         // Make sure the file is actually a procfs handle.
@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn bad_root() {
         let file = File::open("/").expect("open root");
-        let procfs = ProcfsHandle::from_fd(file);
+        let procfs = ProcfsHandle::try_from_fd(file);
 
         assert!(
             procfs.is_err(),
@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn bad_tmpfs() {
         let file = File::open("/tmp").expect("open tmpfs");
-        let procfs = ProcfsHandle::from_fd(file);
+        let procfs = ProcfsHandle::try_from_fd(file);
 
         assert!(
             procfs.is_err(),
@@ -589,7 +589,7 @@ mod tests {
     #[test]
     fn bad_proc_nonroot() {
         let file = File::open("/proc/tty").expect("open tmpfs");
-        let procfs = ProcfsHandle::from_fd(file);
+        let procfs = ProcfsHandle::try_from_fd(file);
 
         assert!(
             procfs.is_err(),
