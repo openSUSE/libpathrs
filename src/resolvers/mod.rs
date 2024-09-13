@@ -53,7 +53,7 @@ const MAX_SYMLINK_TRAVERSALS: usize = 128;
 /// [`Handle`]: crate::Handle
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum ResolverBackend {
+pub(crate) enum ResolverBackend {
     /// Use the native `openat2(2)` backend (requires kernel support).
     KernelOpenat2,
     /// Use the userspace "emulated" backend.
@@ -81,7 +81,8 @@ impl Default for ResolverBackend {
 
 impl ResolverBackend {
     /// Checks if the resolver is supported on the current platform.
-    pub fn supported(self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn supported(self) -> bool {
         match self {
             ResolverBackend::KernelOpenat2 => *syscalls::OPENAT2_IS_SUPPORTED,
             ResolverBackend::EmulatedOpath => true,
@@ -92,14 +93,13 @@ impl ResolverBackend {
 /// Resolover backend and its associated flags.
 ///
 /// This is the primary structure used to configure how a given [`Root`] will
-/// conduct path resolutions. It's not recommended to change the
-/// [`ResolverBackend`] but it wouldn't hurt.
+/// conduct path resolutions.
 ///
 /// [`Root`]: crate::Root
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Resolver {
     /// Underlying resolution backend used.
-    pub backend: ResolverBackend,
+    pub(crate) backend: ResolverBackend,
     /// Flags to pass to the resolution backend.
     pub flags: ResolverFlags,
 }
