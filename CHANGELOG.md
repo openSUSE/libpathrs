@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   - `mkdir_all` so that Go users can switch from `os.MkdirAll`. This is based
     on similar work done in [filepath-securejoin][].
 
+- root: The method for configuring the resolver has changed to be more akin to
+  a getter-setter style. This allows for more ergonomic usage (see the
+  `RootRef::with_resolver_flags` examples) and also lets us avoid exposing
+  internal types needlessly.
+
+  As part of this change, the ability to choose the resolver backend was
+  removed (because the C API also no longer supports it). This will probably be
+  re-added in the future, but for now it seems best to not add extra APIs that
+  aren't necessary until someone asks.
+
 - opath resolver: We now emulate `fs.protected_symlinks` when resolving
   symlinks using the emulated opath resolver. This is only done if
   `fs.protected_symlinks` is enabled on the system (to mirror the behaviour of

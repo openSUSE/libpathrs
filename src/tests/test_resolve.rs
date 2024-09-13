@@ -42,11 +42,18 @@ macro_rules! resolve_tests {
             fn [<root_ $test_name _default>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
+                assert_eq!(
+                    $root_var.resolver_backend(),
+                    ResolverBackend::default(),
+                    "ResolverBackend not the default despite not being configured"
+                );
 
                 { $body }
 
                 // Make sure root_dir is not dropped earlier.
                 let _root_dir = root_dir;
+                // Make sure the mut $root_var doesn't give us a warning.
+                $root_var.set_resolver_flags($root_var.resolver_flags());
                 Ok(())
             }
 
@@ -56,11 +63,18 @@ macro_rules! resolve_tests {
                 let root_dir = $root_dir;
                 let root = Root::open(&root_dir)?;
                 let mut $root_var = root.as_ref();
+                assert_eq!(
+                    $root_var.resolver_backend(),
+                    ResolverBackend::default(),
+                    "ResolverBackend not the default despite not being configured"
+                );
 
                 { $body }
 
                 // Make sure root_dir is not dropped earlier.
                 let _root_dir = root_dir;
+                // Make sure the mut $root_var doesn't give us a warning.
+                $root_var.set_resolver_flags($root_var.resolver_flags());
                 Ok(())
             }
 
@@ -69,8 +83,14 @@ macro_rules! resolve_tests {
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
-                $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
-                if !$root_var.resolver.backend.supported() {
+                $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
+                assert_eq!(
+                    $root_var.resolver_backend(),
+                    ResolverBackend::KernelOpenat2,
+                    "incorrect ResolverBackend despite using set_resolver_backend"
+                );
+
+                if !$root_var.resolver_backend().supported() {
                     // Skip if not supported.
                     return Ok(());
                 }
@@ -88,8 +108,13 @@ macro_rules! resolve_tests {
                 let root_dir = $root_dir;
                 let root = Root::open(&root_dir)?;
                 let mut $root_var = root.as_ref();
-                $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
-                if !$root_var.resolver.backend.supported() {
+                $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
+                assert_eq!(
+                    $root_var.resolver_backend(),
+                    ResolverBackend::KernelOpenat2,
+                    "incorrect ResolverBackend despite using set_resolver_backend"
+                );
+                if !$root_var.resolver_backend().supported() {
                     // Skip if not supported.
                     return Ok(());
                 }
@@ -106,10 +131,15 @@ macro_rules! resolve_tests {
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
-                $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
+                $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
+                assert_eq!(
+                    $root_var.resolver_backend(),
+                    ResolverBackend::EmulatedOpath,
+                    "incorrect ResolverBackend despite using set_resolver_backend"
+                );
                 // EmulatedOpath is always supported.
                 assert!(
-                    $root_var.resolver.backend.supported(),
+                    $root_var.resolver_backend().supported(),
                     "emulated opath is always supported",
                 );
 
@@ -125,11 +155,17 @@ macro_rules! resolve_tests {
             fn [<rootref_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = $root_dir;
                 let root = Root::open(&root_dir)?;
-                let mut $root_var = root.as_ref();
-                $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
+                let mut $root_var = root
+                    .as_ref();
+                $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
+                assert_eq!(
+                    $root_var.resolver_backend(),
+                    ResolverBackend::EmulatedOpath,
+                    "incorrect ResolverBackend despite using set_resolver_backend"
+                );
                 // EmulatedOpath is always supported.
                 assert!(
-                    $root_var.resolver.backend.supported(),
+                    $root_var.resolver_backend().supported(),
                     "emulated opath is always supported",
                 );
 
@@ -166,7 +202,7 @@ macro_rules! resolve_tests {
                 [$root_dir]
                 $(#[cfg($ignore_meta)])*
                 rust-fn [<$op_name _ $test_name>](mut root: Root) {
-                    root.resolver.flags = $rflags;
+                    root.set_resolver_flags($rflags);
 
                     let expected = $expected;
                     utils::[<check_root_ $op_name>](

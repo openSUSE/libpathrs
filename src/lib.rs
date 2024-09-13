@@ -144,7 +144,9 @@ pub use root::*;
 pub mod error;
 pub mod flags;
 pub mod procfs;
-pub mod resolvers;
+
+// Resolver backend implementations.
+mod resolvers;
 
 // C API.
 #[cfg(feature = "capi")]

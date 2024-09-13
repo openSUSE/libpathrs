@@ -21,7 +21,7 @@
 
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
-    flags::{OpenFlags, RenameFlags},
+    flags::{OpenFlags, RenameFlags, ResolverFlags},
     procfs::GLOBAL_PROCFS_HANDLE,
     resolvers::Resolver,
     syscalls::{self, FrozenFd},
@@ -141,20 +141,17 @@ pub struct Root {
 
     /// The underlying [`Resolver`] to use for all operations underneath this
     /// root. This affects not just [`resolve`] but also all other methods which
-    /// have to implicitly resolve a path underneath `Root`.
+    /// have to implicitly resolve a path underneath [`Root`].
     ///
     /// [`resolve`]: Self::resolve
-    // TODO: Drop this and switch to builder-pattern...
-    pub resolver: Resolver,
+    resolver: Resolver,
 }
 
 impl Root {
     /// Open a [`Root`] handle.
     ///
-    /// The [`Resolver`] used by this handle is chosen at runtime based on which
-    /// resolvers are supported by the running kernel (the default [`Resolver`]
-    /// is always `Resolver::default()`). You can change the [`Resolver`] used
-    /// by changing `Root.resolver`, though this is not recommended.
+    /// The resolver backend used by this handle is chosen at runtime based on
+    /// which resolvers are supported by the running kernel.
     ///
     /// # Errors
     ///
@@ -205,6 +202,11 @@ impl Root {
     }
 
     /// Borrow this [`Root`] as a [`RootRef`].
+    ///
+    /// The [`ResolverFlags`] of the [`Root`] are inherited by the [`RootRef`]
+    /// byt are not shared ([`Root::set_resolver_flags`] does not affect
+    /// existing [`RootRef`]s or [`RootRef`]s not created using
+    /// [`Root::as_ref`]).
     // XXX: We can't use Borrow/Deref for this because HandleRef takes a
     //      lifetime rather than being a pure reference. Ideally we would use
     //      Deref but it seems that won't be possible in standard Rust for a
@@ -215,6 +217,48 @@ impl Root {
             inner: self.as_fd(),
             resolver: self.resolver,
         }
+    }
+
+    /// Get the current [`ResolverFlags`] for this [`Root`].
+    #[inline]
+    pub fn resolver_flags(&self) -> ResolverFlags {
+        self.resolver.flags
+    }
+
+    /// Set the [`ResolverFlags`] for all operations in this [`Root`].
+    ///
+    /// Note that this only affects this instance of [`Root`]. Neither other
+    /// [`Root`] instances nor existing [`RootRef`] references to this [`Root`]
+    /// will have their [`ResolverFlags`] unchanged.
+    #[inline]
+    pub fn set_resolver_flags(&mut self, flags: ResolverFlags) -> &mut Self {
+        self.resolver.flags = flags;
+        self
+    }
+
+    /// Set the [`ResolverFlags`] for all operations in this [`Root`].
+    ///
+    /// This is identical to [`Root::set_resolver_flags`] except that it can
+    /// more easily be used with chaining to configure a [`Root`] in a single
+    /// line:
+    ///
+    /// ```rust
+    /// # use pathrs::{Root, flags::ResolverFlags};
+    /// # let tmpdir = tempfile::TempDir::new()?;
+    /// # let rootdir = &tmpdir;
+    /// let root = Root::open(rootdir)?.with_resolver_flags(ResolverFlags::NO_SYMLINKS);
+    /// // Continue to use root.
+    /// # let _ = tmpdir; // make sure it is not dropped early
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    ///
+    /// If you want to temporarily set flags just for a small set of operations,
+    /// you should use [`Root::as_ref`] to create a temporary [`RootRef`] and
+    /// use [`RootRef::with_resolver_flags`] instead.
+    #[inline]
+    pub fn with_resolver_flags(mut self, flags: ResolverFlags) -> Self {
+        self.set_resolver_flags(flags);
+        self
     }
 
     /// Create a copy of an existing [`Root`].
@@ -485,7 +529,7 @@ impl AsFd for Root {
 pub struct RootRef<'fd> {
     inner: BorrowedFd<'fd>,
     // TODO: Drop this and switch to builder-pattern.
-    pub resolver: Resolver,
+    resolver: Resolver,
 }
 
 impl RootRef<'_> {
@@ -515,6 +559,88 @@ impl RootRef<'_> {
             inner,
             resolver: Default::default(),
         }
+    }
+
+    /// Get the current [`ResolverFlags`] for this [`RootRef`].
+    #[inline]
+    pub fn resolver_flags(&self) -> ResolverFlags {
+        self.resolver.flags
+    }
+
+    /// Set the [`ResolverFlags`] for all operations in this [`RootRef`].
+    ///
+    /// Note that this only affects this instance of [`RootRef`]. Neither the
+    /// original [`Root`] nor any other [`RootRef`] references to the same
+    /// underlying [`Root`] will have their [`ResolverFlags`] unchanged.
+    ///
+    /// [`RootRef::clone`] also copies the current [`ResolverFlags`] of the
+    /// [`RootRef`].
+    #[inline]
+    pub fn set_resolver_flags(&mut self, flags: ResolverFlags) -> &mut Self {
+        self.resolver.flags = flags;
+        self
+    }
+
+    /// Set the [`ResolverFlags`] for all operations in this [`RootRef`].
+    ///
+    /// This is identical to [`RootRef::set_resolver_flags`] except that it can
+    /// more easily be used with chaining to configure a [`RootRef`] in a single
+    /// line:
+    ///
+    /// ```rust
+    /// # use std::{
+    /// #     fs::{Permissions, File},
+    /// #     os::unix::{
+    /// #         fs::PermissionsExt,
+    /// #         io::{AsFd, OwnedFd},
+    /// #     },
+    /// # };
+    /// # use pathrs::{RootRef, flags::ResolverFlags, InodeType};
+    /// # let tmpdir = tempfile::TempDir::new()?;
+    /// # let rootdir = &tmpdir;
+    /// let fd: OwnedFd = File::open(rootdir)?.into();
+    /// let root = RootRef::from_fd_unchecked(fd.as_fd())
+    ///     .with_resolver_flags(ResolverFlags::NO_SYMLINKS);
+    ///
+    /// // Continue to use RootRef.
+    /// # let perm = Permissions::from_mode(0o755);
+    /// root.mkdir_all("foo/bar/baz", &perm)?;
+    /// root.create("one", &InodeType::Directory(perm))?;
+    /// root.remove_all("foo")?;
+    /// # let _ = tmpdir; // make sure it is not dropped early
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    ///
+    /// The other primary usecase for [`RootRef::with_resolver_flags`] is with
+    /// [`Root::as_ref`] to temporarily set some flags for a single one-line or
+    /// a few operations without modifying the original [`Root`] resolver flags:
+    ///
+    /// ```rust
+    /// # use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+    /// # use pathrs::{Root, flags::ResolverFlags, InodeType};
+    /// # let tmpdir = tempfile::TempDir::new()?;
+    /// # let rootdir = &tmpdir;
+    /// let root = Root::open(rootdir)?;
+    /// # let perm = Permissions::from_mode(0o755);
+    ///
+    /// // Apply ResolverFlags::NO_SYMLINKS for a single operation.
+    /// root.as_ref()
+    ///     .with_resolver_flags(ResolverFlags::NO_SYMLINKS)
+    ///     .mkdir_all("foo/bar/baz", &perm)?;
+    ///
+    /// // Create a temporary RootRef to do multiple operations.
+    /// let root2 = root
+    ///     .as_ref()
+    ///     .with_resolver_flags(ResolverFlags::NO_SYMLINKS);
+    /// root2.create("one", &InodeType::Directory(perm))?;
+    /// root2.remove_all("foo")?;
+    /// # let _ = tmpdir; // make sure it is not dropped early
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    #[inline]
+    pub fn with_resolver_flags(mut self, flags: ResolverFlags) -> Self {
+        self.set_resolver_flags(flags);
+        self
     }
 
     /// Create a copy of a [`RootRef`].
@@ -1138,12 +1264,56 @@ impl AsFd for RootRef<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Root, RootRef};
+    use crate::{resolvers::ResolverBackend, Root, RootRef};
 
     use std::os::unix::io::{AsFd, AsRawFd};
 
     use anyhow::Error;
     use pretty_assertions::assert_eq;
+
+    impl Root {
+        // TODO: Should we make this public? Is there any real benefit?
+        #[inline]
+        pub(crate) fn resolver_backend(&self) -> ResolverBackend {
+            self.resolver.backend
+        }
+
+        // TODO: Should we make this public? Is there any real benefit?
+        #[inline]
+        pub(crate) fn set_resolver_backend(&mut self, backend: ResolverBackend) -> &mut Self {
+            self.resolver.backend = backend;
+            self
+        }
+
+        // TODO: Should we make this public? Is there any real benefit?
+        #[inline]
+        pub(crate) fn with_resolver_backend(mut self, backend: ResolverBackend) -> Self {
+            self.set_resolver_backend(backend);
+            self
+        }
+    }
+
+    impl RootRef<'_> {
+        // TODO: Should we make this public? Is there any real benefit?
+        #[inline]
+        pub(crate) fn resolver_backend(&self) -> ResolverBackend {
+            self.resolver.backend
+        }
+
+        // TODO: Should we make this public? Is there any real benefit?
+        #[inline]
+        pub(crate) fn set_resolver_backend(&mut self, backend: ResolverBackend) -> &mut Self {
+            self.resolver.backend = backend;
+            self
+        }
+
+        // TODO: Should we make this public? Is there any real benefit?
+        #[inline]
+        pub(crate) fn with_resolver_backend(mut self, backend: ResolverBackend) -> Self {
+            self.set_resolver_backend(backend);
+            self
+        }
+    }
 
     #[test]
     fn from_fd_unchecked() -> Result<(), Error> {
