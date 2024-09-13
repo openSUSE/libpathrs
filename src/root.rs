@@ -769,6 +769,18 @@ impl RootRef<'_> {
                 description: "mode cannot contain non-0o7777 bits".into(),
             })?
         }
+        // Linux silently ignores S_IS[UG]ID if passed to mkdirat(2), and a lot
+        // of libraries just ignore these flags. However, ignoring them as a new
+        // library seems less than ideal -- users shouldn't set flags that are
+        // no-ops because they might not notice they are no-ops.
+        if perm.mode() & !0o1777 != 0 {
+            Err(ErrorImpl::InvalidArgument {
+                name: "perm".into(),
+                description:
+                    "mode contains setuid or setgid bits that are silently ignored by mkdirat"
+                        .into(),
+            })?
+        }
 
         let (handle, remaining) = self
             .resolver

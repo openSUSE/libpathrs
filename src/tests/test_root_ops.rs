@@ -356,9 +356,13 @@ root_op_tests! {
     exchange_plain: rename("a", "e", RenameFlags::RENAME_EXCHANGE) => Ok(());
     exchange_enoent: rename("a", "aa", RenameFlags::RENAME_EXCHANGE) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
 
-    invalid_mode: mkdir_all("foo", libc::S_IFDIR | 0o777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_type: mkdir_all("foo", libc::S_IFDIR | 0o777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_garbage: mkdir_all("foo", 0o12340777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_setuid: mkdir_all("foo", libc::S_ISUID | 0o777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_setgid: mkdir_all("foo", libc::S_ISGID | 0o777) => Err(ErrorKind::InvalidArgument);
     existing: mkdir_all("a", 0o711) => Ok(());
     basic: mkdir_all("a/b/c/d/e/f/g/h/i/j", 0o711) => Ok(());
+    sticky: mkdir_all("foo", libc::S_ISVTX | 0o711) => Ok(());
     dotdot_in_nonexisting: mkdir_all("a/b/c/d/e/f/g/h/i/j/k/../lmnop", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     dotdot_in_existing: mkdir_all("b/c/../c/./d/e/f/g/h", 0o711) => Ok(());
     dotdot_after_symlink: mkdir_all("e/../dd/ee/ff", 0o711) => Ok(());
