@@ -44,9 +44,6 @@ _test_as_root = []
 [profile.release]
 # Enable link-time optimisations.
 lto = true
-# Since we are cdylib, panic!s will cause aborts once they hit the FFI barrier
-# anyway. We might as well reduce our code size if we're doing it.
-panic = "abort"
 
 [dependencies]
 bitflags = "^2"
