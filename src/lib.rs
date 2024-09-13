@@ -131,9 +131,6 @@ extern crate lazy_static;
 extern crate libc;
 extern crate regex;
 
-/// Bit-flags for controlling various operations.
-pub mod flags;
-
 // `Handle` implementation.
 mod handle;
 #[doc(inline)]
@@ -144,16 +141,12 @@ mod root;
 #[doc(inline)]
 pub use root::*;
 
-// `Error` definitions.
 pub mod error;
-
-// Backend resolver implementations.
-mod resolvers;
-#[doc(inline)]
-pub use resolvers::{Resolver, ResolverBackend};
-
-/// Safe procfs handles.
+pub mod flags;
 pub mod procfs;
+
+// Resolver backend implementations.
+mod resolvers;
 
 // C API.
 #[cfg(feature = "capi")]

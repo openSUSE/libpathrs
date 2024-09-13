@@ -20,8 +20,9 @@
 use crate::{
     error::Error,
     flags::{OpenFlags, RenameFlags},
+    resolvers::Resolver,
     tests::traits::{ErrorImpl, HandleImpl},
-    Handle, InodeType, Resolver, Root, RootRef,
+    Handle, InodeType, Root, RootRef,
 };
 
 use std::{
@@ -35,12 +36,13 @@ pub(in crate::tests) trait RootImpl: AsFd + std::fmt::Debug + Sized {
     type Handle: HandleImpl<Error = Self::Error> + Into<OwnedFd>;
     type Error: ErrorImpl;
 
+    // NOTE:: Not part of the actual API, only used for tests!
+    fn resolver(&self) -> Resolver;
+
     // NOTE: We return Self::Cloned so that we can share types with RootRef.
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned;
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error>;
-
-    fn resolver(&self) -> Resolver;
 
     fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error>;
 
@@ -82,18 +84,21 @@ impl RootImpl for Root {
     type Handle = Handle;
     type Error = Error;
 
+    fn resolver(&self) -> Resolver {
+        Resolver {
+            backend: self.resolver_backend(),
+            flags: self.resolver_flags(),
+        }
+    }
+
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        let mut root = Self::Cloned::from_fd_unchecked(fd);
-        root.resolver = resolver;
-        root
+        Self::Cloned::from_fd_unchecked(fd)
+            .with_resolver_backend(resolver.backend)
+            .with_resolver_flags(resolver.flags)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
         self.try_clone().map_err(From::from)
-    }
-
-    fn resolver(&self) -> Resolver {
-        self.resolver
     }
 
     fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
@@ -156,18 +161,21 @@ impl RootImpl for &Root {
     type Handle = Handle;
     type Error = Error;
 
+    fn resolver(&self) -> Resolver {
+        Resolver {
+            backend: self.resolver_backend(),
+            flags: self.resolver_flags(),
+        }
+    }
+
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        let mut root = Self::Cloned::from_fd_unchecked(fd);
-        root.resolver = resolver;
-        root
+        Self::Cloned::from_fd_unchecked(fd)
+            .with_resolver_backend(resolver.backend)
+            .with_resolver_flags(resolver.flags)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
         Root::try_clone(self).map_err(From::from)
-    }
-
-    fn resolver(&self) -> Resolver {
-        self.resolver
     }
 
     fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
@@ -230,18 +238,21 @@ impl RootImpl for RootRef<'_> {
     type Handle = Handle;
     type Error = Error;
 
+    fn resolver(&self) -> Resolver {
+        Resolver {
+            backend: self.resolver_backend(),
+            flags: self.resolver_flags(),
+        }
+    }
+
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        let mut root = Self::Cloned::from_fd_unchecked(fd);
-        root.resolver = resolver;
-        root
+        Self::Cloned::from_fd_unchecked(fd)
+            .with_resolver_backend(resolver.backend)
+            .with_resolver_flags(resolver.flags)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
         self.try_clone().map_err(From::from)
-    }
-
-    fn resolver(&self) -> Resolver {
-        self.resolver
     }
 
     fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
@@ -304,18 +315,21 @@ impl RootImpl for &RootRef<'_> {
     type Handle = Handle;
     type Error = Error;
 
+    fn resolver(&self) -> Resolver {
+        Resolver {
+            backend: self.resolver_backend(),
+            flags: self.resolver_flags(),
+        }
+    }
+
     fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        let mut root = Self::Cloned::from_fd_unchecked(fd);
-        root.resolver = resolver;
-        root
+        Self::Cloned::from_fd_unchecked(fd)
+            .with_resolver_backend(resolver.backend)
+            .with_resolver_flags(resolver.flags)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
         RootRef::try_clone(self).map_err(From::from)
-    }
-
-    fn resolver(&self) -> Resolver {
-        self.resolver
     }
 
     fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {

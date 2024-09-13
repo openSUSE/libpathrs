@@ -17,11 +17,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! `procfs_beneath::resolve` is a very minimal resolver that doesn't allow:
 //!
-//!  1. Any ".." components.
+//! [`ProcfsResolver`](crate::resolvers::procfs::ProcfsResolver) is a very
+//! minimal resolver that doesn't allow:
+//!
+//!  1. Any ".." components (with `openat2` this is slightly relaxed).
 //!  2. Any absolute symlinks.
-//!  3. (If `statx` is supported), any mount-point crossings are disallowed.
+//!  3. (If `statx` or `openat2` is supported), any mount-point crossings.
 //!
 //! This allows us to avoid using any `/proc` checks, and thus this resolver can
 //! be used within the `pathrs::procfs` helpers that are used by other parts of
@@ -94,6 +96,9 @@ impl ProcfsResolver {
     }
 }
 
+/// [`openat2`][openat2.2]-based implementation of [`ProcfsResolver`].
+///
+/// [openat2.2]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
 fn openat2_resolve<F: AsFd, P: AsRef<Path>>(
     root: F,
     path: P,
@@ -129,6 +134,7 @@ fn openat2_resolve<F: AsFd, P: AsRef<Path>>(
     })
 }
 
+/// `O_PATH`-based implementation of [`ProcfsResolver`].
 fn opath_resolve<F: AsFd, P: AsRef<Path>>(
     root: F,
     path: P,

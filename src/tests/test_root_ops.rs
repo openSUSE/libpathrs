@@ -22,8 +22,9 @@ use crate::tests::capi;
 use crate::{
     error::ErrorKind,
     flags::{OpenFlags, RenameFlags},
+    resolvers::ResolverBackend,
     tests::common as tests_common,
-    InodeType, ResolverBackend, Root,
+    InodeType, Root,
 };
 
 use std::{fs::Permissions, os::unix::fs::PermissionsExt};
@@ -56,9 +57,9 @@ macro_rules! root_op_tests {
             #[test]
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
-                let mut $root_var = Root::open(&root_dir)?;
-                $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
-                if !$root_var.resolver.backend.supported() {
+                let $root_var = Root::open(&root_dir)?
+                    .with_resolver_backend(ResolverBackend::KernelOpenat2);
+                if !$root_var.resolver_backend().supported() {
                     // Skip if not supported.
                     return Ok(());
                 }
@@ -71,9 +72,10 @@ macro_rules! root_op_tests {
             fn [<rootref_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let root = Root::open(&root_dir)?;
-                let mut $root_var = root.as_ref();
-                $root_var.resolver.backend = ResolverBackend::KernelOpenat2;
-                if !$root_var.resolver.backend.supported() {
+                let $root_var = root
+                    .as_ref()
+                    .with_resolver_backend(ResolverBackend::KernelOpenat2);
+                if !$root_var.resolver_backend().supported() {
                     // Skip if not supported.
                     return Ok(());
                 }
@@ -85,11 +87,11 @@ macro_rules! root_op_tests {
             #[test]
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
-                let mut $root_var = Root::open(&root_dir)?;
-                $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
+                let $root_var = Root::open(&root_dir)?
+                    .with_resolver_backend(ResolverBackend::EmulatedOpath);
                 // EmulatedOpath is always supported.
                 assert!(
-                    $root_var.resolver.backend.supported(),
+                    $root_var.resolver_backend().supported(),
                     "emulated opath is always supported",
                 );
 
@@ -101,11 +103,12 @@ macro_rules! root_op_tests {
             fn [<rootref_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let root = Root::open(&root_dir)?;
-                let mut $root_var = root.as_ref();
-                $root_var.resolver.backend = ResolverBackend::EmulatedOpath;
+                let $root_var = root
+                    .as_ref()
+                    .with_resolver_backend(ResolverBackend::EmulatedOpath);
                 // EmulatedOpath is always supported.
                 assert!(
-                    $root_var.resolver.backend.supported(),
+                    $root_var.resolver_backend().supported(),
                     "emulated opath is always supported",
                 );
 
