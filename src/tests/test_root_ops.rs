@@ -134,100 +134,113 @@ macro_rules! root_op_tests {
         }
     };
 
-    (@impl mkfile $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkfile $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::File(Permissions::from_mode($mode))
             } => $expected_result
         }
     };
-    (@impl mkdir $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkdir $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Directory(Permissions::from_mode($mode))
             } => $expected_result
         }
     };
-    (@impl symlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl symlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Symlink($target.into())
             } => $expected_result
         }
     };
-    (@impl hardlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl hardlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Hardlink($target.into())
             } => $expected_result
         }
     };
-    (@impl mkfifo $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkfifo $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Fifo(Permissions::from_mode($mode))
             } => $expected_result
         }
     };
-    (@impl mkblk $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkblk $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
         root_op_tests!{
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::BlockDevice(Permissions::from_mode($mode), libc::makedev($major, $minor))
             } => $expected_result
         }
     };
-    (@impl mkchar $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkchar $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
         root_op_tests!{
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::CharacterDevice(Permissions::from_mode($mode), libc::makedev($major, $minor))
             } => $expected_result
         }
     };
 
-    (@impl create_file $test_name:ident ($path:expr, $($oflag:ident)|+, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl create_file $test_name:ident ($path:expr, $($oflag:ident)|+, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_create_file(&root, $path, $(OpenFlags::$oflag)|*, &Permissions::from_mode($mode), $expected_result)
             }
         }
     };
 
-    (@impl remove_dir $test_name:ident ($path:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl remove_dir $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_remove_dir(&root, $path, $expected_result)
             }
         }
     };
 
-    (@impl remove_file $test_name:ident ($path:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl remove_file $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_remove_file(&root, $path, $expected_result)
             }
         }
     };
 
-    (@impl remove_all $test_name:ident ($path:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl remove_all $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_remove_all(&root, $path, $expected_result)
             }
         }
     };
 
-    (@impl rename $test_name:ident ($src_path:expr, $dst_path:expr, $rflags:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl rename $test_name:ident ($src_path:expr, $dst_path:expr, $rflags:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_rename(&root, $src_path, $dst_path, $rflags, $expected_result)
             }
         }
     };
 
-    (@impl mkdir_all $test_name:ident ($path:expr, $mode:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkdir_all $test_name:ident ($path:expr, $mode:expr) => $expected_result:expr) => {
         root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_mkdir_all(&root, $path, Permissions::from_mode($mode), $expected_result)
             }
@@ -237,10 +250,13 @@ macro_rules! root_op_tests {
     // root_tests!{
     //      ...
     // }
-    ($($test_name:ident: $file_type:ident ( $($args:expr),* ) => $expected_result:expr );+ $(;)?) => {
+    ($($(#[cfg($ignore_meta:meta)])* $test_name:ident: $file_type:ident ( $($args:expr),* ) => $expected_result:expr );+ $(;)?) => {
         paste::paste! {
             $(
-                root_op_tests!{ @impl $file_type [<$file_type _ $test_name>]( $($args),* ) => $expected_result }
+                root_op_tests!{
+                    $(#[cfg($ignore_meta)])*
+                    @impl $file_type [<$file_type _ $test_name>]( $($args),* ) => $expected_result
+                }
             )*
         }
     };
