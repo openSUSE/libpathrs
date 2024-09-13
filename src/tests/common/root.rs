@@ -239,5 +239,8 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         "tmpfs-other/link-otheruid" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 11111:12345});
         "tmpfs-other/link-othergid" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 12345:11111});
         "tmpfs-other/link-other" => #[cfg(feature = "_test_as_root")] (symlink -> "file", {chown 11111:11111});
+        // setgid has unique behaviour when interacting with mkdir_all.
+        "setgid-self" => (dir, {chmod 0o7777});
+        "setgid-other" => #[cfg(feature = "_test_as_root")] (dir, {chown 12345:12345}, {chmod 0o7777});
     }
 }

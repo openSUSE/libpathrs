@@ -113,13 +113,22 @@ pub(crate) enum PartialLookup<H, E = Error> {
     },
 }
 
+impl<H> AsRef<H> for PartialLookup<H> {
+    fn as_ref(&self) -> &H {
+        match self {
+            Self::Complete(handle) => handle,
+            Self::Partial { handle, .. } => handle,
+        }
+    }
+}
+
 impl TryInto<Handle> for PartialLookup<Handle> {
     type Error = Error;
 
     fn try_into(self) -> Result<Handle, Self::Error> {
         match self {
-            PartialLookup::Complete(handle) => Ok(handle),
-            PartialLookup::Partial { last_error, .. } => Err(last_error),
+            Self::Complete(handle) => Ok(handle),
+            Self::Partial { last_error, .. } => Err(last_error),
         }
     }
 }
@@ -137,8 +146,8 @@ impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Handle> {
 
     fn try_into(self) -> Result<(Handle, Option<PathBuf>), Self::Error> {
         match self {
-            PartialLookup::Complete(handle) => Ok((handle, None)),
-            PartialLookup::Partial {
+            Self::Complete(handle) => Ok((handle, None)),
+            Self::Partial {
                 handle,
                 remaining,
                 last_error,

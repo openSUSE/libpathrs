@@ -134,100 +134,113 @@ macro_rules! root_op_tests {
         }
     };
 
-    (@impl mkfile $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkfile $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::File(Permissions::from_mode($mode))
             } => $expected_result
         }
     };
-    (@impl mkdir $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkdir $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Directory(Permissions::from_mode($mode))
             } => $expected_result
         }
     };
-    (@impl symlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl symlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Symlink($target.into())
             } => $expected_result
         }
     };
-    (@impl hardlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl hardlink $test_name:ident ($path:expr, $target:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Hardlink($target.into())
             } => $expected_result
         }
     };
-    (@impl mkfifo $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkfifo $test_name:ident ($path:expr, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::Fifo(Permissions::from_mode($mode))
             } => $expected_result
         }
     };
-    (@impl mkblk $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkblk $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
         root_op_tests!{
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::BlockDevice(Permissions::from_mode($mode), libc::makedev($major, $minor))
             } => $expected_result
         }
     };
-    (@impl mkchar $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkchar $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
         root_op_tests!{
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::CharacterDevice(Permissions::from_mode($mode), libc::makedev($major, $minor))
             } => $expected_result
         }
     };
 
-    (@impl create_file $test_name:ident ($path:expr, $($oflag:ident)|+, $mode:literal) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl create_file $test_name:ident ($path:expr, $($oflag:ident)|+, $mode:literal) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_create_file(&root, $path, $(OpenFlags::$oflag)|*, &Permissions::from_mode($mode), $expected_result)
             }
         }
     };
 
-    (@impl remove_dir $test_name:ident ($path:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl remove_dir $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_remove_dir(&root, $path, $expected_result)
             }
         }
     };
 
-    (@impl remove_file $test_name:ident ($path:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl remove_file $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_remove_file(&root, $path, $expected_result)
             }
         }
     };
 
-    (@impl remove_all $test_name:ident ($path:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl remove_all $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_remove_all(&root, $path, $expected_result)
             }
         }
     };
 
-    (@impl rename $test_name:ident ($src_path:expr, $dst_path:expr, $rflags:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl rename $test_name:ident ($src_path:expr, $dst_path:expr, $rflags:expr) => $expected_result:expr) => {
         root_op_tests!{
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_rename(&root, $src_path, $dst_path, $rflags, $expected_result)
             }
         }
     };
 
-    (@impl mkdir_all $test_name:ident ($path:expr, $mode:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl mkdir_all $test_name:ident ($path:expr, $mode:expr) => $expected_result:expr) => {
         root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn $test_name(root) {
                 utils::check_root_mkdir_all(&root, $path, Permissions::from_mode($mode), $expected_result)
             }
@@ -237,10 +250,13 @@ macro_rules! root_op_tests {
     // root_tests!{
     //      ...
     // }
-    ($($test_name:ident: $file_type:ident ( $($args:expr),* ) => $expected_result:expr );+ $(;)?) => {
+    ($($(#[cfg($ignore_meta:meta)])* $test_name:ident: $file_type:ident ( $($args:expr),* ) => $expected_result:expr );+ $(;)?) => {
         paste::paste! {
             $(
-                root_op_tests!{ @impl $file_type [<$file_type _ $test_name>]( $($args),* ) => $expected_result }
+                root_op_tests!{
+                    $(#[cfg($ignore_meta)])*
+                    @impl $file_type [<$file_type _ $test_name>]( $($args),* ) => $expected_result
+                }
             )*
         }
     };
@@ -340,9 +356,13 @@ root_op_tests! {
     exchange_plain: rename("a", "e", RenameFlags::RENAME_EXCHANGE) => Ok(());
     exchange_enoent: rename("a", "aa", RenameFlags::RENAME_EXCHANGE) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
 
-    invalid_mode: mkdir_all("foo", libc::S_IFDIR | 0o777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_type: mkdir_all("foo", libc::S_IFDIR | 0o777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_garbage: mkdir_all("foo", 0o12340777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_setuid: mkdir_all("foo", libc::S_ISUID | 0o777) => Err(ErrorKind::InvalidArgument);
+    invalid_mode_setgid: mkdir_all("foo", libc::S_ISGID | 0o777) => Err(ErrorKind::InvalidArgument);
     existing: mkdir_all("a", 0o711) => Ok(());
     basic: mkdir_all("a/b/c/d/e/f/g/h/i/j", 0o711) => Ok(());
+    sticky: mkdir_all("foo", libc::S_ISVTX | 0o711) => Ok(());
     dotdot_in_nonexisting: mkdir_all("a/b/c/d/e/f/g/h/i/j/k/../lmnop", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     dotdot_in_existing: mkdir_all("b/c/../c/./d/e/f/g/h", 0o711) => Ok(());
     dotdot_after_symlink: mkdir_all("e/../dd/ee/ff", 0o711) => Ok(());
@@ -386,6 +406,10 @@ root_op_tests! {
     loop_trailing: mkdir_all("loop/link", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     loop_basic: mkdir_all("loop/link/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     loop_dotdot: mkdir_all("loop/link/../foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+    // Make sure the S_ISGID handling is correct.
+    setgid_selfdir: mkdir_all("setgid-self/a/b/c/d", 0o711) => Ok(());
+    #[cfg(feature = "_test_as_root")]
+    setgid_otherdir: mkdir_all("setgid-other/a/b/c/d", 0o711) => Ok(());
 }
 
 mod utils {
@@ -397,7 +421,7 @@ mod utils {
         syscalls,
         tests::traits::{ErrorImpl, RootImpl},
         utils::{self, FdExt, PathIterExt},
-        InodeType,
+        Handle, InodeType,
     };
 
     use std::{
@@ -739,11 +763,22 @@ mod utils {
         // components don't exist yet so we can check them later.
         let before_partial_lookup = root.resolver().resolve_partial(root, unsafe_path, false)?;
 
-        let expected_mode = match expected_result {
-            Ok(_) => Some(
-                libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE))?),
-            ),
+        let expected_subdir_state: Option<((_, _), _)> = match expected_result {
             Err(_) => None,
+            Ok(_) => {
+                let expected_uid = syscalls::geteuid();
+                let mut expected_gid = syscalls::getegid();
+                let mut expected_mode =
+                    libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE))?);
+
+                let handle: &Handle = before_partial_lookup.as_ref();
+                let dir_meta = handle.metadata()?;
+                if dir_meta.mode() & libc::S_ISGID == libc::S_ISGID {
+                    expected_gid = dir_meta.gid();
+                    expected_mode |= libc::S_ISGID;
+                }
+                Some(((expected_uid, expected_gid), expected_mode))
+            }
         };
 
         let res = root
@@ -783,21 +818,21 @@ mod utils {
             // Verify that the remaining paths match the mode we expect (either
             // they don't exist or it matches the mode we requested).
             for subpath in subpaths {
-                let got_mode = syscalls::fstatat(&handle, &subpath)
-                    .map(|st| st.st_mode)
+                let got = syscalls::fstatat(&handle, &subpath)
+                    .map(|st| ((st.st_uid, st.st_gid), st.st_mode))
                     .ok();
-                match expected_mode {
+                match expected_subdir_state {
                     // We expect there to be a directory with the exact mode.
-                    Some(mode) => {
+                    Some(want) => {
                         assert_eq!(
-                            got_mode, Some(mode),
-                            "unexpected file mode for newly-created directory {subpath:?} for mkdir_all({unsafe_path:?})"
+                            got, Some(want),
+                            "unexpected owner + file mode for newly-created directory {subpath:?} for mkdir_all({unsafe_path:?})"
                         );
                     }
                     // Make sure there isn't directory (even errors are fine!).
                     None => {
                         assert_ne!(
-                            got_mode,
+                            got.map(|((_, _), mode)| mode & libc::S_IFMT),
                             Some(libc::S_IFDIR),
                             "unexpected directory {subpath:?} for mkdir_all({unsafe_path:?}) that failed"
                         );
