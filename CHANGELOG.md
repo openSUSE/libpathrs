@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+## [0.1.0] - 2024-09-14 ##
+
+> 負けたくないことに理由って要る?
+
 ### Added ###
 - libpathrs now has an official MSRV of 1.63, which is verified by our CI. The
   MSRV was chosen because it's the Rust version in Debian stable and it has
@@ -183,7 +187,8 @@ Initial release.
   - C FFI.
   - Python bindings.
 
-[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/openSUSE/libpathrs/compare/v0.0.2...v0.1.0
 [0.0.2]: https://github.com/openSUSE/libpathrs/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/openSUSE/libpathrs/compare/v0.0.0...v0.0.1
 [0.0.0]: https://github.com/openSUSE/libpathrs/commits/v0.0.0/
