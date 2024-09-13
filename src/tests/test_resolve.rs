@@ -20,7 +20,8 @@
 #[cfg(feature = "capi")]
 use crate::tests::capi::CapiRoot;
 use crate::{
-    error::ErrorKind, flags::ResolverFlags, tests::common as tests_common, ResolverBackend, Root,
+    error::ErrorKind, flags::ResolverFlags, resolvers::ResolverBackend,
+    tests::common as tests_common, Root,
 };
 
 use std::path::Path;

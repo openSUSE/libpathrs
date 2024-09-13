@@ -18,8 +18,8 @@
  */
 
 use crate::{
-    error::ErrorKind, flags::ResolverFlags, resolvers::PartialLookup,
-    tests::common as tests_common, ResolverBackend, Root,
+    error::ErrorKind, flags::ResolverFlags, resolvers::PartialLookup, resolvers::ResolverBackend,
+    tests::common as tests_common, Root,
 };
 
 use anyhow::Error;

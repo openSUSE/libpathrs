@@ -22,8 +22,9 @@ use crate::tests::capi;
 use crate::{
     error::ErrorKind,
     flags::{OpenFlags, RenameFlags},
+    resolvers::ResolverBackend,
     tests::common as tests_common,
-    InodeType, ResolverBackend, Root,
+    InodeType, Root,
 };
 
 use std::{fs::Permissions, os::unix::fs::PermissionsExt};

@@ -17,6 +17,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+#![forbid(unsafe_code)]
+
+//! Bit-flags for modifying the behaviour of libpathrs.
+
 use crate::syscalls;
 
 bitflags! {

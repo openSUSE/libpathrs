@@ -19,6 +19,8 @@
 
 #![forbid(unsafe_code)]
 
+//! Resolver implementations for libpathrs.
+
 use crate::{
     error::{Error, ErrorKind},
     flags::ResolverFlags,
@@ -32,9 +34,9 @@ use std::{
 };
 
 /// `O_PATH`-based userspace resolver.
-pub mod opath;
+pub(crate) mod opath;
 /// `openat2(2)`-based in-kernel resolver.
-pub mod openat2;
+pub(crate) mod openat2;
 /// A limited resolver only used for `/proc` lookups in `ProcfsHandle`.
 pub(crate) mod procfs;
 

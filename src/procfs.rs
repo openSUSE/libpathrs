@@ -19,6 +19,8 @@
 
 #![forbid(unsafe_code)]
 
+//! Helpers to operate on `procfs` safely.
+
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, ResolverFlags},

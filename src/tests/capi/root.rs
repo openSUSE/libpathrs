@@ -20,6 +20,7 @@
 use crate::{
     capi,
     flags::{OpenFlags, RenameFlags},
+    resolvers::Resolver,
     tests::{
         capi::{
             utils::{self as capi_utils, CapiError},
@@ -27,7 +28,7 @@ use crate::{
         },
         traits::{HandleImpl, RootImpl},
     },
-    InodeType, Resolver,
+    InodeType,
 };
 
 use std::{

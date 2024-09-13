@@ -20,8 +20,9 @@
 use crate::{
     error::Error,
     flags::{OpenFlags, RenameFlags},
+    resolvers::Resolver,
     tests::traits::{ErrorImpl, HandleImpl},
-    Handle, InodeType, Resolver, Root, RootRef,
+    Handle, InodeType, Root, RootRef,
 };
 
 use std::{
