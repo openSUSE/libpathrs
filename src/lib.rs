@@ -31,7 +31,6 @@
 //! The recommended usage of libpathrs looks something like this:
 //!
 //! ```
-//! # extern crate libc;
 //! # use pathrs::{error::Error, flags::OpenFlags, Root};
 //! # fn main() -> Result<(), Error> {
 //! let (root_path, unsafe_path) = ("/path/to/root", "/etc/passwd");
