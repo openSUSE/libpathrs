@@ -26,24 +26,7 @@
 //! efficiently than spawning a new process and doing a full [`chroot(2)`] for
 //! every operation.
 //!
-//! In order to ensure the maximum possible number of people can make us of this
-//! library to increase the overall security of Linux tooling, it is written in
-//! Rust (to be memory-safe) and produces C dylibs for usage with any language
-//! that supports C-based FFI.
-//!
-//! # Assumptions
-//!
-//! This library assumes that the kernel supports all of the needed features for
-//! at least one libpathrs backend. At time of writing, those are:
-//!
-//! * A working `/proc` mount, such that `/proc/self/fd/` operates correctly.
-//!   libpathrs will explicitly verify that the `/proc` mount is actually a
-//!   bone-fide `procfs` instance (to avoid potential trickery) and abort if
-//!   `/proc` is not actually `procfs`.
-//! * Native Backend:
-//!   - `openat2` support.
-//!
-//! # Examples
+//! # Example
 //!
 //! The recommended usage of libpathrs looks something like this:
 //!
@@ -67,7 +50,16 @@
 //! # }
 //! ```
 //!
-//! The corresponding C example would be:
+//! # C API
+//!
+//! In order to ensure the maximum possible number of people can make us of this
+//! library to increase the overall security of Linux tooling, it is written in
+//! Rust (to be memory-safe) and produces C dylibs for usage with any language
+//! that supports C-based FFI. To further help expand how many folks can use
+//! libpathrs, libpathrs's MSRV is Rust 1.63, to allow us to build on more
+//! stable operating systems (such as Debian Buster, which provides Rust 1.63).
+//!
+//! A C example corresponding to the above Rust code would look like:
 //!
 //! ```c
 //! #include <pathrs.h>
@@ -112,6 +104,42 @@
 //! }
 //! ```
 //!
+//! # Kernel Support
+//!
+//! libpathrs is designed to only work with Linux, as it uses several Linux-only
+//! APIs.
+//!
+//! libpathrs was designed alongside [`openat2(2)`] (available since Linux 5.6)
+//! and dynamically tries to use the latest kernel features to provide the
+//! maximum possible protection against racing attackers. However, it also
+//! provides support for older kernel versions (in theory up to Linux
+//! 2.6.39 but we do not currently test this) by emulating newer kernel features
+//! in userspace.
+//!
+//! However, we strongly recommend you use at least Linux 5.8 to get a
+//! reasonable amount of protection against various attacks, and ideally at
+//! least Linux 6.8 to make use of all of the protections we have implemented.
+//! See the following table for what kernel features we optionally support and
+//! what they are used for.
+//!
+//! | Feature               | Minimum Kernel Version  | Description | Fallback |
+//! | --------------------- | ----------------------- | ----------- | -------- |
+//! | [`openat2(2)`]        | Linux 5.6 (2020-03-29)  | In-kernel restrictions of path lookup. This is used extensively by `libpathrs` to safely do path lookups. | Userspace emulated path lookups. |
+//! | `/proc/thread-self`   | Linux 3.17 (2014-10-05) | Used when operating on the current thread's `/proc` directory for use with `PATHRS_PROC_THREAD_SELF`. | `/proc/self/task/$tid` is used, but this might not be available in some edge cases so `/proc/self` is used as a final fallback. |
+//! | New Mount API         | Linux 5.2 (2019-07-07)  | Used to create a private procfs handle when operating on `/proc` (with `fsopen(2)` or `open_tree(2)`). | Open a regular handle to `/proc`. This can lead to certain race attacks if the attacker can dynamically create mounts. |
+//! | `STATX_MNT_ID`        | Linux 5.8 (2020-08-02)  | Used to verify whether there are bind-mounts on top of `/proc` that could result in insecure operations. | There is **no fallback**. Not using this protection can lead to fairly trivial attacks if an attacker can configure your mount table. |
+//! | `STATX_MNT_ID_UNIQUE` | Linux 6.8 (2024-03-10)  | Used for the same reason as `STATX_MNT_ID`, but allows us to protect against mount ID recycling. This is effectively a safer version of `STATX_MNT_ID`. | `STATX_MNT_ID` is used (see the `STATX_MNT_ID` fallback if it's not available either). |
+//!
+//! For more information about the work behind `openat2(2)`, you can read the
+//! following LWN articles (note that the merged version of `openat2(2)` is
+//! different to the version described by LWN):
+//!
+//!  * [New AT_ flags for restricting pathname lookup][lwn-atflags]
+//!  * [Restricting path name lookup with openat2()][lwn-openat2]
+//!
+//! [`openat2(2)`]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
+//! [lwn-atflags]: https://lwn.net/Articles/767547/
+//! [lwn-openat2]: https://lwn.net/Articles/796868/
 //! [`File`]: std::fs::File
 //! [`chroot(2)`]: http://man7.org/linux/man-pages/man2/chroot.2.html
 
