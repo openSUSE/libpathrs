@@ -24,8 +24,8 @@ dist: $(SRC_FILES)
 
 .PHONY: clean
 clean:
-	rm -rf dist/ libpathrs.egg-info/
+	rm -rf dist/ pathrs.*-info/ pathrs/__pycache__/
 
 .PHONY: install
 install: dist
-	$(PIP) install dist/libpathrs*.whl
+	$(PIP) install dist/pathrs*.whl
