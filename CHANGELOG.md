@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+### Added ###
+- python bindings: The `cffi` build script is now a little easier to use for
+  distributions that want to build the python bindings at the same time as the
+  main library. After compiling the library, set the `PATHRS_SRC_ROOT`
+  environment variable to the root of the `libpathrs` source directory. This
+  will instruct the `cffi` build script (when called from `setup.py` or
+  `python3 -m build`) to link against the library built in the source directory
+  rather than using system libraries. As long as you install the same library
+  later, this should cause no issues.
+
+  Standard wheel builds still work the same way, so users that want to link
+  against the system libraries don't need to make any changes.
+
 ## [0.1.0] - 2024-09-14 ##
 
 > 負けたくないことに理由って要る?
