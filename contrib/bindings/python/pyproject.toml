@@ -17,9 +17,10 @@
 
 [build-system]
 requires = [
-	"setuptools>=68",
+	"cffi>=1.10.0",
+	"setuptools>=61",
+	"toml>=0.10", # TODO: Remove this once we only support Python >= 3.11.
 	"wheel",
-	"cffi>=1.10.0"
 ]
 build-backend = "setuptools.build_meta"
 
@@ -50,7 +51,7 @@ classifiers = [
 
 requires-python = ">= 3.8"
 dependencies = [
-	"cffi>=1.10.0"
+	"cffi>=1.10.0",
 ]
 
 [project.urls]

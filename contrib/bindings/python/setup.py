@@ -17,7 +17,27 @@
 
 import setuptools
 
+# This is only needed for backwards compatibility with older versions.
+def parse_pyproject():
+	try:
+		import tomllib
+		openmode = "rb"
+	except ImportError:
+		# TODO: Remove this once we only support Python >= 3.11.
+		import toml as tomllib
+		openmode = "r"
+
+	with open("pyproject.toml", openmode) as f:
+		return tomllib.load(f)
+
+pyproject = parse_pyproject()
+
 setuptools.setup(
+	# For backwards-compatibility with pre-pyproject setuptools.
+	name=pyproject["project"]["name"],
+	version=pyproject["project"]["version"],
+	install_requires=pyproject["project"]["dependencies"],
+	# Configure cffi building.
 	ext_package="pathrs",
 	platforms=["Linux"],
 	cffi_modules=["pathrs/pathrs_build.py:ffibuilder"],
