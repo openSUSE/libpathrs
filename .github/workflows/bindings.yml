@@ -89,6 +89,17 @@ jobs:
         run: make -C contrib/bindings/python dist
       - name: install python-libpathrs bindings
         run: make -C contrib/bindings/python install
+      # Verify that the crate and python bindings have the same version.
+      # TODO: Move this to a "make check" we can run locally as well.
+      - name: check crate and python binding versions match
+        run: |
+          CRATE_VERSION="$(cargo metadata --no-deps --format-version=1 | jq -rM '.packages[] | "\(.name)-\(.version)"')"
+          PY_VERSION="$(python3 -c 'import importlib.metadata; print("pathrs-" + importlib.metadata.version("pathrs"))')"
+
+          echo "rust crate version: $CRATE_VERSION";
+          echo "python module version: $PY_VERSION";
+
+          [[ "$CRATE_VERSION" == "$PY_VERSION" ]] || exit 1
       # Include the dist/ in our artefacts.
       - name: upload python-libpathrs bindings dist/
         uses: actions/upload-artifact@v4
