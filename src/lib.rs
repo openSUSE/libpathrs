@@ -156,7 +156,6 @@ extern crate bitflags;
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
-extern crate regex;
 
 // `Handle` implementation.
 mod handle;
