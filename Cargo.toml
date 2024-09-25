@@ -54,8 +54,6 @@ lazy_static = "^1"
 libc = "^0.2"
 memchr = "^2"
 rand = { version = "^0.8", optional = true }
-# MSRV(1.65): Use regex >= 1.10.
-regex = "1.9.*"
 rustix = { version = "^0.38", features = ["fs"] }
 thiserror = "^1"
 
