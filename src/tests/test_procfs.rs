@@ -109,7 +109,12 @@ macro_rules! procfs_tests {
 
         procfs_tests! {
             @rust-fn [<new_fsopen_ $test_name>]
-                { ProcfsHandle::new_fsopen() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
+                { ProcfsHandle::new_fsopen(false) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
+        }
+
+        procfs_tests! {
+            @rust-fn [<new_fsopen_subset_ $test_name>]
+                { ProcfsHandle::new_fsopen(true) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {

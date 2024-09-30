@@ -22,7 +22,7 @@
 //! Helpers to operate on `procfs` safely.
 
 use crate::{
-    error::{Error, ErrorExt, ErrorImpl},
+    error::{Error, ErrorExt, ErrorImpl, ErrorKind},
     flags::{OpenFlags, ResolverFlags},
     resolvers::procfs::ProcfsResolver,
     syscalls::{self, FsmountFlags, FsopenFlags, OpenTreeFlags},
@@ -79,7 +79,7 @@ impl ProcfsBase {
         let proc_root = proc_root.as_ref().map(AsFd::as_fd);
         match self {
             Self::ProcSelf => PathBuf::from("self"),
-            Self::ProcThreadSelf => vec![
+            Self::ProcThreadSelf => [
                 // /proc/thread-self was added in Linux 3.17.
                 "thread-self".into(),
                 // For pre-3.17 kernels we use the fully-expanded version.
@@ -157,6 +157,7 @@ impl ProcfsBase {
 pub struct ProcfsHandle {
     inner: OwnedFd,
     mnt_id: Option<u64>,
+    is_subset: bool,
     pub(crate) resolver: ProcfsResolver,
 }
 
@@ -172,7 +173,7 @@ impl ProcfsHandle {
     /// Create a new `fsopen(2)`-based [`ProcfsHandle`]. This handle is safe
     /// against racing attackers changing the mount table and is guaranteed to
     /// have no overmounts because it is a brand-new procfs.
-    pub(crate) fn new_fsopen() -> Result<Self, Error> {
+    pub(crate) fn new_fsopen(subset: bool) -> Result<Self, Error> {
         let sfd = syscalls::fsopen("proc", FsopenFlags::FSOPEN_CLOEXEC).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "create procfs suberblock".into(),
@@ -180,12 +181,12 @@ impl ProcfsHandle {
             }
         })?;
 
-        // Try to configure hidepid=ptraceable,subset=pid if possible, but
-        // ignore errors.
-        let _ = syscalls::fsconfig_set_string(&sfd, "hidepid", "ptraceable");
-        // TODO: Maybe we can set this initially and unset it with fspick() if
-        //       we ever do ProcfsHandle::open_raw?
-        //let _ = syscalls::fsconfig_set_string(&sfd, "subset", "pid");
+        if subset {
+            // Try to configure hidepid=ptraceable,subset=pid if possible, but
+            // ignore errors.
+            let _ = syscalls::fsconfig_set_string(&sfd, "hidepid", "ptraceable");
+            let _ = syscalls::fsconfig_set_string(&sfd, "subset", "pid");
+        }
 
         syscalls::fsconfig_create(&sfd).map_err(|err| ErrorImpl::RawOsError {
             operation: "instantiate procfs superblock".into(),
@@ -269,9 +270,19 @@ impl ProcfsHandle {
     /// against static overmounts created by an attacker that cannot modify the
     /// mount table while these operations are running.
     pub fn new() -> Result<Self, Error> {
-        Self::new_fsopen()
-            .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
+        Self::new_fsopen(true)
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::AT_RECURSIVE))
+            .or_else(|_| Self::new_unsafe_open())
+    }
+
+    /// Create a new handle, trying to create a non-masked handle.
+    ///
+    /// This is intended to only ever be used internally, as leaking this handle
+    /// into containers could lead to serious security issues (while leaking
+    /// `subset=pid` is a far less worrisome).
+    fn new_unmasked() -> Result<Self, Error> {
+        Self::new_fsopen(false)
+            .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
             .or_else(|_| Self::new_unsafe_open())
     }
 
@@ -349,6 +360,14 @@ impl ProcfsHandle {
 
         let parent = self.open(base, parent, OpenFlags::O_PATH | OpenFlags::O_DIRECTORY)?;
 
+        // Rather than using self.mnt_id for the following check, we use the
+        // mount ID from parent. This is necessary because ProcfsHandle::open
+        // might create a brand-new procfs handle with a different mount ID.
+        // However, ProcfsHandle::open already checks that the mount ID and
+        // fstype are safe, so we can just re-use the mount ID we get without
+        // issue.
+        let parent_mnt_id = utils::fetch_mnt_id(&parent, "")?;
+
         // Detect if the magic-link we are about to open is actually a
         // bind-mount. There is no "statfsat" so we can't check that the f_type
         // is PROC_SUPER_MAGIC. However, an attacker can construct any
@@ -358,7 +377,7 @@ impl ProcfsHandle {
         //
         // NOTE: This check is only safe if there are no racing mounts, so only
         // for the ProcfsHandle::{new_fsopen,new_open_tree} cases.
-        verify_same_mnt(self.mnt_id, &parent, trailing)?;
+        verify_same_mnt(parent_mnt_id, &parent, trailing)?;
 
         syscalls::openat_follow(parent, trailing, oflags.bits(), 0)
             .map(File::from)
@@ -412,17 +431,21 @@ impl ProcfsHandle {
         oflags: F,
     ) -> Result<File, Error> {
         let mut oflags = oflags.into();
-
         // Force-set O_NOFOLLOW.
         oflags.insert(OpenFlags::O_NOFOLLOW);
 
         // Do a basic lookup.
         let base = self.open_base(base)?;
+        let subpath = subpath.as_ref();
         let fd = self
             .resolver
-            .resolve(&base, subpath, oflags, ResolverFlags::empty())?;
-
-        self.verify_same_procfs_mnt(&fd)?;
+            .resolve(&base, subpath, oflags, ResolverFlags::empty())
+            .and_then(|fd| {
+                self.verify_same_procfs_mnt(&fd)?;
+                Ok(fd)
+            })?;
+        // TODO: Copy the fallback code from ProcfsHandle::open_raw() once we
+        // add ProcfsBase::Root.
 
         Ok(fd.into())
     }
@@ -437,15 +460,31 @@ impl ProcfsHandle {
         oflags: F,
     ) -> Result<File, Error> {
         let mut oflags = oflags.into();
-
         // Force-set O_NOFOLLOW.
         oflags.insert(OpenFlags::O_NOFOLLOW);
 
+        let subpath = subpath.as_ref();
         let fd = self
             .resolver
-            .resolve(&self.inner, subpath, oflags, ResolverFlags::empty())?;
-
-        self.verify_same_procfs_mnt(&fd)?;
+            .resolve(&self.inner, subpath, oflags, ResolverFlags::empty())
+            .and_then(|fd| {
+                self.verify_same_procfs_mnt(&fd)?;
+                Ok(fd)
+            })
+            .or_else(|err| {
+                if self.is_subset && err.kind() == ErrorKind::OsError(Some(libc::ENOENT)) {
+                    // If the lookup failed due to ENOENT, and the current
+                    // procfs handle is "masked" in some way, try to create a
+                    // temporary unmasked handle and retry the operation.
+                    Self::new_unmasked()
+                        // Use the old error if creating a new handle failed.
+                        .or(Err(err))?
+                        .open_raw(subpath, oflags)
+                        .map(OwnedFd::from)
+                } else {
+                    Err(err)
+                }
+            })?;
 
         Ok(fd.into())
     }
@@ -508,9 +547,21 @@ impl ProcfsHandle {
         let mnt_id = utils::fetch_mnt_id(&inner, "")?;
         let resolver = ProcfsResolver::default();
 
+        // Figure out if the mount we have is subset=pid or hidepid=. For
+        // hidepid we check if we can resolve /proc/1 -- if we can access it
+        // then hidepid is probably not relevant.
+        let is_subset = [/* subset=pid */ "stat", /* hidepid=n */ "1"]
+            .iter()
+            .any(|subpath| {
+                resolver
+                    .resolve(&inner, subpath, OpenFlags::O_PATH, ResolverFlags::empty())
+                    .is_err()
+            });
+
         Ok(Self {
             inner,
             mnt_id,
+            is_subset,
             resolver,
         })
     }
