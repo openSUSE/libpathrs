@@ -69,59 +69,66 @@ mod tests {
         error::{Error, ErrorKind},
         procfs::GLOBAL_PROCFS_HANDLE,
     };
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn bad_sysctl_file_noexist() {
-        assert!(matches!(
+        assert_eq!(
             super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "nonexistent.dummy.sysctl.path")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::OsError(Some(libc::ENOENT)))
-        ));
-        assert!(matches!(
+            Err(ErrorKind::OsError(Some(libc::ENOENT))),
+            "reading line from non-existent sysctl",
+        );
+        assert_eq!(
             super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "nonexistent.sysctl.path")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::OsError(Some(libc::ENOENT)))
-        ));
+            Err(ErrorKind::OsError(Some(libc::ENOENT))),
+            "parsing line from non-existent sysctl",
+        );
     }
 
     #[test]
     fn bad_sysctl_file_noread() {
-        assert!(matches!(
+        assert_eq!(
             super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "vm.drop_caches")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::OsError(Some(libc::EACCES)))
-        ));
-        assert!(matches!(
+            Err(ErrorKind::OsError(Some(libc::EACCES))),
+            "reading line from non-readable sysctl",
+        );
+        assert_eq!(
             super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "vm.drop_caches")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::OsError(Some(libc::EACCES)))
-        ));
+            Err(ErrorKind::OsError(Some(libc::EACCES))),
+            "parse line from non-readable sysctl",
+        );
     }
 
     #[test]
     fn bad_sysctl_parse_invalid_multinumber() {
         assert!(super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "kernel.printk").is_ok());
-        assert!(matches!(
+        assert_eq!(
             super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "kernel.printk")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::ParseError)
-        ));
+            Err(ErrorKind::ParseError),
+            "parsing line from multi-number sysctl",
+        );
     }
 
     #[test]
     fn bad_sysctl_parse_invalid_nonnumber() {
         assert!(super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "kernel.random.uuid").is_ok());
-        assert!(matches!(
+        assert_eq!(
             super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "kernel.random.uuid")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::ParseError)
-        ));
+            Err(ErrorKind::ParseError),
+            "parsing line from non-number sysctl",
+        );
     }
 
     #[test]
