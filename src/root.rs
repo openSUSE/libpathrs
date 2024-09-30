@@ -22,7 +22,6 @@
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, RenameFlags, ResolverFlags},
-    procfs::GLOBAL_PROCFS_HANDLE,
     resolvers::Resolver,
     syscalls::{self, FrozenFd},
     utils::{self, PathIterExt},
@@ -32,19 +31,15 @@ use crate::{
 use std::{
     fs::Permissions,
     io::Error as IOError,
-    os::{
-        linux::fs::MetadataExt,
-        unix::{
-            ffi::OsStrExt,
-            fs::PermissionsExt,
-            io::{AsFd, BorrowedFd, OwnedFd},
-        },
+    os::unix::{
+        ffi::OsStrExt,
+        fs::PermissionsExt,
+        io::{AsFd, BorrowedFd, OwnedFd},
     },
     path::{Path, PathBuf},
 };
 
 use libc::dev_t;
-use rustix::fs::{self as rustix_fs, Dir, SeekFrom};
 
 /// An inode type to be created with [`Root::create`].
 #[derive(Clone, Debug)]
@@ -947,37 +942,6 @@ impl RootRef<'_> {
             })?
         }
 
-        // Calculate what properties we expect each newly created directory to
-        // have. Note that we need to manually calculate the effect of the umask
-        // (we default to 0o022 since that's what almost everyone uses in
-        // practice).
-        //
-        // NOTE: Another thread (or process with CLONE_FS) could change our
-        // umask after this check. This would at worst result in spurious
-        // errors, but it seems to me that a multithreaded program setting its
-        // own umask() is probably not safe in general anyway. umask() is meant
-        // to be used for shells when spawning subprocesses.
-        let (want_uid, want_gid, want_mode) = {
-            let want_uid = syscalls::geteuid();
-            let mut want_gid = syscalls::getegid();
-            let mut want_mode = libc::S_IFDIR
-                | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE)).unwrap_or(0o022));
-
-            // The setgid bit is inherited to child directories and affects the
-            // group owner of any inodes created in said directory, so if the
-            // starting directory has it set we need to adjust our expected mode
-            // and owner to match.
-            let dir_meta = current.metadata().map_err(|err| ErrorImpl::OsError {
-                operation: "get starting directory metadata".into(),
-                source: err,
-            })?;
-            if dir_meta.st_mode() & libc::S_ISGID == libc::S_ISGID {
-                want_gid = dir_meta.st_gid();
-                want_mode |= libc::S_ISGID;
-            }
-            (want_uid, want_gid, want_mode)
-        };
-
         // For the remaining components, create a each component one-by-one.
         for part in remaining_parts {
             // NOTE: mkdirat(2) does not follow trailing symlinks (even if it is
@@ -1000,92 +964,24 @@ impl RootRef<'_> {
                 .and_then(|handle| handle.reopen(OpenFlags::O_DIRECTORY))
                 .wrap("failed to open newly-created directory with O_DIRECTORY")?;
 
-            // Do some extra verification that the next handle looks like the
-            // directory we just created. There is no way to be absolutely sure
-            // it wasn't a swapped directory, but we can try to make sure that
-            // it looks as-close-to-identical-as-you-can-get.
+            // Unfortunately, we cannot create a directory and open it
+            // atomically (a-la O_CREAT). This means an attacker could swap our
+            // newly created directory with one they have. Ideally we would
+            // verify that the directory "looks right" by checking the owner,
+            // mode, and whether it is empty.
             //
-            // These protections probably don't protect against serious attacks
-            // in practice, but it's better to be safe than sorry. The main goal
-            // is to ensure that a less-privileged process cannot trick us into
-            // creating directories inside directories we don't expect. In
-            // fairness, the semantics of mkdir_all are kind of loose in general
-            // so it's not really clear how necessary this is.
-
-            // Verify that the (uid, gid, mode) match what we expect.
-            let meta = next.metadata().map_err(|err| ErrorImpl::OsError {
-                operation: "fstat next directory component".into(),
-                source: err,
-            })?;
-
-            let (got_uid, got_gid) = (meta.st_uid(), meta.st_gid());
-            let got_mode = meta.st_mode();
-            if (got_uid, got_gid, got_mode) != (want_uid, want_gid, want_mode) {
-                Err(ErrorImpl::SafetyViolation {
-                    description: format!("newly-created directory {part:?} appears to have been swapped (expected owner {want_uid}:{want_gid} mode 0o{want_mode:o}, got owner {got_uid}:{got_gid} mode 0o{got_mode:o})").into(),
-                })?
-            }
-
-            // Make sure the directory is empty. Obviously, an attacker could
-            // create entries in the directory after this call (if they have
-            // sufficient privileges) but if the attacker can create entries in
-            // this directory (that has the same owner and permission bits as
-            // the directory we created) then they could've done so in the
-            // directory we created as well.
-            let has_children = {
-                // NOTE: Unfortunately, this creates a new internal copy of the
-                // file for fs::Dir. At the moment we can't use fs::RawDir
-                // (which can take a BorrowedFd) because it doesn't implement
-                // Iterator and so filtering out the "." and ".." entries will
-                // be quite ugly.
-                // TODO: Switch back to RawDir once they fix that issue, or
-                // create our own wrapper that implements Iterator.
-                // Unfortunately because RawDir takes AsFd, it seems likely we
-                // won't be able to express the right lifetime bounds...
-                let mut dir = Dir::read_from(&next)
-                    .map_err(|err| ErrorImpl::OsError {
-                        operation: "create directory iterator".into(),
-                        source: err.into(),
-                    })
-                    .with_wrap(|| format!("scan newly-created directory {part:?}"))?;
-
-                // Is there is any entry in the directory?
-                dir
-                    // Get the first non-"."/".." entry.
-                    .find(|res| {
-                        !matches!(
-                            res.as_ref().map(|dentry| dentry.file_name().to_bytes()),
-                            Ok(b".") | Ok(b"..")
-                        )
-                    })
-                    // Handle errors.
-                    // TODO: Use try_find() once it's stabilised.
-                    // <https://github.com/rust-lang/rust/issues/63178>
-                    .transpose()
-                    .map_err(|err| ErrorImpl::OsError {
-                        operation: "readdir".into(),
-                        source: err.into(),
-                    })
-                    .with_wrap(|| format!("scan newly-created directory {part:?}"))?
-                    // We only care if there was an entry, not its details.
-                    .is_some()
-            };
-            if has_children {
-                Err(ErrorImpl::SafetyViolation {
-                    description: format!(
-                        "newly-created directory {part:?} is not an empty directory"
-                    )
-                    .into(),
-                })?
-            }
-            // Rewind the directory so that the caller doesn't end up with a
-            // half-read directory iterator. We have to do this manually rather
-            // than using Dir::rewind() because Dir::rewind() just marks the
-            // iterator so it is rewinded when the next iteration happens.
-            rustix_fs::seek(&next, SeekFrom::Start(0)).map_err(|err| ErrorImpl::OsError {
-                operation: "reset offset of directory handle".into(),
-                source: err.into(),
-            })?;
+            // However, it turns out that trying to do this correctly is more
+            // complicated than you might expect. Basic Unix DACs are mostly
+            // trivial to emulate, but POSIX ACLs and filesystem-specific mount
+            // options can affect ownership and modes in unexpected ways,
+            // resulting in spurious errors. In addition, some pseudofilesystems
+            // (like cgroupfs) create non-empty directories so requiring new
+            // directories be empty would result in spurious errors.
+            //
+            // Ultimately, the semantics of Root::mkdir_all() permit reusing an
+            // existing directory that an attacker created beforehand, so
+            // verifying that directories we create weren't swapped really
+            // doesn't seem to provide any practical benefit.
 
             // Keep walking.
             current = next;

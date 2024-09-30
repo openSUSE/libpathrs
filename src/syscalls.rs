@@ -797,6 +797,7 @@ pub(crate) fn geteuid() -> libc::uid_t {
     unsafe { libc::geteuid() }
 }
 
+#[cfg(test)]
 pub(crate) fn getegid() -> libc::gid_t {
     // SAFETY: Obviously safe libc function.
     unsafe { libc::getegid() }

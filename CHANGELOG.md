@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   Standard wheel builds still work the same way, so users that want to link
   against the system libraries don't need to make any changes.
 
+### Fixed ###
+- `Root::mkdir_all` no longer does strict verification that directories craeted
+  by `mkdir_all` "look right" after opening each component. These checks didn't
+  protect against any practical attack (since an attacker could just get us to
+  use a directory by creating it before `Root::mkdir_all` and we would happily
+  use it) and just resulted in spurious errors when dealing with complicated
+  filesystem configurations (POSIX ACLs, weird filesystem-specific mount
+  options). (#71)
+
 ## [0.1.0] - 2024-09-14 ##
 
 > 負けたくないことに理由って要る?

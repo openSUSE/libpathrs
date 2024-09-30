@@ -28,8 +28,5 @@ pub(crate) use path::*;
 mod fd;
 pub(crate) use fd::*;
 
-mod umask;
-pub(crate) use umask::*;
-
 mod sysctl;
 pub(crate) use sysctl::*;

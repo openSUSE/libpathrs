@@ -419,11 +419,10 @@ mod utils {
     use crate::{
         error::{ErrorExt, ErrorKind},
         flags::{OpenFlags, RenameFlags},
-        procfs::GLOBAL_PROCFS_HANDLE,
         resolvers::PartialLookup,
         syscalls,
         tests::traits::{ErrorImpl, RootImpl},
-        utils::{self, FdExt, PathIterExt},
+        utils::{FdExt, PathIterExt},
         Handle, InodeType,
     };
 
@@ -771,8 +770,10 @@ mod utils {
             Ok(_) => {
                 let expected_uid = syscalls::geteuid();
                 let mut expected_gid = syscalls::getegid();
-                let mut expected_mode =
-                    libc::S_IFDIR | (perm.mode() & !utils::get_umask(Some(&GLOBAL_PROCFS_HANDLE))?);
+                // Assume the umask is 0o022. Writing code to verify the umask
+                // is a little annoying just for the purposes of a test, so
+                // let's just stick with the default for now.
+                let mut expected_mode = libc::S_IFDIR | (perm.mode() & !0o022);
 
                 let handle: &Handle = before_partial_lookup.as_ref();
                 let dir_meta = handle.metadata()?;
