@@ -26,7 +26,7 @@ use std::{
     ptr,
 };
 
-use crate::syscalls;
+use crate::{syscalls, utils::ToCString};
 
 use anyhow::Error;
 use libc::c_int;
@@ -45,6 +45,25 @@ unsafe fn unshare(flags: c_int) -> Result<(), IOError> {
 unsafe fn setns(fd: RawFd, flags: c_int) -> Result<(), IOError> {
     // SAFETY: Caller guarantees that this setns operation is safe.
     let ret = unsafe { libc::setns(fd, flags) };
+    let err = IOError::last_os_error();
+    if ret >= 0 {
+        Ok(())
+    } else {
+        Err(err)
+    }
+}
+
+fn make_slave<P: AsRef<Path>>(path: P) -> Result<(), IOError> {
+    // SAFETY: Obviously safe syscall.
+    let ret = unsafe {
+        libc::mount(
+            ptr::null(),
+            path.as_ref().to_c_string().as_ptr(),
+            ptr::null(),
+            libc::MS_SLAVE | libc::MS_REC,
+            ptr::null(),
+        )
+    };
     let err = IOError::last_os_error();
     if ret >= 0 {
         Ok(())
@@ -110,6 +129,9 @@ where
 
     unsafe { unshare(libc::CLONE_FS | libc::CLONE_NEWNS) }
         .expect("unable to create a mount namespace");
+
+    // Mark / as MS_SLAVE to avoid DoSing the host.
+    make_slave("/")?;
 
     let ret = func();
 
