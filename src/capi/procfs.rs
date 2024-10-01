@@ -32,13 +32,16 @@ use libc::{c_char, c_int, size_t};
 /// pathrs_proc_*. This is necessary because /proc/thread-self is not present on
 /// pre-3.17 kernels and so it may be necessary to emulate /proc/thread-self
 /// access on those older kernels.
-///
-/// NOTE: Currently, operating on /proc/... directly is not supported.
+// TODO: Switch to open_enum so C code that passes garbage values can be caught.
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[allow(non_camel_case_types, dead_code)]
 pub enum CProcfsBase {
-    //PATHRS_PROC_ROOT, // TODO
+    /// Use `/proc`. Note that this mode may be more expensive because we have
+    /// to take steps to try to avoid leaking unmasked procfs handles, so you
+    /// should use `PATHRS_PROC_SELF` if you can.
+    PATHRS_PROC_ROOT = 0x5001_FFFF,
+
     /// Use /proc/self. For most programs, this is the standard choice.
     PATHRS_PROC_SELF = 0x091D_5E1F,
 
@@ -55,6 +58,7 @@ pub enum CProcfsBase {
 impl From<CProcfsBase> for ProcfsBase {
     fn from(c_base: CProcfsBase) -> Self {
         match c_base {
+            CProcfsBase::PATHRS_PROC_ROOT => ProcfsBase::ProcRoot,
             CProcfsBase::PATHRS_PROC_SELF => ProcfsBase::ProcSelf,
             CProcfsBase::PATHRS_PROC_THREAD_SELF => ProcfsBase::ProcThreadSelf,
         }
@@ -65,6 +69,7 @@ impl From<CProcfsBase> for ProcfsBase {
 impl From<ProcfsBase> for CProcfsBase {
     fn from(base: ProcfsBase) -> Self {
         match base {
+            ProcfsBase::ProcRoot => CProcfsBase::PATHRS_PROC_ROOT,
             ProcfsBase::ProcSelf => CProcfsBase::PATHRS_PROC_SELF,
             ProcfsBase::ProcThreadSelf => CProcfsBase::PATHRS_PROC_THREAD_SELF,
         }

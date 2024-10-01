@@ -20,7 +20,7 @@
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::OpenFlags,
-    procfs::ProcfsHandle,
+    procfs::{ProcfsBase, ProcfsHandle},
 };
 
 use std::{
@@ -35,7 +35,7 @@ pub(crate) fn sysctl_read_line(procfs: &ProcfsHandle, sysctl: &str) -> Result<St
     // Convert "foo.bar.baz" to "foo/bar/baz".
     sysctl_path.push(sysctl.replace(".", "/"));
 
-    let sysctl_file = procfs.open_raw(sysctl_path, OpenFlags::O_RDONLY)?;
+    let sysctl_file = procfs.open(ProcfsBase::ProcRoot, sysctl_path, OpenFlags::O_RDONLY)?;
 
     // Just read the first line.
     let mut reader = BufReader::new(sysctl_file);

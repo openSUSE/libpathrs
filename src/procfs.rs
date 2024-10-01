@@ -66,6 +66,16 @@ lazy_static! {
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum ProcfsBase {
+    /// Use `/proc`. Note that this mode may be more expensive because we have
+    /// to take steps to try to avoid leaking unmasked procfs handles, so you
+    /// should use [`ProcfsBase::ProcSelf`] if you can.
+    // TODO: Should we have a ProcfsBase::Pid(pid_t)? This isn't strictly
+    // necessary (and the C API for this could be a little weird) but it might
+    // be nice for users to explicitly say that an operation is in reference to
+    // a PID. However, at the moment the maximum pid the kernel supports is 2^22
+    // (and almost all systems have smaller defaults) so we could use values
+    // >=2^63 in the C API.
+    ProcRoot,
     /// Use `/proc/self`. For most programs, this is the standard choice.
     ProcSelf,
     /// Use `/proc/thread-self`. In multi-threaded programs where one thread has
@@ -78,6 +88,7 @@ impl ProcfsBase {
     pub(crate) fn into_path(self, proc_root: Option<BorrowedFd<'_>>) -> PathBuf {
         let proc_root = proc_root.as_ref().map(AsFd::as_fd);
         match self {
+            Self::ProcRoot => PathBuf::from("."),
             Self::ProcSelf => PathBuf::from("self"),
             Self::ProcThreadSelf => [
                 // /proc/thread-self was added in Linux 3.17.
@@ -435,38 +446,11 @@ impl ProcfsHandle {
         oflags.insert(OpenFlags::O_NOFOLLOW);
 
         // Do a basic lookup.
-        let base = self.open_base(base)?;
+        let basedir = self.open_base(base)?;
         let subpath = subpath.as_ref();
         let fd = self
             .resolver
-            .resolve(&base, subpath, oflags, ResolverFlags::empty())
-            .and_then(|fd| {
-                self.verify_same_procfs_mnt(&fd)?;
-                Ok(fd)
-            })?;
-        // TODO: Copy the fallback code from ProcfsHandle::open_raw() once we
-        // add ProcfsBase::Root.
-
-        Ok(fd.into())
-    }
-
-    /// Safely open a path inside the root of `procfs`.
-    ///
-    /// **This is only intended to be used internally for now.**
-    // TODO: Remove this once we get ProcfsBase::Root.
-    pub(crate) fn open_raw<P: AsRef<Path>, F: Into<OpenFlags>>(
-        &self,
-        subpath: P,
-        oflags: F,
-    ) -> Result<File, Error> {
-        let mut oflags = oflags.into();
-        // Force-set O_NOFOLLOW.
-        oflags.insert(OpenFlags::O_NOFOLLOW);
-
-        let subpath = subpath.as_ref();
-        let fd = self
-            .resolver
-            .resolve(&self.inner, subpath, oflags, ResolverFlags::empty())
+            .resolve(&basedir, subpath, oflags, ResolverFlags::empty())
             .and_then(|fd| {
                 self.verify_same_procfs_mnt(&fd)?;
                 Ok(fd)
@@ -479,7 +463,7 @@ impl ProcfsHandle {
                     Self::new_unmasked()
                         // Use the old error if creating a new handle failed.
                         .or(Err(err))?
-                        .open_raw(subpath, oflags)
+                        .open(base, subpath, oflags)
                         .map(OwnedFd::from)
                 } else {
                     Err(err)
