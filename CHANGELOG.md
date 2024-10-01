@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   filesystem configurations (POSIX ACLs, weird filesystem-specific mount
   options). (#71)
 
+- capi: Passing invalid `pathrs_proc_base_t` values to `pathrs_proc_*` will now
+  return an error rather than resulting in Undefined Behaviour™.
+
 ## [0.1.0] - 2024-09-14 ##
 
 > 負けたくないことに理由って要る?
