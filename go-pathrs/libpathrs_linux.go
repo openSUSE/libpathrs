@@ -195,6 +195,7 @@ func pathrsHardlink(rootFd uintptr, path, target string) error {
 type pathrsProcBase C.pathrs_proc_base_t
 
 const (
+	pathrsProcRoot       pathrsProcBase = C.PATHRS_PROC_ROOT
 	pathrsProcSelf       pathrsProcBase = C.PATHRS_PROC_SELF
 	pathrsProcThreadSelf pathrsProcBase = C.PATHRS_PROC_THREAD_SELF
 )

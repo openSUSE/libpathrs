@@ -220,6 +220,7 @@ def _convert_mode(mode):
 	return flags
 
 
+PROC_ROOT = libpathrs_so.PATHRS_PROC_ROOT
 PROC_SELF = libpathrs_so.PATHRS_PROC_SELF
 PROC_THREAD_SELF = libpathrs_so.PATHRS_PROC_THREAD_SELF
 
