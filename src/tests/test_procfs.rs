@@ -32,10 +32,10 @@ use anyhow::Error;
 
 macro_rules! procfs_tests {
     // Create the actual test functions.
-    (@rust-fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
+    ($(#[$meta:meta])* @rust-fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
         paste::paste! {
             #[test]
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[$meta])*
             fn [<procfs_overmounts_ $func_prefix $test_name>]() -> Result<(), Error> {
                 utils::[<check_proc_ $procfs_op>](
                     || $procfs_inst,
@@ -46,7 +46,7 @@ macro_rules! procfs_tests {
             }
 
             #[test]
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[$meta])*
             fn [<procfs_overmounts_ $func_prefix openat2_ $test_name>]() -> Result<(), Error> {
                 if !*syscalls::OPENAT2_IS_SUPPORTED {
                     // skip this test
@@ -66,7 +66,7 @@ macro_rules! procfs_tests {
             }
 
             #[test]
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[$meta])*
             fn [<procfs_overmounts_ $func_prefix opath_ $test_name>]() -> Result<(), Error> {
                 utils::[<check_proc_ $procfs_op>](
                     || {
@@ -84,11 +84,11 @@ macro_rules! procfs_tests {
     };
 
     // Create the actual test function for the C API.
-    (@capi-fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
+    ($(#[$meta:meta])* @capi-fn [<$func_prefix:ident $test_name:ident>] $procfs_inst:block . $procfs_op:ident ($($args:expr),*) => (over_mounts: $over_mounts:expr, error: $expect_error:expr) ;) => {
         paste::paste! {
             #[test]
             #[cfg(feature = "capi")]
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            $(#[$meta])*
             fn [<procfs_overmounts_ $func_prefix $test_name>]() -> Result<(), Error> {
                 utils::[<check_proc_ $procfs_op>](
                     || $procfs_inst,
@@ -108,16 +108,24 @@ macro_rules! procfs_tests {
         }
 
         procfs_tests! {
+            @rust-fn [<new_unmasked_ $test_name>]
+                { ProcfsHandle::new_unmasked() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
+        }
+
+        procfs_tests! {
+            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_fsopen_ $test_name>]
                 { ProcfsHandle::new_fsopen(false) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
+            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_fsopen_subset_ $test_name>]
                 { ProcfsHandle::new_fsopen(true) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
+            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_open_tree_ $test_name>]
                 {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE)
@@ -125,6 +133,7 @@ macro_rules! procfs_tests {
         }
 
         procfs_tests! {
+            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_open_tree_recursive_ $test_name>]
                 {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE | OpenTreeFlags::AT_RECURSIVE)
@@ -261,6 +270,7 @@ mod utils {
         error::ErrorKind,
         flags::OpenFlags,
         procfs::ProcfsBase,
+        syscalls,
         tests::{
             common::{self as tests_common, MountType},
             traits::{ErrorImpl, ProcfsHandleImpl},
@@ -300,6 +310,20 @@ mod utils {
             res,
             expected
         );
+    }
+
+    fn in_host_mnt_ns<T, E, F>(expected: ExpectedResult, func: F) -> Result<(), Error>
+    where
+        T: Debug,
+        E: ErrorImpl,
+        F: FnOnce() -> Result<T, E>,
+    {
+        // Non-mnt-ns tests don't have overmounts configured.
+        let are_over_mounts_visible = false;
+
+        let res = func();
+        check_proc_error(res, are_over_mounts_visible, expected);
+        Ok(())
     }
 
     fn in_mnt_ns_with_overmounts<T, E, F>(
@@ -380,6 +404,23 @@ mod utils {
         })
     }
 
+    fn check_func<T, E, F>(
+        are_over_mounts_visible: bool,
+        expected: ExpectedResult,
+        func: F,
+    ) -> Result<(), Error>
+    where
+        T: Debug,
+        E: ErrorImpl,
+        F: FnOnce() -> Result<T, E>,
+    {
+        if syscalls::geteuid() == 0 {
+            in_mnt_ns_with_overmounts(are_over_mounts_visible, expected, func)
+        } else {
+            in_host_mnt_ns(expected, func)
+        }
+    }
+
     pub(super) fn check_proc_open<Proc, ProcFn, P: AsRef<Path>, F: Into<OpenFlags>>(
         proc_fn: ProcFn,
         base: ProcfsBase,
@@ -392,7 +433,7 @@ mod utils {
         Proc: ProcfsHandleImpl,
         ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
     {
-        in_mnt_ns_with_overmounts(are_over_mounts_visible, expected, || {
+        check_func(are_over_mounts_visible, expected, || {
             proc_fn()?.open(base, path, oflags)
         })
     }
@@ -409,7 +450,7 @@ mod utils {
         Proc: ProcfsHandleImpl,
         ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
     {
-        in_mnt_ns_with_overmounts(are_over_mounts_visible, expected, || {
+        check_func(are_over_mounts_visible, expected, || {
             proc_fn()?.open_follow(base, path, oflags)
         })
     }
@@ -425,7 +466,7 @@ mod utils {
         Proc: ProcfsHandleImpl,
         ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
     {
-        in_mnt_ns_with_overmounts(are_over_mounts_visible, expected, || {
+        check_func(are_over_mounts_visible, expected, || {
             proc_fn()?.readlink(base, path)
         })
     }

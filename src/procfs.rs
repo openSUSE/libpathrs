@@ -291,7 +291,7 @@ impl ProcfsHandle {
     /// This is intended to only ever be used internally, as leaking this handle
     /// into containers could lead to serious security issues (while leaking
     /// `subset=pid` is a far less worrisome).
-    fn new_unmasked() -> Result<Self, Error> {
+    pub(crate) fn new_unmasked() -> Result<Self, Error> {
         Self::new_fsopen(false)
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
             .or_else(|_| Self::new_unsafe_open())
