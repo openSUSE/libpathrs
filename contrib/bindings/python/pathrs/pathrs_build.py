@@ -116,7 +116,7 @@ if __name__ == "__main__":
 	try:
 		# Search for the compiled libraries to link to from our libpathrs
 		# source if running outside of setuptools as a regular program.
-		ffibuilder = find_ffibuilder()
+		ffibuilder = srcdir_ffibuilder(root_dir=find_rootdir())
 	except FileNotFoundError:
 		# If we couldn't find a valid library in the source dir, just fallback
 		# to using the system libraries.

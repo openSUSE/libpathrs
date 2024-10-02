@@ -24,7 +24,7 @@ dist: $(SRC_FILES)
 
 .PHONY: clean
 clean:
-	rm -rf dist/ pathrs.*-info/ pathrs/__pycache__/
+	rm -rf dist/ pathrs.*-info/ pathrs/__pycache__/ pathrs/_libpathrs_cffi.*
 
 .PHONY: install
 install: dist
