@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+## [0.1.1] - 2024-10-01 ##
+
+> 頒布と聞いたら蛇に睨まれた蛙になるよ
+
 ### Added ###
 - procfs: add support for operating on files in the `/proc` root (or other
   processes) with `ProcfsBase::ProcRoot`.
@@ -226,7 +230,8 @@ Initial release.
   - C FFI.
   - Python bindings.
 
-[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/openSUSE/libpathrs/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/openSUSE/libpathrs/compare/v0.0.2...v0.1.0
 [0.0.2]: https://github.com/openSUSE/libpathrs/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/openSUSE/libpathrs/compare/v0.0.0...v0.0.1

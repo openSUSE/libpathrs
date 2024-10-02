@@ -27,7 +27,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pathrs"
 # TODO: Figure out a way to keep this version up-to-date with Cargo.toml.
-version = "0.1.0+dev"
+version = "0.1.1+dev"
 description = "Python bindings for libpathrs, a safe path resolution library for Linux."
 keywords = ["libpathrs", "pathrs"]
 license = { file = "COPYING.APACHE-2.0" }
