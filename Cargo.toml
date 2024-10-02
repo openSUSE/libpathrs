@@ -37,7 +37,7 @@ maintenance = { status = "experimental" }
 crate-type = ["rlib"]
 
 [features]
-capi = ["dep:rand"]
+capi = ["dep:rand", "dep:open-enum"]
 # Only used for tests.
 _test_as_root = []
 
@@ -53,6 +53,8 @@ itertools = "^0.13"
 lazy_static = "^1"
 libc = "^0.2"
 memchr = "^2"
+# MSRV(1.65): Update to >=0.4.1 which uses let_else. 0.4.0 was broken.
+open-enum = {version = "=0.3.0", optional = true }
 rand = { version = "^0.8", optional = true }
 rustix = { version = "^0.38", features = ["fs"] }
 thiserror = "^1"

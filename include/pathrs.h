@@ -43,10 +43,14 @@
  * pathrs_proc_*. This is necessary because /proc/thread-self is not present on
  * pre-3.17 kernels and so it may be necessary to emulate /proc/thread-self
  * access on those older kernels.
- *
- * NOTE: Currently, operating on /proc/... directly is not supported.
  */
-typedef enum {
+enum pathrs_proc_base_t {
+    /**
+     * Use `/proc`. Note that this mode may be more expensive because we have
+     * to take steps to try to avoid leaking unmasked procfs handles, so you
+     * should use `PATHRS_PROC_SELF` if you can.
+     */
+    PATHRS_PROC_ROOT = 1342308351,
     /**
      * Use /proc/self. For most programs, this is the standard choice.
      */
@@ -61,7 +65,8 @@ typedef enum {
      * be killed (such as Go -- where you want to use runtime.LockOSThread).
      */
     PATHRS_PROC_THREAD_SELF = 1051549215,
-} pathrs_proc_base_t;
+};
+typedef uint64_t pathrs_proc_base_t;
 
 /**
  * Attempts to represent a Rust Error type in C. This structure must be freed

@@ -137,8 +137,6 @@ lazy_static! {
     // TODO: In theory this value could change during the lifetime of the
     // program, but there's no nice way of detecting that, and the overhead of
     // checking this for every symlink lookup is more likely to be an issue.
-    // TODO: Maybe we should make a private ProcfsHandle just for this so that
-    // we can use subset=pid for GLOBAL_PROCFS_HANDLE?
     static ref PROTECTED_SYMLINKS_SYSCTL: u32 =
         utils::sysctl_read_parse(&GLOBAL_PROCFS_HANDLE, "fs.protected_symlinks")
             .expect("should be able to parse fs.protected_symlinks");

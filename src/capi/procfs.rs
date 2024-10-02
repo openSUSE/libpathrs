@@ -19,26 +19,33 @@
 
 use crate::{
     capi::{ret::IntoCReturn, utils},
-    error::Error,
+    error::{Error, ErrorImpl},
     flags::OpenFlags,
     procfs::{ProcfsBase, GLOBAL_PROCFS_HANDLE},
 };
 
-use std::os::unix::io::{OwnedFd, RawFd};
+use std::{
+    convert::TryFrom,
+    os::unix::io::{OwnedFd, RawFd},
+};
 
 use libc::{c_char, c_int, size_t};
+use open_enum::open_enum;
 
 /// Indicate what base directory should be used when doing operations with
 /// pathrs_proc_*. This is necessary because /proc/thread-self is not present on
 /// pre-3.17 kernels and so it may be necessary to emulate /proc/thread-self
 /// access on those older kernels.
-///
-/// NOTE: Currently, operating on /proc/... directly is not supported.
-#[repr(C)]
+#[open_enum]
+#[repr(u64)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[allow(non_camel_case_types, dead_code)]
 pub enum CProcfsBase {
-    //PATHRS_PROC_ROOT, // TODO
+    /// Use `/proc`. Note that this mode may be more expensive because we have
+    /// to take steps to try to avoid leaking unmasked procfs handles, so you
+    /// should use `PATHRS_PROC_SELF` if you can.
+    PATHRS_PROC_ROOT = 0x5001_FFFF,
+
     /// Use /proc/self. For most programs, this is the standard choice.
     PATHRS_PROC_SELF = 0x091D_5E1F,
 
@@ -52,11 +59,19 @@ pub enum CProcfsBase {
     PATHRS_PROC_THREAD_SELF = 0x3EAD_5E1F,
 }
 
-impl From<CProcfsBase> for ProcfsBase {
-    fn from(c_base: CProcfsBase) -> Self {
+impl TryFrom<CProcfsBase> for ProcfsBase {
+    type Error = Error;
+
+    fn try_from(c_base: CProcfsBase) -> Result<Self, Self::Error> {
         match c_base {
-            CProcfsBase::PATHRS_PROC_SELF => ProcfsBase::ProcSelf,
-            CProcfsBase::PATHRS_PROC_THREAD_SELF => ProcfsBase::ProcThreadSelf,
+            CProcfsBase::PATHRS_PROC_ROOT => Ok(ProcfsBase::ProcRoot),
+            CProcfsBase::PATHRS_PROC_SELF => Ok(ProcfsBase::ProcSelf),
+            CProcfsBase::PATHRS_PROC_THREAD_SELF => Ok(ProcfsBase::ProcThreadSelf),
+            _ => Err(ErrorImpl::InvalidArgument {
+                name: "procfs base".into(),
+                description: "the procfs base must be one of the PATHRS_PROC_* values".into(),
+            }
+            .into()),
         }
     }
 }
@@ -65,6 +80,7 @@ impl From<CProcfsBase> for ProcfsBase {
 impl From<ProcfsBase> for CProcfsBase {
     fn from(base: ProcfsBase) -> Self {
         match base {
+            ProcfsBase::ProcRoot => CProcfsBase::PATHRS_PROC_ROOT,
             ProcfsBase::ProcSelf => CProcfsBase::PATHRS_PROC_SELF,
             ProcfsBase::ProcThreadSelf => CProcfsBase::PATHRS_PROC_THREAD_SELF,
         }
@@ -114,12 +130,13 @@ pub unsafe extern "C" fn pathrs_proc_open(
     flags: c_int,
 ) -> RawFd {
     || -> Result<_, Error> {
+        let base = base.try_into()?;
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let oflags = OpenFlags::from_bits_retain(flags);
 
         match oflags.contains(OpenFlags::O_NOFOLLOW) {
-            true => GLOBAL_PROCFS_HANDLE.open(base.into(), path, oflags),
-            false => GLOBAL_PROCFS_HANDLE.open_follow(base.into(), path, oflags),
+            true => GLOBAL_PROCFS_HANDLE.open(base, path, oflags),
+            false => GLOBAL_PROCFS_HANDLE.open_follow(base, path, oflags),
         }
     }()
     .map(OwnedFd::from)
@@ -170,8 +187,9 @@ pub unsafe extern "C" fn pathrs_proc_readlink(
     linkbuf_size: size_t,
 ) -> c_int {
     || -> Result<_, Error> {
+        let base = base.try_into()?;
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
-        let link_target = GLOBAL_PROCFS_HANDLE.readlink(base.into(), path)?;
+        let link_target = GLOBAL_PROCFS_HANDLE.readlink(base, path)?;
         // SAFETY: C caller guarantees buffer is at least linkbuf_size and can
         // be written to.
         unsafe { utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size) }

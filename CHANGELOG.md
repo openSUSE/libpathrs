@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## [Unreleased] ##
 
 ### Added ###
+- procfs: add support for operating on files in the `/proc` root (or other
+  processes) with `ProcfsBase::ProcRoot`.
+
+  While the cached file descriptor shouldn't leak into containers (container
+  runtimes know to set `PR_SET_DUMPABLE`, and our cached file descriptor is
+  `O_CLOEXEC`), I felt a little uncomfortable about having a global unmasked
+  procfs handle sitting around in `libpathrs`. So, in order to avoid making a
+  file descriptor leak by a `libpathrs` user catastrophic, `libpathrs` will
+  always try to use a "limited" procfs handle as the global cached handle
+  (which is much safer to leak into a container) and for operations on
+  `ProcfsBase::ProcRoot`, a temporary new "unrestricted" procfs handle is
+  created just for that operartion. This is more expensive, but it avoids a
+  potential leak turning into a breakout or other nightmare scenario.
+
 - python bindings: The `cffi` build script is now a little easier to use for
   distributions that want to build the python bindings at the same time as the
   main library. After compiling the library, set the `PATHRS_SRC_ROOT`
@@ -27,6 +41,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   use it) and just resulted in spurious errors when dealing with complicated
   filesystem configurations (POSIX ACLs, weird filesystem-specific mount
   options). (#71)
+
+- capi: Passing invalid `pathrs_proc_base_t` values to `pathrs_proc_*` will now
+  return an error rather than resulting in Undefined Behaviour™.
 
 ## [0.1.0] - 2024-09-14 ##
 
