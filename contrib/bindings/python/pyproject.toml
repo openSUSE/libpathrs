@@ -59,3 +59,4 @@ dependencies = [
 Homepage = "https://github.com/openSUSE/libpathrs"
 Repository = "https://github.com/openSUSE/libpathrs"
 Documentation = "https://docs.rs/pathrs"
+Changelog = "https://github.com/openSUSE/libpathrs/blob/main/CHANGELOG.md"
