@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 ### Fixes ###
+- python bindings: add a minimal README for PyPI.
 - python bindings: actually export `PROC_ROOT`.
 
 ## [0.1.1] - 2024-10-01 ##

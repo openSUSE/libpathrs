@@ -29,6 +29,7 @@ name = "pathrs"
 # TODO: Figure out a way to keep this version up-to-date with Cargo.toml.
 version = "0.1.1+dev"
 description = "Python bindings for libpathrs, a safe path resolution library for Linux."
+readme = "README.md"
 keywords = ["libpathrs", "pathrs"]
 license = { file = "COPYING.APACHE-2.0" }
 authors = [
@@ -57,3 +58,4 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/openSUSE/libpathrs"
 Repository = "https://github.com/openSUSE/libpathrs"
+Documentation = "https://docs.rs/pathrs"
