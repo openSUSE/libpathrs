@@ -28,7 +28,7 @@ __all__ = [
 	# core api
 	"Root", "Handle",
 	# procfs api
-	"PROC_SELF", "PROC_THREAD_SELF",
+	"PROC_ROOT", "PROC_SELF", "PROC_THREAD_SELF",
 	"proc_open", "proc_open_raw", "proc_readlink",
 	# error api
 	"Error",
