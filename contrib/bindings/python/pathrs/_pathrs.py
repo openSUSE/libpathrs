@@ -20,6 +20,7 @@ import os
 import re
 import sys
 import copy
+import errno
 import fcntl
 
 from ._libpathrs_cffi import ffi, lib as libpathrs_so
@@ -39,9 +40,6 @@ def _cstr(pystr):
 
 def _pystr(cstr):
 	return ffi.string(cstr).decode("utf8")
-
-def _pyptr(cptr):
-	return int(ffi.cast("uintptr_t", cptr))
 
 def _cbuffer(size):
 	return ffi.new("char[%d]" % (size,))
@@ -118,8 +116,8 @@ def _fileno(file):
 		# Assume there is a fileno method.
 		return file.fileno()
 
-def _clonefile(file):
-	return fcntl.fcntl(fileno(file), fcntl.F_DUPFD_CLOEXEC)
+def _clonefile(file: FileLike) -> int:
+	return fcntl.fcntl(_fileno(file), fcntl.F_DUPFD_CLOEXEC)
 
 
 class WrappedFd(object):
@@ -152,7 +150,7 @@ class WrappedFd(object):
 			# If this is a regular open file, we need to make a copy because
 			# you cannot leak files and so the GC might close it from
 			# underneath us.
-			fd = clonefd(fd)
+			fd = _clonefile(fd)
 		self._fd = fd
 
 	def fileno(self):
@@ -503,7 +501,7 @@ class Root(WrappedFd):
 		Atomically create-and-open a new file at the given path in the Root,
 		a-la O_CREAT.
 
-		This method returns an os.fdopen() file handle.
+		This method returns a Handle.
 
 		filemode is the Unix DAC mode you wish the new file to be created with.
 		This mode might not be the actual mode of the created file due to a
@@ -519,6 +517,7 @@ class Root(WrappedFd):
 		fd = libpathrs_so.pathrs_creat(self.fileno(), path, flags, filemode)
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
+		# TODO: This should actually return an os.fdopen.
 		return Handle(fd)
 
 	# TODO: creat_raw?
