@@ -19,7 +19,10 @@
 
 use crate::{capi::error as capi_error, error::Error, Handle, Root};
 
-use std::os::unix::io::{IntoRawFd, OwnedFd};
+use std::{
+    fs::File,
+    os::unix::io::{IntoRawFd, OwnedFd},
+};
 
 use libc::c_int;
 
@@ -59,6 +62,12 @@ impl IntoCReturn for Root {
 }
 
 impl IntoCReturn for Handle {
+    fn into_c_return(self) -> CReturn {
+        OwnedFd::from(self).into_c_return()
+    }
+}
+
+impl IntoCReturn for File {
     fn into_c_return(self) -> CReturn {
         OwnedFd::from(self).into_c_return()
     }

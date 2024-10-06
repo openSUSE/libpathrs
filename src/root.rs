@@ -29,7 +29,7 @@ use crate::{
 };
 
 use std::{
-    fs::Permissions,
+    fs::{File, Permissions},
     io::Error as IOError,
     os::unix::{
         ffi::OsStrExt,
@@ -367,7 +367,7 @@ impl Root {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Handle, Error> {
+    ) -> Result<File, Error> {
         self.as_ref().create_file(path, flags, perm)
     }
 
@@ -829,7 +829,7 @@ impl RootRef<'_> {
         path: P,
         mut flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Handle, Error> {
+    ) -> Result<File, Error> {
         // The path doesn't exist yet, so we need to get a safe reference to the
         // parent and just operate on the final (slashless) component.
         let (dir, name) = self
@@ -851,7 +851,7 @@ impl RootRef<'_> {
             }
         })?;
 
-        Ok(Handle::from_fd_unchecked(fd))
+        Ok(fd.into())
     }
 
     /// Within the [`RootRef`]'s tree, create a directory and any of its parent

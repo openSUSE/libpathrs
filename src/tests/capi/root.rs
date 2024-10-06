@@ -32,7 +32,7 @@ use crate::{
 };
 
 use std::{
-    fs::Permissions,
+    fs::{File, Permissions},
     os::unix::{
         fs::PermissionsExt,
         io::{AsFd, BorrowedFd, OwnedFd},
@@ -140,14 +140,14 @@ impl CapiRoot {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<CapiHandle, CapiError> {
+    ) -> Result<File, CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_fd(|| unsafe {
             capi::core::pathrs_creat(root_fd.into(), path.as_ptr(), flags.bits(), perm.mode())
         })
-        .map(CapiHandle::from_fd_unchecked)
+        .map(File::from)
     }
 
     fn mkdir_all<P: AsRef<Path>>(
@@ -269,7 +269,7 @@ impl RootImpl for CapiRoot {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Self::Handle, Self::Error> {
+    ) -> Result<File, Self::Error> {
         self.create_file(path, flags, perm)
     }
 
@@ -348,7 +348,7 @@ impl RootImpl for &CapiRoot {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Self::Handle, Self::Error> {
+    ) -> Result<File, Self::Error> {
         CapiRoot::create_file(self, path, flags, perm)
     }
 

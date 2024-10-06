@@ -517,8 +517,7 @@ class Root(WrappedFd):
 		fd = libpathrs_so.pathrs_creat(self.fileno(), path, flags, filemode)
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
-		# TODO: This should actually return an os.fdopen.
-		return Handle(fd)
+		return os.fdopen(fd, mode)
 
 	# TODO: creat_raw?
 
