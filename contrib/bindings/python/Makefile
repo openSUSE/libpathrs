@@ -19,7 +19,7 @@ PIP ?= pip3
 
 SRC_FILES := $(wildcard *.py pathrs/*.py)
 
-dist: $(SRC_FILES)
+dist: $(SRC_FILES) pyproject.toml
 	$(PYTHON) -m build
 
 .PHONY: clean
