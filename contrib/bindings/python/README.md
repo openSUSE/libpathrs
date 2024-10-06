@@ -5,7 +5,8 @@ resolution library for Linux. For more details about the security protections
 provided by [libpathrs][libpathrs], [see the main README][libpathrs-readme].
 
 In order to use this library, you need to have `libpathrs.so` installed on your
-system.
+system. Your distribution might already have a libpathrs package. If not, you
+can [install libpathrs from source][libpathrs].
 
 ### Examples ###
 
@@ -81,5 +82,9 @@ with pathrs.proc_open(pathrs.PROC_ROOT, "cpuinfo", "r") as cpuinfo:
         print(line.rstrip("\n"))
 ```
 
+For more information about the libpathrs API and considerations you should have
+when using libpathrs, please see [the Rust documentation][libpathrs-rustdoc].
+
 [libpathrs]: https://github.com/openSUSE/libpathrs
 [libpathrs-readme]: https://github.com/openSUSE/libpathrs/blob/main/README.md
+[libpathrs-rustdoc]: https://docs.rs/pathrs
