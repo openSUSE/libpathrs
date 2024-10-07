@@ -620,6 +620,10 @@ class Root(WrappedFd):
 		mode of the created file due to a variety of external factors (umask,
 		setgid bits, POSIX ACLs).
 
+		dev is the the (major, minor) device number used for the new inode if
+		the mode contains S_IFCHR or S_IFBLK. You can construct the device
+		number from a (major, minor) using os.makedev().
+
 		A pathrs.Error is raised if the path already exists.
 		"""
 		path = _cstr(path)
