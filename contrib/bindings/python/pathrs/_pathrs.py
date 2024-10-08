@@ -24,7 +24,8 @@ import errno
 import fcntl
 
 import typing
-from typing import Any, IO, Optional, TextIO, Type, TypeVar, Union
+from types import TracebackType
+from typing import Any, Dict, IO, Optional, TextIO, Type, TypeVar, Union
 
 # TODO: Remove this once we only support Python >= 3.11.
 from typing_extensions import Self, TypeAlias
@@ -88,7 +89,7 @@ class Error(Exception):
     errno: Optional[int]
     strerror: Optional[str]
 
-    def __init__(self, message: str, *_, errno: Optional[int] = None):
+    def __init__(self, message: str, *, errno: Optional[int] = None):
         # Construct Exception.
         super().__init__(message)
 
@@ -110,7 +111,7 @@ class Error(Exception):
             return None
 
         err = libpathrs_so.pathrs_errorinfo(err_id)
-        if err == ffi.NULL:
+        if err == ffi.NULL:  # type: ignore # TODO: Make this check nicer...
             return None
 
         description = _pystr(err.description)
@@ -249,7 +250,7 @@ class WrappedFd(object):
             raise
 
     @classmethod
-    def from_raw_fd(cls, fd: int) -> Self:
+    def from_raw_fd(cls: Type[Fd], fd: int) -> Fd:
         "Shorthand for WrappedFd(fd)."
         return cls(fd)
 
@@ -300,7 +301,7 @@ class WrappedFd(object):
         # A "shallow copy" of a file is the same as a deep copy.
         return copy.deepcopy(self)
 
-    def __deepcopy__(self, memo) -> Self:
+    def __deepcopy__(self, memo: Dict[int, Any]) -> Self:
         "Identical to WrappedFd.clone()"
         return self.clone()
 
@@ -311,7 +312,12 @@ class WrappedFd(object):
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        exc_traceback: Optional[TracebackType],
+    ) -> None:
         self.close()
 
 
@@ -442,7 +448,8 @@ def proc_readlink(base: ProcfsBase, path: str) -> str:
         if n < 0:
             raise Error._fetch(n) or INTERNAL_ERROR
         elif n <= linkbuf_size:
-            return ffi.buffer(linkbuf, linkbuf_size)[:n].decode("latin1")
+            buf = typing.cast(bytes, ffi.buffer(linkbuf, linkbuf_size)[:n])
+            return buf.decode("latin1")
         else:
             # The contents were truncated. Unlike readlinkat, pathrs returns
             # the size of the link when it checked. So use the returned size
@@ -551,7 +558,8 @@ class Root(WrappedFd):
             if n < 0:
                 raise Error._fetch(n) or INTERNAL_ERROR
             elif n <= linkbuf_size:
-                return ffi.buffer(linkbuf, linkbuf_size)[:n].decode("latin1")
+                buf = typing.cast(bytes, ffi.buffer(linkbuf, linkbuf_size)[:n])
+                return buf.decode("latin1")
             else:
                 # The contents were truncated. Unlike readlinkat, pathrs returns
                 # the size of the link when it checked. So use the returned size

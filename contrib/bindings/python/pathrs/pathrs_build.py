@@ -23,7 +23,7 @@ import re
 import os
 import sys
 
-from typing import Optional
+from typing import Any, Optional
 from collections.abc import Iterable
 
 import cffi
@@ -51,7 +51,7 @@ def load_hdr(ffi: cffi.FFI, hdr_path: str) -> None:
     ffi.cdef(hdr)
 
 
-def create_ffibuilder(**kwargs) -> cffi.FFI:
+def create_ffibuilder(**kwargs: Any) -> cffi.FFI:
     ffibuilder = cffi.FFI()
     ffibuilder.cdef("typedef uint32_t dev_t;")
 

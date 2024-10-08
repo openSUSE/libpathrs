@@ -17,16 +17,18 @@
 
 import setuptools
 
+from typing import Any, Dict
+
 
 # This is only needed for backwards compatibility with older versions.
-def parse_pyproject():
+def parse_pyproject() -> Dict[str, Any]:
     try:
         import tomllib
 
         openmode = "rb"
     except ImportError:
         # TODO: Remove this once we only support Python >= 3.11.
-        import toml as tomllib
+        import toml as tomllib  # type: ignore
 
         openmode = "r"
 
