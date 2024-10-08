@@ -98,7 +98,7 @@ totally private `procfs` handle that can be used without worrying about racing
 mount operations. `libpathrs` will try to use this if it can (this usually
 requires root).
 
-Here are a few examples of pratical things you might want to do with
+Here are a few examples of practical things you might want to do with
 `libpathrs`'s `procfs` API:
 
 ```c

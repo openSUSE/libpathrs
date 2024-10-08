@@ -53,7 +53,7 @@ pub enum CProcfsBase {
     /// different CLONE_FS, it is possible for /proc/self to point the wrong
     /// thread and so /proc/thread-self may be necessary.
     ///
-    /// NOTE: Using /proc/thread-self may require care if used from langauges
+    /// NOTE: Using /proc/thread-self may require care if used from languages
     /// where your code can change threads without warning and old threads can
     /// be killed (such as Go -- where you want to use runtime.LockOSThread).
     PATHRS_PROC_THREAD_SELF = 0x3EAD_5E1F,

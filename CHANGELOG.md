@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   against the system libraries don't need to make any changes.
 
 ### Fixed ###
-- `Root::mkdir_all` no longer does strict verification that directories craeted
+- `Root::mkdir_all` no longer does strict verification that directories created
   by `mkdir_all` "look right" after opening each component. These checks didn't
   protect against any practical attack (since an attacker could just get us to
   use a directory by creating it before `Root::mkdir_all` and we would happily

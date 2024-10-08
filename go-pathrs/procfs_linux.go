@@ -149,7 +149,7 @@ func ProcSelfOpen(path string, flags int) (*os.File, error) {
 //
 // Because Go can change the running OS thread of your goroutine without notice
 // (and then subsequently kill the old thread), this method will lock the
-// current goroutine to ths OS thread (with runtime.LockOSThread) and the
+// current goroutine to the OS thread (with runtime.LockOSThread) and the
 // caller is responsible for unlocking the the OS thread with the
 // ProcHandleCloser callback once they are done using the returned file. This
 // callback MUST be called AFTER you have finished using the returned *os.File.
