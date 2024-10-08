@@ -52,7 +52,7 @@ jobs:
       - name: install mypy
         run: >-
           python3 -m pip install --user mypy
-      - uses: tsuyoshicho/action-mypy@v4
+      - uses: tsuyoshicho/action-mypy@v5
         with:
           github_token: ${{ secrets.github_token }}
           reporter: github-check
