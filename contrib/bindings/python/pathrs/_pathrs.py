@@ -28,20 +28,19 @@ from typing import Any, IO, Optional, TextIO, Union
 # TODO: Remove this once we only support Python >= 3.11.
 from typing_extensions import Self, TypeAlias
 
+from ._libpathrs_cffi import lib as libpathrs_so
 if typing.TYPE_CHECKING:
 	# mypy apparently cannot handle the "ffi: cffi.api.FFI" definition in
 	# _libpathrs_cffi/__init__.pyi so we need to explicitly reference the type
 	# from cffi here.
 	import cffi
-	ffi: cffi.FFI
+	ffi = cffi.FFI()
 	CString: TypeAlias = cffi.FFI.CData
 	CBuffer: TypeAlias = cffi.FFI.CData
 else:
 	from ._libpathrs_cffi import ffi
 	CString: TypeAlias = ffi.CData
 	CBuffer: TypeAlias = ffi.CData
-
-from ._libpathrs_cffi import lib as libpathrs_so
 
 __all__ = [
 	# core api

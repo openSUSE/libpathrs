@@ -102,8 +102,10 @@ def srcdir_ffibuilder(root_dir: Optional[str] = None) -> cffi.FFI:
 	library_dirs = [os.path.dirname(path) for path in library_dirs]
 
 	# Compile the libpathrs module.
-	return create_ffibuilder(include_dirs=[os.path.join(root_dir, "include")],
-	                         library_dirs=library_dirs)
+	return create_ffibuilder(
+		include_dirs=[os.path.join(root_dir, "include")],
+		library_dirs=library_dirs,
+	)
 
 def system_ffibuilder() -> cffi.FFI:
 	"""
@@ -112,7 +114,7 @@ def system_ffibuilder() -> cffi.FFI:
 
 	return create_ffibuilder(include_dirs=[
 		"/usr/include",
-		"/usr/local/include"
+		"/usr/local/include",
 	])
 
 if __name__ == "__main__":
