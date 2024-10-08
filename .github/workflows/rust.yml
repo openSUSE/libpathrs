@@ -117,3 +117,16 @@ jobs:
         with:
           components: clippy
       - run: cargo clippy --all-features --all-targets
+
+  complete:
+    needs:
+      - check
+      - check-msrv
+      - rustdoc
+      - test
+      - examples
+      - fmt
+      - clippy
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Rust CI jobs completed successfully."

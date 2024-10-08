@@ -26,7 +26,7 @@ use crate::{
 };
 
 use std::{
-    fs::Permissions,
+    fs::{File, Permissions},
     os::unix::io::{AsFd, OwnedFd},
     path::{Path, PathBuf},
 };
@@ -57,7 +57,7 @@ pub(in crate::tests) trait RootImpl: AsFd + std::fmt::Debug + Sized {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Self::Handle, Self::Error>;
+    ) -> Result<File, Self::Error>;
 
     fn mkdir_all<P: AsRef<Path>>(
         &self,
@@ -122,7 +122,7 @@ impl RootImpl for Root {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Self::Handle, Self::Error> {
+    ) -> Result<File, Self::Error> {
         self.create_file(path, flags, perm)
     }
 
@@ -199,7 +199,7 @@ impl RootImpl for &Root {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Self::Handle, Self::Error> {
+    ) -> Result<File, Self::Error> {
         Root::create_file(self, path, flags, perm)
     }
 
@@ -276,7 +276,7 @@ impl RootImpl for RootRef<'_> {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Self::Handle, Self::Error> {
+    ) -> Result<File, Self::Error> {
         self.create_file(path, flags, perm)
     }
 
@@ -353,7 +353,7 @@ impl RootImpl for &RootRef<'_> {
         path: P,
         flags: OpenFlags,
         perm: &Permissions,
-    ) -> Result<Self::Handle, Self::Error> {
+    ) -> Result<File, Self::Error> {
         RootRef::create_file(self, path, flags, perm)
     }
 

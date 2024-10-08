@@ -23,9 +23,12 @@ import re
 import os
 import sys
 
+from typing import Optional
+from collections.abc import Iterable
+
 import cffi
 
-def load_hdr(ffi, hdr_path):
+def load_hdr(ffi: cffi.FFI, hdr_path: str) -> None:
 	with open(hdr_path) as f:
 		hdr = f.read()
 
@@ -41,7 +44,7 @@ def load_hdr(ffi, hdr_path):
 	# Load the header.
 	ffi.cdef(hdr)
 
-def create_ffibuilder(**kwargs):
+def create_ffibuilder(**kwargs) -> cffi.FFI:
 	ffibuilder = cffi.FFI()
 	ffibuilder.cdef("typedef uint32_t dev_t;")
 
@@ -58,7 +61,7 @@ def create_ffibuilder(**kwargs):
 
 	return ffibuilder
 
-def find_rootdir():
+def find_rootdir() -> str:
 	# Figure out where the libpathrs source dir is.
 	root_dir = None
 	candidate = os.path.dirname(sys.path[0] or os.getcwd())
@@ -80,7 +83,7 @@ def find_rootdir():
 
 	return root_dir
 
-def srcdir_ffibuilder(root_dir=None):
+def srcdir_ffibuilder(root_dir: Optional[str] = None) -> cffi.FFI:
 	"""
 	Build the CFFI bindings using the provided root_dir as the root of a
 	pathrs source tree which has compiled cdylibs ready in target/*.
@@ -90,7 +93,7 @@ def srcdir_ffibuilder(root_dir=None):
 		root_dir = find_rootdir()
 
 	# Figure out which libs are usable.
-	library_dirs = (
+	library_dirs: Iterable[str] = (
 		os.path.join(root_dir, "target/%s/libpathrs.so" % (mode,))
 			for mode in ("debug", "release")
 	)
@@ -102,7 +105,7 @@ def srcdir_ffibuilder(root_dir=None):
 	return create_ffibuilder(include_dirs=[os.path.join(root_dir, "include")],
 	                         library_dirs=library_dirs)
 
-def system_ffibuilder():
+def system_ffibuilder() -> cffi.FFI:
 	"""
 	Build the CFFI bindings using the installed libpathrs system libraries.
 	"""

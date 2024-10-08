@@ -24,46 +24,32 @@ on:
   schedule:
     - cron: '0 0 * * *'
 
-name: bindings-ci
+name: bindings-python
 
 jobs:
-  c:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Build and install libpathrs.so.
-      - uses: dtolnay/rust-toolchain@stable
-      - name: build libpathrs
-        run: make release
-      - name: install libpathrs
-        run: sudo ./install.sh --libdir=/usr/lib
-      # Run smoke-tests.
-      - run: make -C examples/c smoke-test
+  # TODO: Do some kind of lints?
 
-  go:
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: ["1.18.x", "1.21.x", "1.22.x"]
+  mypy:
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write # allow the action to annotate code
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Build and install libpathrs.so.
-      - uses: dtolnay/rust-toolchain@stable
-      - name: build libpathrs
-        run: make release
-      - name: install libpathrs
-        run: sudo ./install.sh --libdir=/usr/lib
-      # Setup go.
-      - name: install go ${{ matrix.go-version }}
-        uses: actions/setup-go@v5
+      # Set up python venv.
+      - uses: actions/setup-python@v5
+      - name: install mypy
+        run: >-
+          python3 -m pip install --user mypy
+      - uses: tsuyoshicho/action-mypy@v4
         with:
-          go-version: ${{ matrix.go-version }}
-          check-latest: true
-      # Run smoke-tests.
-      - run: make -C examples/go smoke-test
+          github_token: ${{ secrets.github_token }}
+          reporter: github-check
+          workdir: contrib/bindings/python/pathrs
+          fail_on_error: true
 
-  python:
+  smoke-test:
     strategy:
       fail-fast: false
       matrix:
@@ -108,3 +94,11 @@ jobs:
           path: contrib/bindings/python/dist/
       # Run smoke-tests.
       - run: make -C examples/python smoke-test
+
+  complete:
+    needs:
+      - mypy
+      - smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Python CI jobs completed successfully."

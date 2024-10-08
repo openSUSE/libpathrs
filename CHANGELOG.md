@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Fixes ###
 - python bindings: add a minimal README for PyPI.
 - python bindings: actually export `PROC_ROOT`.
+- python bindings: add type annotations and `py.typed` to allow for downstream
+  users to get proper type annotations for the API.
 
 ## [0.1.1] - 2024-10-01 ##
 

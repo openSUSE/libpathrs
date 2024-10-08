@@ -20,9 +20,28 @@ import os
 import re
 import sys
 import copy
+import errno
 import fcntl
 
-from ._libpathrs_cffi import ffi, lib as libpathrs_so
+import typing
+from typing import Any, IO, Optional, TextIO, Union
+# TODO: Remove this once we only support Python >= 3.11.
+from typing_extensions import Self, TypeAlias
+
+if typing.TYPE_CHECKING:
+	# mypy apparently cannot handle the "ffi: cffi.api.FFI" definition in
+	# _libpathrs_cffi/__init__.pyi so we need to explicitly reference the type
+	# from cffi here.
+	import cffi
+	ffi: cffi.FFI
+	CString: TypeAlias = cffi.FFI.CData
+	CBuffer: TypeAlias = cffi.FFI.CData
+else:
+	from ._libpathrs_cffi import ffi
+	CString: TypeAlias = ffi.CData
+	CBuffer: TypeAlias = ffi.CData
+
+from ._libpathrs_cffi import lib as libpathrs_so
 
 __all__ = [
 	# core api
@@ -34,16 +53,15 @@ __all__ = [
 	"Error",
 ]
 
-def _cstr(pystr):
+def _cstr(pystr: str) -> CString:
 	return ffi.new("char[]", pystr.encode("utf8"))
 
-def _pystr(cstr):
-	return ffi.string(cstr).decode("utf8")
+def _pystr(cstr: CString) -> str:
+	s = ffi.string(cstr)
+	assert isinstance(s, bytes) # typing
+	return s.decode("utf8")
 
-def _pyptr(cptr):
-	return int(ffi.cast("uintptr_t", cptr))
-
-def _cbuffer(size):
+def _cbuffer(size: int) -> CBuffer:
 	return ffi.new("char[%d]" % (size,))
 
 
@@ -55,7 +73,11 @@ class Error(Exception):
 	(Error.errno).
 	"""
 
-	def __init__(self, message, *_, errno=None):
+	message: str
+	errno: Optional[int]
+	strerror: Optional[str]
+
+	def __init__(self, message: str, *_, errno: Optional[int] = None):
 		# Construct Exception.
 		super().__init__(message)
 
@@ -65,14 +87,14 @@ class Error(Exception):
 
 		# Pre-format the errno.
 		self.strerror = None
-		if self.errno is not None:
+		if errno is not None:
 			try:
 				self.strerror = os.strerror(errno)
 			except ValueError:
 				self.strerror = str(errno)
 
 	@classmethod
-	def _fetch(cls, err_id):
+	def _fetch(cls, err_id: int) -> Optional[Self]:
 		if err_id >= 0:
 			return None
 
@@ -83,21 +105,22 @@ class Error(Exception):
 		description = _pystr(err.description)
 		errno = err.saved_errno or None
 
+		# TODO: Should we use ffi.gc()? mypy doesn't seem to like our types...
 		libpathrs_so.pathrs_errorinfo_free(err)
 		del err
 
 		return cls(description, errno=errno)
 
-	def __str__(self):
+	def __str__(self) -> str:
 		if self.errno is None:
 			return self.message
 		else:
 			return "%s (%s)" % (self.message, self.strerror)
 
-	def __repr__(self):
+	def __repr__(self) -> str:
 		return "Error(%r, errno=%r)" % (self.message, self.errno)
 
-	def pprint(self, out=sys.stdout):
+	def pprint(self, out: TextIO = sys.stdout) -> None:
 		"Pretty-print the error to the given @out file."
 		# Basic error information.
 		if self.errno is None:
@@ -109,8 +132,13 @@ class Error(Exception):
 
 INTERNAL_ERROR = Error("tried to fetch libpathrs error but no error found")
 
+class FilenoFile(typing.Protocol):
+	def fileno(self) -> int:
+		...
 
-def _fileno(file):
+FileLike = Union[FilenoFile, int]
+
+def _fileno(file: FileLike) -> int:
 	if isinstance(file, int):
 		# file is a plain fd
 		return file
@@ -118,8 +146,8 @@ def _fileno(file):
 		# Assume there is a fileno method.
 		return file.fileno()
 
-def _clonefile(file):
-	return fcntl.fcntl(fileno(file), fcntl.F_DUPFD_CLOEXEC)
+def _clonefile(file: FileLike) -> int:
+	return fcntl.fcntl(_fileno(file), fcntl.F_DUPFD_CLOEXEC)
 
 
 class WrappedFd(object):
@@ -131,7 +159,9 @@ class WrappedFd(object):
 	pathrs will return WrappedFds for most operations that return an fd.
 	"""
 
-	def __init__(self, file):
+	_fd: Optional[int]
+
+	def __init__(self, file: FileLike):
 		"""
 		Construct a WrappedFd from any file-like object.
 
@@ -152,10 +182,10 @@ class WrappedFd(object):
 			# If this is a regular open file, we need to make a copy because
 			# you cannot leak files and so the GC might close it from
 			# underneath us.
-			fd = clonefd(fd)
+			fd = _clonefile(fd)
 		self._fd = fd
 
-	def fileno(self):
+	def fileno(self) -> int:
 		"""
 		Return the file descriptor number of this WrappedFd.
 
@@ -170,7 +200,7 @@ class WrappedFd(object):
 			raise OSError(errno.EBADF, "Closed file descriptor")
 		return self._fd
 
-	def leak(self):
+	def leak(self) -> None:
 		"""
 		Clears this WrappedFd without closing the underlying file, to stop GC
 		from closing the file.
@@ -182,7 +212,7 @@ class WrappedFd(object):
 		"""
 		self._fd = None
 
-	def fdopen(self, mode="r"):
+	def fdopen(self, mode: str = "r") -> IO[Any]:
 		"""
 		Convert this WrappedFd into an os.fileopen() handle.
 
@@ -201,11 +231,11 @@ class WrappedFd(object):
 			raise
 
 	@classmethod
-	def from_raw_fd(cls, fd):
+	def from_raw_fd(cls, fd: int) -> Self:
 		"Shorthand for WrappedFd(fd)."
 		return cls(fd)
 
-	def into_raw_fd(self):
+	def into_raw_fd(self) -> int:
 		"""
 		Convert this WrappedFd into a raw file descriptor that GC won't touch.
 
@@ -216,14 +246,14 @@ class WrappedFd(object):
 		self.leak()
 		return fd
 
-	def isclosed(self):
+	def isclosed(self) -> bool:
 		"""
 		Returns whether the underlying file descriptor is closed or the
 		WrappedFd has been leaked.
 		"""
 		return self._fd is None
 
-	def close(self):
+	def close(self) -> None:
 		"""
 		Manually close the underlying file descriptor for this WrappedFd.
 
@@ -231,59 +261,61 @@ class WrappedFd(object):
 		you really care about the point where a file is closed.
 		"""
 		if not self.isclosed():
+			assert self._fd is not None # typing
 			os.close(self._fd)
 			self._fd = None
 
-	def clone(self):
+	def clone(self) -> Self:
 		"Create a clone of this WrappedFd that has a separate lifetime."
 		if self.isclosed():
 			raise ValueError("cannot clone closed file")
-		return self.__class__(_clonefile(self))
+		assert self._fd is not None # typing
+		return self.__class__(_clonefile(self._fd))
 
-	def __copy__(self):
+	def __copy__(self) -> Self:
 		"Identical to WrappedFd.clone()"
 		# A "shallow copy" of a file is the same as a deep copy.
 		return copy.deepcopy(self)
 
-	def __deepcopy__(self, memo):
+	def __deepcopy__(self, memo) -> Self:
 		"Identical to WrappedFd.clone()"
 		return self.clone()
 
-	def __del__(self):
+	def __del__(self) -> None:
 		"Identical to WrappedFd.close()"
 		self.close()
 
-	def __enter__(self):
+	def __enter__(self) -> Self:
 		return self
 
-	def __exit__(self, exc_type, exc_value, exc_traceback):
+	def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
 		self.close()
 
 
 # XXX: This is _super_ ugly but so is the one in CPython.
-def _convert_mode(mode):
-	mode = set(mode)
+def _convert_mode(mode: str) -> int:
+	mode_set = set(mode)
 	flags = os.O_CLOEXEC
 
 	# We don't support O_CREAT or O_EXCL with libpathrs -- use creat().
-	if "x" in mode:
+	if "x" in mode_set:
 		raise ValueError("pathrs doesn't support mode='x', use Root.creat()")
 	# Basic sanity-check to make sure we don't accept garbage modes.
-	if len(mode & {"r", "w", "a"}) > 1:
+	if len(mode_set & {"r", "w", "a"}) > 1:
 		raise ValueError("must have exactly one of read/write/append mode")
 
 	read = False
 	write = False
 
-	if "+" in mode:
+	if "+" in mode_set:
 		read = True
 		write = True
-	if "r" in mode:
+	if "r" in mode_set:
 		read = True
-	if "w" in mode:
+	if "w" in mode_set:
 		write = True
 		flags |= os.O_TRUNC
-	if "a" in mode:
+	if "a" in mode_set:
 		write = True
 		flags |= os.O_APPEND
 
@@ -298,11 +330,22 @@ def _convert_mode(mode):
 	return flags
 
 
+#: Resolve proc_* operations relative to the /proc root. Note that this mode
+#: may be more expensive because we have to take steps to try to avoid leaking
+#: unmasked procfs handles, so you should use PROC_SELF if you can.
 PROC_ROOT = libpathrs_so.PATHRS_PROC_ROOT
+
+#: Resolve proc_* operations relative to /proc/self. For most programs, this is
+#: the standard choice.
 PROC_SELF = libpathrs_so.PATHRS_PROC_SELF
+
+#: Resolve proc_* operations relative to /proc/thread-self. In multi-threaded
+#: programs where one thread has a different CLONE_FS, it is possible for
+#: /proc/self to point the wrong thread and so /proc/thread-self may be
+#: necessary.
 PROC_THREAD_SELF = libpathrs_so.PATHRS_PROC_THREAD_SELF
 
-def proc_open(base, path, mode="r", extra_flags=0):
+def proc_open(base, path: str, mode: str = "r", extra_flags: int = 0):
 	"""
 	Open a procfs file using Pythonic mode strings.
 
@@ -324,7 +367,7 @@ def proc_open(base, path, mode="r", extra_flags=0):
 	with proc_open_raw(base, path, flags) as file:
 		return file.fdopen(mode)
 
-def proc_open_raw(base, path, flags):
+def proc_open_raw(base, path: str, flags: int) -> WrappedFd:
 	"""
 	Open a procfs file using Unix open flags.
 
@@ -341,13 +384,12 @@ def proc_open_raw(base, path, flags):
 	let libpathrs know that it can be more strict when opening the path.
 	"""
 	# TODO: Should we default to O_NOFOLLOW or put a separate argument for it?
-	path = _cstr(path)
-	fd = libpathrs_so.pathrs_proc_open(base, path, flags)
+	fd = libpathrs_so.pathrs_proc_open(base, _cstr(path), flags)
 	if fd < 0:
 		raise Error._fetch(fd) or INTERNAL_ERROR
 	return WrappedFd(fd)
 
-def proc_readlink(base, path):
+def proc_readlink(base, path: str) -> str:
 	"""
 	Fetch the target of a procfs symlink.
 
@@ -361,11 +403,11 @@ def proc_readlink(base, path):
 	open.
 	"""
 	# TODO: See if we can merge this with Root.readlink.
-	path = _cstr(path)
+	cpath = _cstr(path)
 	linkbuf_size = 128
 	while True:
 		linkbuf = _cbuffer(linkbuf_size)
-		n = libpathrs_so.pathrs_proc_readlink(base, path, linkbuf, linkbuf_size)
+		n = libpathrs_so.pathrs_proc_readlink(base, cpath, linkbuf, linkbuf_size)
 		if n < 0:
 			raise Error._fetch(n) or INTERNAL_ERROR
 		elif n <= linkbuf_size:
@@ -382,16 +424,16 @@ def proc_readlink(base, path):
 class Handle(WrappedFd):
 	"A handle to a filesystem object, usually resolved using Root.resolve()."
 
-	def __init__(self, file):
+	def __init__(self, file: FileLike):
 		# XXX: Is this necessary?
 		super().__init__(file)
 
 	@classmethod
-	def from_file(cls, file):
+	def from_file(cls, file: FileLike):
 		"Manually create a Handle from a file-like object."
 		return cls(file)
 
-	def reopen(self, mode="r", extra_flags=0):
+	def reopen(self, mode: str = "r", extra_flags: int = 0) -> IO[Any]:
 		"""
 		Upgrade a Handle to a os.fdopen() file handle.
 
@@ -405,7 +447,7 @@ class Handle(WrappedFd):
 		with self.reopen_raw(flags) as file:
 			return file.fdopen(mode)
 
-	def reopen_raw(self, flags):
+	def reopen_raw(self, flags: int) -> WrappedFd:
 		"""
 		Upgrade a Handle to a WrappedFd file handle.
 
@@ -426,7 +468,7 @@ class Root(WrappedFd):
 	relative to.
 	"""
 
-	def __init__(self, file_or_path):
+	def __init__(self, file_or_path: Union[FileLike, str]):
 		"""
 		Create a handle from a file-like object or a path to a directory.
 
@@ -435,27 +477,29 @@ class Root(WrappedFd):
 		is a path string, be aware there are no protections against rename race
 		attacks when opening the Root directory handle itself.
 		"""
-		file = file_or_path
 		if isinstance(file_or_path, str):
 			path = _cstr(file_or_path)
 			fd = libpathrs_so.pathrs_root_open(path)
 			if fd < 0:
 				raise Error._fetch(fd) or INTERNAL_ERROR
-			file = fd
+			file: FileLike = fd
+		else:
+			file = file_or_path
+
 		# XXX: Is this necessary?
 		super().__init__(file)
 
 	@classmethod
-	def open(cls, path):
+	def open(cls, path: str) -> Self:
 		"Identical to Root(path)."
 		return cls(path)
 
 	@classmethod
-	def from_file(cls, file):
+	def from_file(cls, file: FileLike) -> Self:
 		"Identical to Root(file)."
 		return cls(file)
 
-	def resolve(self, path, follow_trailing=True):
+	def resolve(self, path: str, follow_trailing: bool = True) -> Handle:
 		"""
 		Resolve the given path inside the Root and return a Handle.
 
@@ -466,26 +510,25 @@ class Root(WrappedFd):
 
 		A pathrs.Error is raised if the path doesn't exist.
 		"""
-		path = _cstr(path)
 		if follow_trailing:
-			fd = libpathrs_so.pathrs_resolve(self.fileno(), path)
+			fd = libpathrs_so.pathrs_resolve(self.fileno(), _cstr(path))
 		else:
-			fd = libpathrs_so.pathrs_resolve_nofollow(self.fileno(), path)
+			fd = libpathrs_so.pathrs_resolve_nofollow(self.fileno(), _cstr(path))
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
 		return Handle(fd)
 
-	def readlink(self, path):
+	def readlink(self, path: str) -> str:
 		"""
 		Fetch the target of a symlink at the given path in the Root.
 
 		A pathrs.Error is raised if the path is not a symlink or doesn't exist.
 		"""
-		path = _cstr(path)
+		cpath = _cstr(path)
 		linkbuf_size = 128
 		while True:
 			linkbuf = _cbuffer(linkbuf_size)
-			n = libpathrs_so.pathrs_readlink(self.fileno(), path, linkbuf, linkbuf_size)
+			n = libpathrs_so.pathrs_readlink(self.fileno(), cpath, linkbuf, linkbuf_size)
 			if n < 0:
 				raise Error._fetch(n) or INTERNAL_ERROR
 			elif n <= linkbuf_size:
@@ -498,7 +541,7 @@ class Root(WrappedFd):
 				# make sure we are a fair bit larger).
 				linkbuf_size += n
 
-	def creat(self, path, filemode, mode="r", extra_flags=0):
+	def creat(self, path: str, filemode: int, mode: str = "r", extra_flags: int = 0) -> IO[Any]:
 		"""
 		Atomically create-and-open a new file at the given path in the Root,
 		a-la O_CREAT.
@@ -514,16 +557,15 @@ class Root(WrappedFd):
 		to ensure the new file was created *by you* then you may wish to add
 		O_EXCL to extra_flags.
 		"""
-		path = _cstr(path)
 		flags = _convert_mode(mode) | extra_flags
-		fd = libpathrs_so.pathrs_creat(self.fileno(), path, flags, filemode)
+		fd = libpathrs_so.pathrs_creat(self.fileno(), _cstr(path), flags, filemode)
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
-		return Handle(fd)
+		return os.fdopen(fd, mode)
 
 	# TODO: creat_raw?
 
-	def rename(self, src, dst, flags=0):
+	def rename(self, src: str, dst: str, flags: int = 0) -> None:
 		"""
 		Rename a path from src to dst within the Root.
 
@@ -532,25 +574,22 @@ class Root(WrappedFd):
 		RENAME_EXCHANGE will turn this into an atomic swap operation.
 		"""
 		# TODO: Should we have a separate Root.swap() operation?
-		src = _cstr(src)
-		dst = _cstr(dst)
-		err = libpathrs_so.pathrs_rename(self.fileno(), src, dst, flags)
+		err = libpathrs_so.pathrs_rename(self.fileno(), _cstr(src), _cstr(dst), flags)
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
-	def rmdir(self, path):
+	def rmdir(self, path: str) -> None:
 		"""
 		Remove an empty directory at the given path within the Root.
 
 		To remove non-empty directories recursively, you can use
 		Root.remove_all().
 		"""
-		path = _cstr(path)
-		err = libpathrs_so.pathrs_rmdir(self.fileno(), path)
+		err = libpathrs_so.pathrs_rmdir(self.fileno(), _cstr(path))
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
-	def unlink(self, path):
+	def unlink(self, path: str) -> None:
 		"""
 		Remove a non-directory inode at the given path within the Root.
 
@@ -558,22 +597,20 @@ class Root(WrappedFd):
 		files and non-empty directories recursively, you can use
 		Root.remove_all().
 		"""
-		path = _cstr(path)
-		err = libpathrs_so.pathrs_unlink(self.fileno(), path)
+		err = libpathrs_so.pathrs_unlink(self.fileno(), _cstr(path))
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
-	def remove_all(self, path):
+	def remove_all(self, path: str) -> None:
 		"""
 		Remove the file or directory (empty or non-empty) at the given path
 		within the Root.
 		"""
-		path = _cstr(path)
-		err = libpathrs_so.pathrs_remove_all(self.fileno(), path)
+		err = libpathrs_so.pathrs_remove_all(self.fileno(), _cstr(path))
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
-	def mkdir(self, path, mode):
+	def mkdir(self, path: str, mode: int) -> None:
 		"""
 		Create a directory at the given path within the Root.
 
@@ -586,12 +623,11 @@ class Root(WrappedFd):
 		directories (or just re-use an existing directory) you can use
 		Root.mkdir_all().
 		"""
-		path = _cstr(path)
-		err = libpathrs_so.pathrs_mkdir(self.fileno(), path, mode)
+		err = libpathrs_so.pathrs_mkdir(self.fileno(), _cstr(path), mode)
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
-	def mkdir_all(self, path, mode):
+	def mkdir_all(self, path: str, mode: int) -> Handle:
 		"""
 		Recursively create a directory and all of its parents at the given path
 		within the Root (or re-use an existing directory if the path already
@@ -605,13 +641,12 @@ class Root(WrappedFd):
 		full path already exists, this mode is ignored and the existing
 		directory mode is kept.
 		"""
-		path = _cstr(path)
-		fd = libpathrs_so.pathrs_mkdir_all(self.fileno(), path, mode)
+		fd = libpathrs_so.pathrs_mkdir_all(self.fileno(), _cstr(path), mode)
 		if fd < 0:
 			raise Error._fetch(fd) or INTERNAL_ERROR
 		return Handle(fd)
 
-	def mknod(self, path, mode, dev=0):
+	def mknod(self, path: str, mode: int, dev: int = 0) -> None:
 		"""
 		Create a new inode at the given path within the Root.
 
@@ -621,14 +656,17 @@ class Root(WrappedFd):
 		mode of the created file due to a variety of external factors (umask,
 		setgid bits, POSIX ACLs).
 
+		dev is the the (major, minor) device number used for the new inode if
+		the mode contains S_IFCHR or S_IFBLK. You can construct the device
+		number from a (major, minor) using os.makedev().
+
 		A pathrs.Error is raised if the path already exists.
 		"""
-		path = _cstr(path)
-		err = libpathrs_so.pathrs_mknod(self.fileno(), path, mode, dev)
+		err = libpathrs_so.pathrs_mknod(self.fileno(), _cstr(path), mode, dev)
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
-	def hardlink(self, path, target):
+	def hardlink(self, path: str, target: str) -> None:
 		"""
 		Create a hardlink between two paths inside the Root.
 
@@ -638,13 +676,11 @@ class Root(WrappedFd):
 		A pathrs.Error is raised if the path for the new hardlink already
 		exists.
 		"""
-		path = _cstr(path)
-		target = _cstr(target)
-		err = libpathrs_so.pathrs_hardlink(self.fileno(), path, target)
+		err = libpathrs_so.pathrs_hardlink(self.fileno(), _cstr(path), _cstr(target))
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR
 
-	def symlink(self, path, target):
+	def symlink(self, path: str, target: str) -> None:
 		"""
 		Create a symlink at the given path in the Root.
 
@@ -655,8 +691,6 @@ class Root(WrappedFd):
 		A pathrs.Error is raised if the path for the new symlink already
 		exists.
 		"""
-		path = _cstr(path)
-		target = _cstr(target)
-		err = libpathrs_so.pathrs_symlink(self.fileno(), path, target)
+		err = libpathrs_so.pathrs_symlink(self.fileno(), _cstr(path), _cstr(target))
 		if err < 0:
 			raise Error._fetch(err) or INTERNAL_ERROR

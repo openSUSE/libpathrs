@@ -106,21 +106,17 @@ func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
 // Create creates a file within the Root's directory tree at the given path,
 // and returns a handle to the file. The provided mode is used for the new file
 // (the process's umask applies).
-func (r *Root) Create(path string, flags int, mode os.FileMode) (*Handle, error) {
+func (r *Root) Create(path string, flags int, mode os.FileMode) (*os.File, error) {
 	unixMode, err := toUnixMode(mode)
 	if err != nil {
 		return nil, err
 	}
-	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
+	return withFileFd(r.inner, func(rootFd uintptr) (*os.File, error) {
 		handleFd, err := pathrsCreat(rootFd, path, flags, unixMode)
 		if err != nil {
 			return nil, err
 		}
-		handleFile, err := mkFile(uintptr(handleFd))
-		if err != nil {
-			return nil, err
-		}
-		return &Handle{inner: handleFile}, nil
+		return mkFile(uintptr(handleFd))
 	})
 }
 

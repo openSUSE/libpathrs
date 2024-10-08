@@ -14,18 +14,35 @@
 # You should have received a copy of the GNU Lesser General Public License along
 # with this program. If not, see <https://www.gnu.org/licenses/>.
 
-PYTHON ?= python3
-PIP ?= pip3
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+  schedule:
+    - cron: '0 0 * * *'
 
-SRC_FILES := $(wildcard *.py pathrs/*.py)
+name: bindings-c
 
-dist: $(SRC_FILES) pyproject.toml
-	$(PYTHON) -m build
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build and install libpathrs.so.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build libpathrs
+        run: make release
+      - name: install libpathrs
+        run: sudo ./install.sh --libdir=/usr/lib
+      # Run smoke-tests.
+      - run: make -C examples/c smoke-test
 
-.PHONY: clean
-clean:
-	rm -rf dist/ pathrs.*-info/ pathrs/__pycache__/ pathrs/_libpathrs_cffi.*
-
-.PHONY: install
-install: dist
-	$(PIP) install dist/pathrs*.whl
+  complete:
+    needs:
+      - smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "C CI jobs completed successfully."
