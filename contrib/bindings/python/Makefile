@@ -26,6 +26,11 @@ dist: $(SRC_FILES) pyproject.toml
 clean:
 	rm -rf dist/ pathrs.*-info/ pathrs/__pycache__/ pathrs/_libpathrs_cffi.*
 
+.PHONY: lint
+lint:
+	black --check .
+	mypy .
+
 .PHONY: install
 install: dist
 	$(PIP) install dist/pathrs*.whl
