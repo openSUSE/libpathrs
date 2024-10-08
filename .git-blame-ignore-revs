@@ -1,2 +1,4 @@
 # python bindings: reformat with black
 c2924e9e77d258587ed9aa160525f3d434780686
+# examples: python: reformat with black
+9abf966f98e675925613fa7d692a9673e6b5a1fc
