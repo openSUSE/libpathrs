@@ -27,6 +27,16 @@ on:
 name: bindings-python
 
 jobs:
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: psf/black@stable
+        with:
+          options: "--check --verbose"
+          src: "./contrib/bindings/python"
+          version: "~= 24.0"
+
   # TODO: Do some kind of lints?
 
   mypy:
@@ -97,6 +107,7 @@ jobs:
 
   complete:
     needs:
+      - black
       - mypy
       - smoke-test
     runs-on: ubuntu-latest
