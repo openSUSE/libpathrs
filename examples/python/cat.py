@@ -26,21 +26,23 @@ import sys
 sys.path.append(os.path.dirname(__file__) + "/../contrib/bindings/python")
 import pathrs
 
+
 def chomp(s):
-	for nl in ["\r\n", "\r", "\n"]:
-		if s.endswith(nl):
-			return s[:-len(nl)]
-	return s
+    for nl in ["\r\n", "\r", "\n"]:
+        if s.endswith(nl):
+            return s[: -len(nl)]
+    return s
+
 
 def main(root_path, unsafe_path):
-	# Test that context managers work properly with WrappedFd:
-	with pathrs.Root(root_path) as root:
-		with root.resolve(unsafe_path) as handle:
-			with handle.reopen("r") as f:
-				for line in f:
-					line = chomp(line)
-					print(line)
+    # Test that context managers work properly with WrappedFd:
+    with pathrs.Root(root_path) as root:
+        with root.resolve(unsafe_path) as handle:
+            with handle.reopen("r") as f:
+                for line in f:
+                    line = chomp(line)
+                    print(line)
 
 
 if __name__ == "__main__":
-	main(*sys.argv[1:])
+    main(*sys.argv[1:])
