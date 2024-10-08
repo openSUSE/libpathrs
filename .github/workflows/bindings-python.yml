@@ -27,6 +27,28 @@ on:
 name: bindings-python
 
 jobs:
+  # TODO: Do some kind of lints?
+
+  mypy:
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write # allow the action to annotate code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Set up python venv.
+      - uses: actions/setup-python@v5
+      - name: install mypy
+        run: >-
+          python3 -m pip install --user mypy
+      - uses: tsuyoshicho/action-mypy@v4
+        with:
+          github_token: ${{ secrets.github_token }}
+          reporter: github-check
+          workdir: contrib/bindings/python/pathrs
+          fail_on_error: true
+
   smoke-test:
     strategy:
       fail-fast: false
@@ -75,6 +97,7 @@ jobs:
 
   complete:
     needs:
+      - mypy
       - smoke-test
     runs-on: ubuntu-latest
     steps:
