@@ -26,7 +26,52 @@ on:
 
 name: bindings-go
 
+env:
+  GO_VERSION: 1.22.x
+
 jobs:
+  lint:
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write # to allow the action to annotate code in the pr.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build and install libpathrs.so.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build libpathrs
+        run: make release
+      - name: install libpathrs
+        run: sudo ./install.sh --libdir=/usr/lib
+      # Run golangci-lint.
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61
+          working-directory: go-pathrs
+
+  go-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      # Build and install libpathrs.so.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build libpathrs
+        run: make release
+      - name: install libpathrs
+        run: sudo ./install.sh --libdir=/usr/lib
+      # Run go-fix.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+      - name: run go fix
+        run: |
+          cd go-pathrs
+          go fix ./...
+          git diff --exit-code
+
   smoke-test:
     strategy:
       fail-fast: false
@@ -52,6 +97,8 @@ jobs:
 
   complete:
     needs:
+      - lint
+      - go-fix
       - smoke-test
     runs-on: ubuntu-latest
     steps:

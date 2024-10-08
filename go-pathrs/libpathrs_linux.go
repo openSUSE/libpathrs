@@ -33,11 +33,11 @@ char *cast_ptr(void *ptr) { return ptr; }
 */
 import "C"
 
-func fetchError(errId C.int) error {
-	if errId >= 0 {
+func fetchError(errID C.int) error {
+	if errID >= 0 {
 		return nil
 	}
-	cErr := C.pathrs_errorinfo(errId)
+	cErr := C.pathrs_errorinfo(errID)
 	defer C.pathrs_errorinfo_free(cErr)
 
 	var err error
