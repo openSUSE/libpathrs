@@ -24,46 +24,10 @@ on:
   schedule:
     - cron: '0 0 * * *'
 
-name: bindings-ci
+name: bindings-python
 
 jobs:
-  c:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Build and install libpathrs.so.
-      - uses: dtolnay/rust-toolchain@stable
-      - name: build libpathrs
-        run: make release
-      - name: install libpathrs
-        run: sudo ./install.sh --libdir=/usr/lib
-      # Run smoke-tests.
-      - run: make -C examples/c smoke-test
-
-  go:
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: ["1.18.x", "1.21.x", "1.22.x"]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Build and install libpathrs.so.
-      - uses: dtolnay/rust-toolchain@stable
-      - name: build libpathrs
-        run: make release
-      - name: install libpathrs
-        run: sudo ./install.sh --libdir=/usr/lib
-      # Setup go.
-      - name: install go ${{ matrix.go-version }}
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
-          check-latest: true
-      # Run smoke-tests.
-      - run: make -C examples/go smoke-test
-
-  python:
+  smoke-test:
     strategy:
       fail-fast: false
       matrix:
@@ -108,3 +72,10 @@ jobs:
           path: contrib/bindings/python/dist/
       # Run smoke-tests.
       - run: make -C examples/python smoke-test
+
+  complete:
+    needs:
+      - smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Python CI jobs completed successfully."
