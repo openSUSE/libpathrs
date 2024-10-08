@@ -375,7 +375,7 @@ impl ProcfsHandle {
         // mount ID from parent. This is necessary because ProcfsHandle::open
         // might create a brand-new procfs handle with a different mount ID.
         // However, ProcfsHandle::open already checks that the mount ID and
-        // fstype are safe, so we can just re-use the mount ID we get without
+        // fstype are safe, so we can just reuse the mount ID we get without
         // issue.
         let parent_mnt_id = utils::fetch_mnt_id(&parent, "")?;
 

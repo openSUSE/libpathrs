@@ -720,7 +720,7 @@ mod utils {
                     );
                 }
                 RenameFlags::RENAME_WHITEOUT => {
-                    // Verify that there is a whiteout entry where the soure
+                    // Verify that there is a whiteout entry where the source
                     // used to be.
                     let new_lookup = root
                         .resolve_nofollow(src_path)

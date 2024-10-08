@@ -190,7 +190,7 @@ class WrappedFd(object):
         WrappedFd.leak() to ensure there is only ever one owner of the handle
         at a given time).
 
-        However, for os.fdopen() (or simmilar Pythonic file objects that are
+        However, for os.fdopen() (or similar Pythonic file objects that are
         tracked by the GC), we have to create a clone and so the WrappedFd is a
         copy.
         """
@@ -649,7 +649,7 @@ class Root(WrappedFd):
 
         A pathrs.Error will be raised if the parent directory doesn't exist, or
         the path already exists. To create a directory and all of its parent
-        directories (or just re-use an existing directory) you can use
+        directories (or just reuse an existing directory) you can use
         Root.mkdir_all().
         """
         err = libpathrs_so.pathrs_mkdir(self.fileno(), _cstr(path), mode)
@@ -659,7 +659,7 @@ class Root(WrappedFd):
     def mkdir_all(self, path: str, mode: int) -> Handle:
         """
         Recursively create a directory and all of its parents at the given path
-        within the Root (or re-use an existing directory if the path already
+        within the Root (or reuse an existing directory if the path already
         exists).
 
         This method returns a Handle to the created directory.

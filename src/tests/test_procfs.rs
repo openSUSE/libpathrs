@@ -149,7 +149,7 @@ macro_rules! procfs_tests {
         //
         // TODO: Figure out the fd type of GLOBAL_PROCFS_HANDLE. In principle we
         // would expect to be able to do fsopen(2) (otherwise the fsopen(2)
-        // tests will fail) but it would be nice to avoid possible spurrious
+        // tests will fail) but it would be nice to avoid possible spurious
         // errors.
         procfs_tests! {
             @capi-fn [<capi_ $test_name>]

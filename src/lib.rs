@@ -182,6 +182,6 @@ mod capi;
 mod syscalls;
 mod utils;
 
-// Library tetss.
+// Library tests.
 #[cfg(test)]
 mod tests;

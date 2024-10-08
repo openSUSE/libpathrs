@@ -100,7 +100,7 @@ pub(crate) fn path_split(path: &'_ Path) -> Result<(&'_ Path, Option<&'_ Path>),
     Ok((dir, base))
 }
 
-/// RawComponents is like [`Components`] execpt that no normalisation is done
+/// RawComponents is like [`Components`] except that no normalisation is done
 /// for any path components ([`Components`] normalises "/./" components), and
 /// all of the components are simply [`OsStr`].
 ///
@@ -211,7 +211,7 @@ impl<'p> Iterator for Ancestors<'p> {
             Some(idx) => idx,
         };
 
-        // TODO: Skip over mutiple "//" components.
+        // TODO: Skip over multiple "//" components.
 
         // Split the path.
         // TODO: We probably want to move some of the None handling here to

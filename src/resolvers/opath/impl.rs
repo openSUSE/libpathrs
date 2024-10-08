@@ -33,7 +33,7 @@
 //! If the check fails, we assume we are being attacked and return an error (and
 //! the caller can decide to re-try if they want). The kernel implementation
 //! will fail in fewer cases because it has access to in-kernel locks and other
-//! measures, but the final check throgh procfs should block all attack
+//! measures, but the final check through procfs should block all attack
 //! attempts.
 
 use crate::{

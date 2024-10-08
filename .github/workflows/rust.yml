@@ -30,6 +30,13 @@ env:
   RUST_MSRV: "1.63"
 
 jobs:
+  codespell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install codespell==v2.3.0
+      - run: codespell -L crate
+
   check:
     name: cargo check (stable)
     runs-on: ubuntu-latest
