@@ -36,7 +36,7 @@ type Handle struct {
 	inner *os.File
 }
 
-// HandleFromFile creates a new Handle from an exisitng file handle. The handle
+// HandleFromFile creates a new Handle from an existing file handle. The handle
 // will be copied by this method, so the original handle should still be freed
 // by the caller.
 //
@@ -76,7 +76,7 @@ func (h *Handle) OpenFile(flags int) (*os.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		return os.NewFile(uintptr(newFd), h.inner.Name()), nil
+		return os.NewFile(newFd, h.inner.Name()), nil
 	})
 }
 
@@ -97,7 +97,7 @@ func (h *Handle) IntoFile() *os.File {
 }
 
 // Clone creates a copy of a Handle, such that it has a separate lifetime to
-// the original (while refering to the same underlying file).
+// the original (while referring to the same underlying file).
 func (h *Handle) Clone() (*Handle, error) {
 	return HandleFromFile(h.inner)
 }

@@ -19,9 +19,9 @@
 package pathrs
 
 import (
+	"errors"
 	"fmt"
 	"os"
-
 	"syscall"
 )
 
@@ -77,7 +77,7 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 		if err != nil {
 			return nil, err
 		}
-		handleFile, err := mkFile(uintptr(handleFd))
+		handleFile, err := mkFile(handleFd)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +95,7 @@ func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
 		if err != nil {
 			return nil, err
 		}
-		handleFile, err := mkFile(uintptr(handleFd))
+		handleFile, err := mkFile(handleFd)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +116,7 @@ func (r *Root) Create(path string, flags int, mode os.FileMode) (*os.File, error
 		if err != nil {
 			return nil, err
 		}
-		return mkFile(uintptr(handleFd))
+		return mkFile(handleFd)
 	})
 }
 
@@ -163,11 +163,11 @@ func (r *Root) Remove(path string) error {
 		return nil
 	}
 	// Both failed, adjust the error in the same way that os.Remove does.
-	if err, ok := rmdirErr.(*Error); ok && err.errno != syscall.ENOTDIR {
-		return rmdirErr
-	} else {
-		return unlinkErr
+	err := rmdirErr
+	if errors.Is(err, syscall.ENOTDIR) {
+		err = unlinkErr
 	}
+	return err
 }
 
 // RemoveAll recursively deletes a path and all of its children. This is
@@ -211,7 +211,7 @@ func (r *Root) MkdirAll(path string, mode os.FileMode) (*Handle, error) {
 		if err != nil {
 			return nil, err
 		}
-		handleFile, err := mkFile(uintptr(handleFd))
+		handleFile, err := mkFile(handleFd)
 		if err != nil {
 			return nil, err
 		}
@@ -274,7 +274,7 @@ func (r *Root) IntoFile() *os.File {
 }
 
 // Clone creates a copy of a Root handle, such that it has a separate lifetime
-// to the original (while refering to the same underlying directory).
+// to the original (while referring to the same underlying directory).
 func (r *Root) Clone() (*Root, error) {
 	return RootFromFile(r.inner)
 }

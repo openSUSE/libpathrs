@@ -34,9 +34,10 @@ func dupFd(fd uintptr, name string) (*os.File, error) {
 	return os.NewFile(uintptr(newFd), name), nil
 }
 
+//nolint:cyclop // this function needs to handle a lot of cases
 func toUnixMode(mode os.FileMode) (uint32, error) {
 	sysMode := uint32(mode.Perm())
-	switch mode & os.ModeType {
+	switch mode & os.ModeType { //nolint:exhaustive // we only care about ModeType bits
 	case 0:
 		sysMode |= unix.S_IFREG
 	case os.ModeDir:
