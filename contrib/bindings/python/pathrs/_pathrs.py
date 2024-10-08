@@ -344,23 +344,28 @@ def _convert_mode(mode: str) -> int:
     return flags
 
 
+# TODO: Switch to "type ..." syntax once we switch to Python >= 3.12...?
+ProcfsBase: TypeAlias = int
+
 #: Resolve proc_* operations relative to the /proc root. Note that this mode
 #: may be more expensive because we have to take steps to try to avoid leaking
 #: unmasked procfs handles, so you should use PROC_SELF if you can.
-PROC_ROOT = libpathrs_so.PATHRS_PROC_ROOT
+PROC_ROOT: ProcfsBase = libpathrs_so.PATHRS_PROC_ROOT
 
 #: Resolve proc_* operations relative to /proc/self. For most programs, this is
 #: the standard choice.
-PROC_SELF = libpathrs_so.PATHRS_PROC_SELF
+PROC_SELF: ProcfsBase = libpathrs_so.PATHRS_PROC_SELF
 
 #: Resolve proc_* operations relative to /proc/thread-self. In multi-threaded
 #: programs where one thread has a different CLONE_FS, it is possible for
 #: /proc/self to point the wrong thread and so /proc/thread-self may be
 #: necessary.
-PROC_THREAD_SELF = libpathrs_so.PATHRS_PROC_THREAD_SELF
+PROC_THREAD_SELF: ProcfsBase = libpathrs_so.PATHRS_PROC_THREAD_SELF
 
 
-def proc_open(base, path: str, mode: str = "r", extra_flags: int = 0):
+def proc_open(
+    base: ProcfsBase, path: str, mode: str = "r", extra_flags: int = 0
+) -> IO[Any]:
     """
     Open a procfs file using Pythonic mode strings.
 
@@ -383,7 +388,7 @@ def proc_open(base, path: str, mode: str = "r", extra_flags: int = 0):
         return file.fdopen(mode)
 
 
-def proc_open_raw(base, path: str, flags: int) -> WrappedFd:
+def proc_open_raw(base: ProcfsBase, path: str, flags: int) -> WrappedFd:
     """
     Open a procfs file using Unix open flags.
 
@@ -406,7 +411,7 @@ def proc_open_raw(base, path: str, flags: int) -> WrappedFd:
     return WrappedFd(fd)
 
 
-def proc_readlink(base, path: str) -> str:
+def proc_readlink(base: ProcfsBase, path: str) -> str:
     """
     Fetch the target of a procfs symlink.
 

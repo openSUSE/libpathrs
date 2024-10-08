@@ -21,7 +21,7 @@ from typing import Optional, overload, type_check_only, Union
 # TODO: Remove this once we only support Python >= 3.10.
 from typing_extensions import TypeAlias, Literal
 
-from .._pathrs import CBuffer, CString
+from .._pathrs import CBuffer, CString, ProcfsBase
 
 # pathrs_errorinfo_t *
 @type_check_only
@@ -36,8 +36,6 @@ RawFd: TypeAlias = int
 #       this using the typing stubs for CFFI...
 def pathrs_errorinfo(err_id: Union[ErrorId, int]) -> CError: ...
 def pathrs_errorinfo_free(err: CError) -> None: ...
-
-ProcfsBase: TypeAlias = int
 
 PATHRS_PROC_ROOT: ProcfsBase
 PATHRS_PROC_SELF: ProcfsBase
