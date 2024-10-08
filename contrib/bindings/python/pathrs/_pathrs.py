@@ -24,7 +24,7 @@ import errno
 import fcntl
 
 import typing
-from typing import Any, IO, Optional, TextIO, Union
+from typing import Any, IO, Optional, TextIO, Type, TypeVar, Union
 
 # TODO: Remove this once we only support Python >= 3.11.
 from typing_extensions import Self, TypeAlias
@@ -164,6 +164,10 @@ def _clonefile(file: FileLike) -> int:
     return fcntl.fcntl(_fileno(file), fcntl.F_DUPFD_CLOEXEC)
 
 
+# TODO: Switch to def foo[T](...): ... syntax with Python >= 3.12.
+Fd = TypeVar("Fd", bound="WrappedFd")
+
+
 class WrappedFd(object):
     """
     Represents a file descriptor that allows for manual lifetime management,
@@ -248,6 +252,11 @@ class WrappedFd(object):
     def from_raw_fd(cls, fd: int) -> Self:
         "Shorthand for WrappedFd(fd)."
         return cls(fd)
+
+    @classmethod
+    def from_file(cls: Type[Fd], file: FileLike) -> Fd:
+        "Shorthand for WrappedFd(file)."
+        return cls(file)
 
     def into_raw_fd(self) -> int:
         """
@@ -446,15 +455,6 @@ def proc_readlink(base: ProcfsBase, path: str) -> str:
 class Handle(WrappedFd):
     "A handle to a filesystem object, usually resolved using Root.resolve()."
 
-    def __init__(self, file: FileLike):
-        # XXX: Is this necessary?
-        super().__init__(file)
-
-    @classmethod
-    def from_file(cls, file: FileLike):
-        "Manually create a Handle from a file-like object."
-        return cls(file)
-
     def reopen(self, mode: str = "r", extra_flags: int = 0) -> IO[Any]:
         """
         Upgrade a Handle to a os.fdopen() file handle.
@@ -515,11 +515,6 @@ class Root(WrappedFd):
     def open(cls, path: str) -> Self:
         "Identical to Root(path)."
         return cls(path)
-
-    @classmethod
-    def from_file(cls, file: FileLike) -> Self:
-        "Identical to Root(file)."
-        return cls(file)
 
     def resolve(self, path: str, follow_trailing: bool = True) -> Handle:
         """
