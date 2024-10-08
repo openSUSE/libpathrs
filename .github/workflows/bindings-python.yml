@@ -31,10 +31,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: psf/black@stable
+      - name: black --check contrib/bindings/python
+        uses: psf/black@stable
         with:
           options: "--check --verbose"
           src: "./contrib/bindings/python"
+          version: "~= 24.0"
+      - name: black --check examples/python
+        uses: psf/black@stable
+        with:
+          options: "--check --verbose"
+          src: "./examples/python"
           version: "~= 24.0"
 
   # TODO: Do some kind of lints?
