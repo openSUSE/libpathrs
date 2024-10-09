@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+### Changed ###
+- gha: our Rust crate and Python bindings are now uploaded automatically from a
+  GitHub action when a tag is pushed.
+
 ### Fixes ###
 - syscalls: the pretty-printing of `openat2` errors now gives a string
   description of the flags passed rather that just a hex value (to match other
