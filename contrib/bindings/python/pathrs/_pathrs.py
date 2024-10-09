@@ -89,7 +89,7 @@ class Error(Exception):
     errno: Optional[int]
     strerror: Optional[str]
 
-    def __init__(self, message: str, *, errno: Optional[int] = None):
+    def __init__(self, message: str, /, *, errno: Optional[int] = None):
         # Construct Exception.
         super().__init__(message)
 
@@ -106,7 +106,7 @@ class Error(Exception):
                 self.strerror = str(errno)
 
     @classmethod
-    def _fetch(cls, err_id: int) -> Optional[Self]:
+    def _fetch(cls, err_id: int, /) -> Optional[Self]:
         if err_id >= 0:
             return None
 
@@ -180,7 +180,7 @@ class WrappedFd(object):
 
     _fd: Optional[int]
 
-    def __init__(self, file: FileLike):
+    def __init__(self, file: FileLike, /):
         """
         Construct a WrappedFd from any file-like object.
 
@@ -250,12 +250,12 @@ class WrappedFd(object):
             raise
 
     @classmethod
-    def from_raw_fd(cls: Type[Fd], fd: int) -> Fd:
+    def from_raw_fd(cls: Type[Fd], fd: int, /) -> Fd:
         "Shorthand for WrappedFd(fd)."
         return cls(fd)
 
     @classmethod
-    def from_file(cls: Type[Fd], file: FileLike) -> Fd:
+    def from_file(cls: Type[Fd], file: FileLike, /) -> Fd:
         "Shorthand for WrappedFd(file)."
         return cls(file)
 
@@ -379,7 +379,7 @@ PROC_THREAD_SELF: ProcfsBase = libpathrs_so.PATHRS_PROC_THREAD_SELF
 
 
 def proc_open(
-    base: ProcfsBase, path: str, mode: str = "r", extra_flags: int = 0
+    base: ProcfsBase, path: str, mode: str = "r", /, *, extra_flags: int = 0
 ) -> IO[Any]:
     """
     Open a procfs file using Pythonic mode strings.
@@ -403,7 +403,7 @@ def proc_open(
         return file.fdopen(mode)
 
 
-def proc_open_raw(base: ProcfsBase, path: str, flags: int) -> WrappedFd:
+def proc_open_raw(base: ProcfsBase, path: str, flags: int, /) -> WrappedFd:
     """
     Open a procfs file using Unix open flags.
 
@@ -426,7 +426,7 @@ def proc_open_raw(base: ProcfsBase, path: str, flags: int) -> WrappedFd:
     return WrappedFd(fd)
 
 
-def proc_readlink(base: ProcfsBase, path: str) -> str:
+def proc_readlink(base: ProcfsBase, path: str, /) -> str:
     """
     Fetch the target of a procfs symlink.
 
@@ -462,7 +462,7 @@ def proc_readlink(base: ProcfsBase, path: str) -> str:
 class Handle(WrappedFd):
     "A handle to a filesystem object, usually resolved using Root.resolve()."
 
-    def reopen(self, mode: str = "r", extra_flags: int = 0) -> IO[Any]:
+    def reopen(self, mode: str = "r", /, *, extra_flags: int = 0) -> IO[Any]:
         """
         Upgrade a Handle to a os.fdopen() file handle.
 
@@ -476,7 +476,7 @@ class Handle(WrappedFd):
         with self.reopen_raw(flags) as file:
             return file.fdopen(mode)
 
-    def reopen_raw(self, flags: int) -> WrappedFd:
+    def reopen_raw(self, flags: int, /) -> WrappedFd:
         """
         Upgrade a Handle to a WrappedFd file handle.
 
@@ -497,7 +497,7 @@ class Root(WrappedFd):
     relative to.
     """
 
-    def __init__(self, file_or_path: Union[FileLike, str]):
+    def __init__(self, file_or_path: Union[FileLike, str], /):
         """
         Create a handle from a file-like object or a path to a directory.
 
@@ -519,11 +519,11 @@ class Root(WrappedFd):
         super().__init__(file)
 
     @classmethod
-    def open(cls, path: str) -> Self:
+    def open(cls, path: str, /) -> Self:
         "Identical to Root(path)."
         return cls(path)
 
-    def resolve(self, path: str, follow_trailing: bool = True) -> Handle:
+    def resolve(self, path: str, /, *, follow_trailing: bool = True) -> Handle:
         """
         Resolve the given path inside the Root and return a Handle.
 
@@ -542,7 +542,7 @@ class Root(WrappedFd):
             raise Error._fetch(fd) or INTERNAL_ERROR
         return Handle(fd)
 
-    def readlink(self, path: str) -> str:
+    def readlink(self, path: str, /) -> str:
         """
         Fetch the target of a symlink at the given path in the Root.
 
@@ -569,7 +569,7 @@ class Root(WrappedFd):
                 linkbuf_size += n
 
     def creat(
-        self, path: str, filemode: int, mode: str = "r", extra_flags: int = 0
+        self, path: str, filemode: int, mode: str = "r", /, extra_flags: int = 0
     ) -> IO[Any]:
         """
         Atomically create-and-open a new file at the given path in the Root,
@@ -594,7 +594,7 @@ class Root(WrappedFd):
 
     # TODO: creat_raw?
 
-    def rename(self, src: str, dst: str, flags: int = 0) -> None:
+    def rename(self, src: str, dst: str, flags: int = 0, /) -> None:
         """
         Rename a path from src to dst within the Root.
 
@@ -607,7 +607,7 @@ class Root(WrappedFd):
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
-    def rmdir(self, path: str) -> None:
+    def rmdir(self, path: str, /) -> None:
         """
         Remove an empty directory at the given path within the Root.
 
@@ -618,7 +618,7 @@ class Root(WrappedFd):
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
-    def unlink(self, path: str) -> None:
+    def unlink(self, path: str, /) -> None:
         """
         Remove a non-directory inode at the given path within the Root.
 
@@ -630,7 +630,7 @@ class Root(WrappedFd):
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
-    def remove_all(self, path: str) -> None:
+    def remove_all(self, path: str, /) -> None:
         """
         Remove the file or directory (empty or non-empty) at the given path
         within the Root.
@@ -639,7 +639,7 @@ class Root(WrappedFd):
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
-    def mkdir(self, path: str, mode: int) -> None:
+    def mkdir(self, path: str, mode: int, /) -> None:
         """
         Create a directory at the given path within the Root.
 
@@ -656,7 +656,7 @@ class Root(WrappedFd):
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
-    def mkdir_all(self, path: str, mode: int) -> Handle:
+    def mkdir_all(self, path: str, mode: int, /) -> Handle:
         """
         Recursively create a directory and all of its parents at the given path
         within the Root (or reuse an existing directory if the path already
@@ -675,7 +675,7 @@ class Root(WrappedFd):
             raise Error._fetch(fd) or INTERNAL_ERROR
         return Handle(fd)
 
-    def mknod(self, path: str, mode: int, dev: int = 0) -> None:
+    def mknod(self, path: str, mode: int, device: int = 0, /) -> None:
         """
         Create a new inode at the given path within the Root.
 
@@ -691,11 +691,11 @@ class Root(WrappedFd):
 
         A pathrs.Error is raised if the path already exists.
         """
-        err = libpathrs_so.pathrs_mknod(self.fileno(), _cstr(path), mode, dev)
+        err = libpathrs_so.pathrs_mknod(self.fileno(), _cstr(path), mode, device)
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
-    def hardlink(self, path: str, target: str) -> None:
+    def hardlink(self, path: str, target: str, /) -> None:
         """
         Create a hardlink between two paths inside the Root.
 
@@ -709,7 +709,7 @@ class Root(WrappedFd):
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
-    def symlink(self, path: str, target: str) -> None:
+    def symlink(self, path: str, target: str, /) -> None:
         """
         Create a symlink at the given path in the Root.
 
