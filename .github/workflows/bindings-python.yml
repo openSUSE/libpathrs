@@ -86,10 +86,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: install pypa/build
         run: >-
-          python3 -m pip install --user build
+          python3 -m pip install --user build twine
       # Build and install our bindings.
       - name: build python-pathrs bindings
         run: make -C contrib/bindings/python dist
+      - run: twine check contrib/bindings/python/dist/*
       - name: install python-pathrs bindings
         run: make -C contrib/bindings/python install
       # Verify that the crate and python bindings have the same version.
