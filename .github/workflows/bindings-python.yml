@@ -70,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.10", "3.12"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.x"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,9 +88,9 @@ jobs:
         run: >-
           python3 -m pip install --user build
       # Build and install our bindings.
-      - name: build python-libpathrs bindings
+      - name: build python-pathrs bindings
         run: make -C contrib/bindings/python dist
-      - name: install python-libpathrs bindings
+      - name: install python-pathrs bindings
         run: make -C contrib/bindings/python install
       # Verify that the crate and python bindings have the same version.
       # TODO: Move this to a "make check" we can run locally as well.
@@ -104,10 +104,10 @@ jobs:
 
           [[ "$CRATE_VERSION" == "$PY_VERSION" ]] || exit 1
       # Include the dist/ in our artefacts.
-      - name: upload python-libpathrs bindings dist/
+      - name: upload python-pathrs bindings dist/
         uses: actions/upload-artifact@v4
         with:
-          name: python-${{ matrix.python-version }}-libpathrs-dist
+          name: python-${{ matrix.python-version }}-pathrs-dist
           path: contrib/bindings/python/dist/
       # Run smoke-tests.
       - run: make -C examples/python smoke-test
