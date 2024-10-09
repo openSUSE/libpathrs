@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
+
+## [0.1.2] - 2024-10-09 ##
+
+> 蛇のように賢く、鳩のように素直でありなさい
+
 ### Fixes ###
 - python bindings: add a minimal README for PyPI.
 - python bindings: actually export `PROC_ROOT`.
@@ -235,7 +240,8 @@ Initial release.
   - C FFI.
   - Python bindings.
 
-[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/openSUSE/libpathrs/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/openSUSE/libpathrs/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/openSUSE/libpathrs/compare/v0.0.2...v0.1.0
 [0.0.2]: https://github.com/openSUSE/libpathrs/compare/v0.0.1...v0.0.2
