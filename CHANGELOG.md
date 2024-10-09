@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+## [0.1.3] - 2024-10-10 ##
+
+> 自動化って物は試しとすればいい物だ
+
 ### Changed ###
 - gha: our Rust crate and Python bindings are now uploaded automatically from a
   GitHub action when a tag is pushed.
@@ -14,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - syscalls: the pretty-printing of `openat2` errors now gives a string
   description of the flags passed rather that just a hex value (to match other
   syscalls).
+- python bindings: restrict how our methods and functions can be called using
+  `/` and `*` to reduce the possibility of future breakages if we rename or
+  re-order some of our arguments.
 
 ## [0.1.2] - 2024-10-09 ##
 
@@ -249,7 +256,8 @@ Initial release.
   - C FFI.
   - Python bindings.
 
-[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/openSUSE/libpathrs/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/openSUSE/libpathrs/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/openSUSE/libpathrs/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/openSUSE/libpathrs/compare/v0.0.2...v0.1.0
