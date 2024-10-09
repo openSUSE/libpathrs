@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - syscalls: the pretty-printing of `openat2` errors now gives a string
   description of the flags passed rather that just a hex value (to match other
   syscalls).
+- python bindings: restrict how our methods and functions can be called using
+  `/` and `*` to reduce the possibility of future breakages if we rename or
+  re-order some of our arguments.
 
 ## [0.1.2] - 2024-10-09 ##
 
