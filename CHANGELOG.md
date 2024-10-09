@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+### Breaking ###
+- python bindings: `Root.creat` has had its `filemode` and `flags` arguments
+  swapped to match the argument order of `openat2` (and `Root.creat_raw`). This
+  also now makes `filemode` have a default value of `0o644` if unspecified.
+
+### Added ###
+- python bindings: add `Root.creat_raw` to create a new file and wrap it in a
+  raw `WrappedFd` (os opposed to `Root.creat` which returns an `os.fdopen`).
+
 ## [0.1.3] - 2024-10-10 ##
 
 > 自動化って物は試しとすればいい物だ

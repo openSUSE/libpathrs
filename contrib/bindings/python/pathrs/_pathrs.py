@@ -569,7 +569,7 @@ class Root(WrappedFd):
                 linkbuf_size += n
 
     def creat(
-        self, path: str, filemode: int, mode: str = "r", /, extra_flags: int = 0
+        self, path: str, mode: str = "r", filemode: int = 0o644, /, extra_flags: int = 0
     ) -> IO[Any]:
         """
         Atomically create-and-open a new file at the given path in the Root,
@@ -592,7 +592,25 @@ class Root(WrappedFd):
             raise Error._fetch(fd) or INTERNAL_ERROR
         return os.fdopen(fd, mode)
 
-    # TODO: creat_raw?
+    def creat_raw(self, path: str, flags: int, filemode: int = 0o644, /) -> WrappedFd:
+        """
+        Atomically create-and-open a new file at the given path in the Root,
+        a-la O_CREAT.
+
+        This method returns a WrappedFd handle.
+
+        filemode is the Unix DAC mode you wish the new file to be created with.
+        This mode might not be the actual mode of the created file due to a
+        variety of external factors (umask, setgid bits, POSIX ACLs).
+
+        flags is the set of O_* flags you wish to pass to the open operation. If
+        you do not intend to open a symlink, you should pass O_NOFOLLOW to flags to
+        let libpathrs know that it can be more strict when opening the path.
+        """
+        fd = libpathrs_so.pathrs_creat(self.fileno(), _cstr(path), flags, filemode)
+        if fd < 0:
+            raise Error._fetch(fd) or INTERNAL_ERROR
+        return WrappedFd(fd)
 
     def rename(self, src: str, dst: str, flags: int = 0, /) -> None:
         """
