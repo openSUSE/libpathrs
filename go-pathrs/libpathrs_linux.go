@@ -23,11 +23,14 @@ import (
 	"unsafe"
 )
 
-// #cgo pkg-config: pathrs
-// #include <pathrs.h>
-import "C"
-
 /*
+// TODO: Figure out if we need to add support for linking against libpathrs
+//       statically even if in dynamically linked builds in order to make
+//       packaging a bit easier (using "-Wl,-Bstatic -lpathrs -Wl,-Bdynamic" or
+//       "-l:pathrs.a").
+#cgo pkg-config: pathrs
+#include <pathrs.h>
+
 // This is a workaround for unsafe.Pointer() not working for non-void pointers.
 char *cast_ptr(void *ptr) { return ptr; }
 */
