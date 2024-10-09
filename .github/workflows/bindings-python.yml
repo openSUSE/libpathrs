@@ -24,6 +24,9 @@ on:
   schedule:
     - cron: '0 0 * * *'
 
+env:
+  PYTHON_DIST: ${{ github.workspace }}/.tmp/python3-pathrs-${{ github.run_id }}-${{ github.run_attempt }}
+
 name: bindings-python
 
 jobs:
@@ -66,7 +69,7 @@ jobs:
           workdir: contrib/bindings/python/pathrs
           fail_on_error: true
 
-  smoke-test:
+  build-pyproject:
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +113,36 @@ jobs:
         with:
           name: python-${{ matrix.python-version }}-pathrs-dist
           path: contrib/bindings/python/dist/
+
+  smoke-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.x"]
+    needs:
+      - build-pyproject
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build and install libpathrs.so.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build libpathrs
+        run: make release
+      - name: install libpathrs
+        run: sudo ./install.sh --libdir=/usr/lib
+      # Set up python venv.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Download the pre-built python dist.
+      - name: download built python-pathrs
+        uses: actions/download-artifact@v4
+        with:
+          name: python-${{ matrix.python-version }}-pathrs-dist
+          path: ${{ env.PYTHON_DIST }}
+      - name: install python-pathrs
+        run: |-
+          python3 -m pip install ${{ env.PYTHON_DIST }}/*.whl
       # Run smoke-tests.
       - run: make -C examples/python smoke-test
 
@@ -117,6 +150,7 @@ jobs:
     needs:
       - black
       - mypy
+      - build-pyproject
       - smoke-test
     runs-on: ubuntu-latest
     steps:
