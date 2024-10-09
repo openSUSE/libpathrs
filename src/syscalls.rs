@@ -717,6 +717,27 @@ pub(crate) fn statx<Fd: AsFd, P: AsRef<Path>>(
     }
 }
 
+bitflags! {
+    /// Wrapper for the underlying `libc`'s `RESOLVE_*` flags.
+    ///
+    /// The flag values and their meaning is identical to the description in the
+    /// [`openat2(2)`] man page.
+    ///
+    /// [`openat2(2)`]: http://man7.org/linux/man-pages/man2/openat2.2.html
+    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
+    struct ResolveFlags: u64 {
+        const RESOLVE_BENEATH = libc::RESOLVE_BENEATH;
+        const RESOLVE_IN_ROOT = libc::RESOLVE_IN_ROOT;
+        const RESOLVE_NO_MAGICLINKS = libc::RESOLVE_NO_MAGICLINKS;
+        const RESOLVE_NO_SYMLINKS = libc::RESOLVE_NO_SYMLINKS;
+        const RESOLVE_NO_XDEV = libc::RESOLVE_NO_XDEV;
+        const RESOLVE_CACHED = libc::RESOLVE_CACHED;
+
+        // Don't clobber unknown RESOLVE_* bits.
+        const _ = !0;
+    }
+}
+
 /// Arguments for how `openat2` should open the target path.
 // TODO: Maybe switch to libc::open_how?
 #[repr(C)]
@@ -732,13 +753,24 @@ pub struct OpenHow {
 
 impl fmt::Display for OpenHow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{ ")?;
         // self.flags
-        write!(f, "{{ flags: 0x{:x}, ", self.flags)?;
+        if let Ok(oflags) = i32::try_from(self.flags) {
+            // If the flags can fit inside OpenFlags, pretty-print the flags.
+            write!(f, "flags: {:?}, ", OpenFlags::from_bits_retain(oflags))?;
+        } else {
+            write!(f, "flags: 0x{:x}, ", self.flags)?;
+        }
         if self.flags & (libc::O_CREAT | libc::O_TMPFILE) as u64 != 0 {
             write!(f, "mode: 0o{:o}, ", self.mode)?;
         }
         // self.resolve
-        write!(f, "resolve: 0x{:x} }}", self.resolve)
+        write!(
+            f,
+            "resolve: {:?}",
+            ResolveFlags::from_bits_retain(self.resolve)
+        )?;
+        write!(f, " }}")
     }
 }
 

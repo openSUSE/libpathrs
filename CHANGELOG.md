@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+### Fixes ###
+- syscalls: the pretty-printing of `openat2` errors now gives a string
+  description of the flags passed rather that just a hex value (to match other
+  syscalls).
+
 ## [0.1.2] - 2024-10-09 ##
 
 > 蛇のように賢く、鳩のように素直でありなさい
