@@ -37,12 +37,12 @@ pub struct CapiHandle {
 }
 
 impl CapiHandle {
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
         Self { inner: fd.into() }
     }
 
     fn try_clone(&self) -> Result<Self, anyhow::Error> {
-        Ok(Self::from_fd_unchecked(self.inner.try_clone()?))
+        Ok(Self::from_fd(self.inner.try_clone()?))
     }
 
     fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, CapiError> {
@@ -73,8 +73,8 @@ impl HandleImpl for CapiHandle {
     // C implementation *DOES NOT* set O_CLOEXEC by default.
     const FORCED_CLOEXEC: bool = false;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
@@ -93,8 +93,8 @@ impl HandleImpl for &CapiHandle {
     // C implementation *DOES NOT* set O_CLOEXEC by default.
     const FORCED_CLOEXEC: bool = false;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {

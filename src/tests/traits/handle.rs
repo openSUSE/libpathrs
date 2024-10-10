@@ -33,7 +33,7 @@ pub(in crate::tests) trait HandleImpl: AsFd + std::fmt::Debug + Sized {
     const FORCED_CLOEXEC: bool;
 
     // NOTE: We return Self::Cloned so that we can share types with HandleRef.
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned;
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned;
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error>;
 
@@ -47,8 +47,8 @@ impl HandleImpl for Handle {
     // Rust impl forces O_CLOEXEC by default.
     const FORCED_CLOEXEC: bool = true;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
@@ -67,8 +67,8 @@ impl HandleImpl for &Handle {
     // Rust impl forces O_CLOEXEC by default.
     const FORCED_CLOEXEC: bool = true;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
@@ -87,8 +87,8 @@ impl HandleImpl for HandleRef<'_> {
     // Rust impl forces O_CLOEXEC by default.
     const FORCED_CLOEXEC: bool = true;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
@@ -107,8 +107,8 @@ impl HandleImpl for &HandleRef<'_> {
     // Rust impl forces O_CLOEXEC by default.
     const FORCED_CLOEXEC: bool = true;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {

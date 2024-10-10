@@ -53,23 +53,8 @@ pub struct Handle {
 
 impl Handle {
     /// Wrap an [`OwnedFd`] into a [`Handle`].
-    ///
-    /// # Safety
-    ///
-    /// The caller guarantees that the provided file is an `O_PATH` file
-    /// descriptor with exactly the same semantics as one created through
-    /// [`Root::resolve`]. This means that this function should usually be used
-    /// to convert an [`OwnedFd`] returned from [`OwnedFd::from`] (possibly from
-    /// another process) into a [`Handle`].
-    ///
-    /// While this function is not marked as `unsafe` (because the safety
-    /// guarantee required is not related to memory-safety), users should still
-    /// take great care when using this method because it can cause other kinds
-    /// of unsafety.
-    ///
-    /// [`Root::resolve`]: crate::Root::resolve
     #[inline]
-    pub fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    pub fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
         Self { inner: fd.into() }
     }
 
@@ -112,6 +97,13 @@ impl Handle {
     #[inline]
     pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
         self.as_ref().reopen(flags)
+    }
+}
+
+impl From<OwnedFd> for Handle {
+    /// Shorthand for [`Handle::from_fd`].
+    fn from(fd: OwnedFd) -> Self {
+        Self::from_fd(fd)
     }
 }
 
@@ -159,24 +151,8 @@ pub struct HandleRef<'fd> {
 }
 
 impl HandleRef<'_> {
-    /// Wrap a [`BorrowedFd`] into a [`HandleRef`]. The lifetime is tied to the
-    /// [`BorrowedFd`].
-    ///
-    /// # Safety
-    ///
-    /// The caller guarantees that the provided file is an `O_PATH` file
-    /// descriptor with exactly the same semantics as one created through
-    /// [`Root::resolve`]. This means that this function should usually be used
-    /// to convert a [`BorrowedFd`] returned from [`AsFd::as_fd`] (possibly from
-    /// another process) into a [`HandleRef`].
-    ///
-    /// While this function is not marked as `unsafe` (because the safety
-    /// guarantee required is not related to memory-safety), users should still
-    /// take great care when using this method because it can cause other kinds
-    /// of unsafety.
-    ///
-    /// [`Root::resolve`]: crate::Root::resolve
-    pub fn from_fd_unchecked(inner: BorrowedFd<'_>) -> HandleRef<'_> {
+    /// Wrap a [`BorrowedFd`] into a [`HandleRef`].
+    pub fn from_fd(inner: BorrowedFd<'_>) -> HandleRef<'_> {
         HandleRef { inner }
     }
 
@@ -188,6 +164,9 @@ impl HandleRef<'_> {
     ///
     /// To create a shallow copy of a [`HandleRef`], you can use
     /// [`Clone::clone`] (or just [`Copy`]).
+    // TODO: We might need to call this something other than try_clone(), since
+    //       it's a little too easy to confuse with Clone::clone() but we also
+    //       really want to have Copy.
     pub fn try_clone(&self) -> Result<Handle, Error> {
         self.as_fd()
             .try_clone_to_owned()
@@ -198,7 +177,7 @@ impl HandleRef<'_> {
                 }
                 .into()
             })
-            .map(Handle::from_fd_unchecked)
+            .map(Handle::from_fd)
     }
 
     /// "Upgrade" the handle to a usable [`File`] handle.
@@ -229,6 +208,13 @@ impl HandleRef<'_> {
     //       Handle::reopen().
 }
 
+impl<'fd> From<BorrowedFd<'fd>> for HandleRef<'fd> {
+    /// Shorthand for [`HandleRef::from_fd`].
+    fn from(fd: BorrowedFd<'fd>) -> Self {
+        Self::from_fd(fd)
+    }
+}
+
 impl AsFd for HandleRef<'_> {
     /// Access the underlying file descriptor for a [`HandleRef`].
     ///
@@ -252,10 +238,10 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn from_fd_unchecked() -> Result<(), Error> {
+    fn from_fd() -> Result<(), Error> {
         let handle = Root::open(".")?.resolve(".")?;
         let handle_ref1 = handle.as_ref();
-        let handle_ref2 = HandleRef::from_fd_unchecked(handle.as_fd());
+        let handle_ref2 = HandleRef::from_fd(handle.as_fd());
 
         assert_eq!(
             handle.as_fd().as_raw_fd(),
@@ -265,7 +251,7 @@ mod tests {
         assert_eq!(
             handle.as_fd().as_raw_fd(),
             handle_ref2.as_fd().as_raw_fd(),
-            "HandleRef::from_fd_unchecked should have the same underlying fd"
+            "HandleRef::from_fd should have the same underlying fd"
         );
 
         Ok(())

@@ -50,15 +50,15 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_fd(|| unsafe { capi::core::pathrs_root_open(path.as_ptr()) })
-            .map(Self::from_fd_unchecked)
+            .map(Self::from_fd)
     }
 
-    pub(in crate::tests) fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    pub(in crate::tests) fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
         Self { inner: fd.into() }
     }
 
     fn try_clone(&self) -> Result<Self, anyhow::Error> {
-        Ok(Self::from_fd_unchecked(self.inner.try_clone()?))
+        Ok(Self::from_fd(self.inner.try_clone()?))
     }
 
     fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<CapiHandle, CapiError> {
@@ -68,7 +68,7 @@ impl CapiRoot {
         capi_utils::call_capi_fd(|| unsafe {
             capi::core::pathrs_resolve(root_fd.into(), path.as_ptr())
         })
-        .map(CapiHandle::from_fd_unchecked)
+        .map(CapiHandle::from_fd)
     }
 
     fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<CapiHandle, CapiError> {
@@ -78,7 +78,7 @@ impl CapiRoot {
         capi_utils::call_capi_fd(|| unsafe {
             capi::core::pathrs_resolve_nofollow(root_fd.into(), path.as_ptr())
         })
-        .map(CapiHandle::from_fd_unchecked)
+        .map(CapiHandle::from_fd)
     }
 
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, CapiError> {
@@ -161,7 +161,7 @@ impl CapiRoot {
         capi_utils::call_capi_fd(|| unsafe {
             capi::core::pathrs_mkdir_all(root_fd.into(), path.as_ptr(), perm.mode())
         })
-        .map(CapiHandle::from_fd_unchecked)
+        .map(CapiHandle::from_fd)
     }
 
     fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), CapiError> {
@@ -231,13 +231,13 @@ impl RootImpl for CapiRoot {
     // <https://github.com/dtolnay/anyhow/issues/25>
     type Error = CapiError;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
         assert_eq!(
             resolver,
             Resolver::default(),
             "cannot use non-default Resolver with capi"
         );
-        Self::Cloned::from_fd_unchecked(fd)
+        Self::Cloned::from_fd(fd)
     }
 
     fn resolver(&self) -> Resolver {
@@ -310,13 +310,13 @@ impl RootImpl for &CapiRoot {
     // <https://github.com/dtolnay/anyhow/issues/25>
     type Error = CapiError;
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
         assert_eq!(
             resolver,
             Resolver::default(),
             "cannot use non-default Resolver with capi"
         );
-        Self::Cloned::from_fd_unchecked(fd)
+        Self::Cloned::from_fd(fd)
     }
 
     fn resolver(&self) -> Resolver {

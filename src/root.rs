@@ -165,31 +165,18 @@ impl Root {
             operation: "open root handle".into(),
             source: err,
         })?;
-        Ok(Self::from_fd_unchecked(file))
+        Ok(Self::from_fd(file))
     }
 
     /// Wrap an [`OwnedFd`] into a [`Root`].
     ///
+    /// The [`OwnedFd`] should be a file descriptor referencing a directory,
+    /// otherwise all [`Root`] operations will fail.
+    ///
     /// The configuration is set to the system default and should be configured
     /// prior to usage, if appropriate.
-    ///
-    /// # Safety
-    ///
-    /// The caller guarantees that the provided file is an `O_PATH` file
-    /// descriptor with exactly the same semantics as one created through
-    /// [`Root::open`]. This means that this function should usually be used to
-    /// convert an [`OwnedFd`] returned from [`OwnedFd::from`] (possibly from
-    /// another process) into a [`Root`].
-    ///
-    /// While this function is not marked as `unsafe` (because the safety
-    /// guarantee required is not related to memory-safety), users should still
-    /// take great care when using this method because it can cause other kinds
-    /// of unsafety.
-    // TODO: We should probably have a `Root::from_file` which attempts to
-    //       re-open the path with `O_PATH | O_DIRECTORY`, to allow for an
-    //       alternative to `Root::open`.
     #[inline]
-    pub fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    pub fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
         Self {
             inner: fd.into(),
             resolver: Default::default(),
@@ -483,6 +470,13 @@ impl Root {
     }
 }
 
+impl From<OwnedFd> for Root {
+    /// Shorthand for [`Root::from_fd`].
+    fn from(fd: OwnedFd) -> Self {
+        Self::from_fd(fd)
+    }
+}
+
 impl From<Root> for OwnedFd {
     /// Unwrap a [`Root`] to reveal the underlying [`OwnedFd`].
     ///
@@ -528,28 +522,14 @@ pub struct RootRef<'fd> {
 }
 
 impl RootRef<'_> {
-    /// Wrap a [`BorrowedFd`] into a [`RootRef`]. The lifetime is tied to the
-    /// [`BorrowedFd`].
+    /// Wrap a [`BorrowedFd`] into a [`RootRef`].
+    ///
+    /// The [`BorrowedFd`] should be a file descriptor referencing a directory,
+    /// otherwise all [`Root`] operations will fail.
     ///
     /// The configuration is set to the system default and should be configured
     /// prior to usage, if appropriate.
-    ///
-    /// # Safety
-    ///
-    /// The caller guarantees that the provided file is an `O_PATH` file
-    /// descriptor with exactly the same semantics as one created through
-    /// [`Root::open`]. This means that this function should usually be used to
-    /// convert a [`BorrowedFd`] returned from [`AsFd::as_fd`] into a
-    /// [`RootRef`].
-    ///
-    /// While this function is not marked as `unsafe` (because the safety
-    /// guarantee required is not related to memory-safety), users should still
-    /// take great care when using this method because it can cause other kinds
-    /// of unsafety.
-    // TODO: We should probably have a `Root::from_file` which attempts to
-    //       re-open the path with `O_PATH | O_DIRECTORY`, to allow for an
-    //       alternative to `Root::open`.
-    pub fn from_fd_unchecked(inner: BorrowedFd<'_>) -> RootRef<'_> {
+    pub fn from_fd(inner: BorrowedFd<'_>) -> RootRef<'_> {
         RootRef {
             inner,
             resolver: Default::default(),
@@ -594,7 +574,7 @@ impl RootRef<'_> {
     /// # let tmpdir = tempfile::TempDir::new()?;
     /// # let rootdir = &tmpdir;
     /// let fd: OwnedFd = File::open(rootdir)?.into();
-    /// let root = RootRef::from_fd_unchecked(fd.as_fd())
+    /// let root = RootRef::from_fd(fd.as_fd())
     ///     .with_resolver_flags(ResolverFlags::NO_SYMLINKS);
     ///
     /// // Continue to use RootRef.
@@ -646,6 +626,9 @@ impl RootRef<'_> {
     ///
     /// To create a shallow copy of a [`RootRef`], you can use [`Clone::clone`]
     /// (or just [`Copy`]).
+    // TODO: We might need to call this something other than try_clone(), since
+    //       it's a little too easy to confuse with Clone::clone() but we also
+    //       really want to have Copy.
     pub fn try_clone(&self) -> Result<Root, Error> {
         Ok(Root {
             inner: self
@@ -987,7 +970,7 @@ impl RootRef<'_> {
             current = next;
         }
 
-        Ok(Handle::from_fd_unchecked(current))
+        Ok(Handle::from_fd(current))
     }
 
     /// Within the [`RootRef`]'s tree, remove the inode of type `inode_type` at
@@ -1145,6 +1128,13 @@ impl RootRef<'_> {
     }
 }
 
+impl<'fd> From<BorrowedFd<'fd>> for RootRef<'fd> {
+    /// Shorthand for [`RootRef::from_fd`].
+    fn from(fd: BorrowedFd<'fd>) -> Self {
+        Self::from_fd(fd)
+    }
+}
+
 impl AsFd for RootRef<'_> {
     /// Access the underlying file descriptor for a [`RootRef`].
     ///
@@ -1212,10 +1202,10 @@ mod tests {
     }
 
     #[test]
-    fn from_fd_unchecked() -> Result<(), Error> {
+    fn from_fd() -> Result<(), Error> {
         let root = Root::open(".")?;
         let root_ref1 = root.as_ref();
-        let root_ref2 = RootRef::from_fd_unchecked(root.as_fd());
+        let root_ref2 = RootRef::from_fd(root.as_fd());
 
         assert_eq!(
             root.as_fd().as_raw_fd(),
@@ -1225,7 +1215,7 @@ mod tests {
         assert_eq!(
             root.as_fd().as_raw_fd(),
             root_ref2.as_fd().as_raw_fd(),
-            "RootRef::from_fd_unchecked should have the same underlying fd"
+            "RootRef::from_fd should have the same underlying fd"
         );
 
         Ok(())
