@@ -34,7 +34,8 @@ linters:
     - mnd
     - nilerr
     - nilnil
-    - nolintlint
+    # This lint has issues with a nolint:exhaustive we have.
+    #- nolintlint
     - perfsprint
     - prealloc
     - reassign
