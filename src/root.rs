@@ -470,6 +470,13 @@ impl Root {
     }
 }
 
+impl From<OwnedFd> for Root {
+    /// Shorthand for [`Root::from_fd`].
+    fn from(fd: OwnedFd) -> Self {
+        Self::from_fd(fd)
+    }
+}
+
 impl From<Root> for OwnedFd {
     /// Unwrap a [`Root`] to reveal the underlying [`OwnedFd`].
     ///
@@ -1118,6 +1125,13 @@ impl RootRef<'_> {
             }
             .into()
         })
+    }
+}
+
+impl<'fd> From<BorrowedFd<'fd>> for RootRef<'fd> {
+    /// Shorthand for [`RootRef::from_fd`].
+    fn from(fd: BorrowedFd<'fd>) -> Self {
+        Self::from_fd(fd)
     }
 }
 

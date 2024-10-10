@@ -100,6 +100,13 @@ impl Handle {
     }
 }
 
+impl From<OwnedFd> for Handle {
+    /// Shorthand for [`Handle::from_fd`].
+    fn from(fd: OwnedFd) -> Self {
+        Self::from_fd(fd)
+    }
+}
+
 impl From<Handle> for OwnedFd {
     /// Unwrap a [`Handle`] to reveal the underlying [`OwnedFd`].
     ///
@@ -199,6 +206,13 @@ impl HandleRef<'_> {
     // TODO: bind(). This might be safe to do (set the socket path to
     //       /proc/self/fd/...) but I'm a bit sad it'd be separate from
     //       Handle::reopen().
+}
+
+impl<'fd> From<BorrowedFd<'fd>> for HandleRef<'fd> {
+    /// Shorthand for [`HandleRef::from_fd`].
+    fn from(fd: BorrowedFd<'fd>) -> Self {
+        Self::from_fd(fd)
+    }
 }
 
 impl AsFd for HandleRef<'_> {
