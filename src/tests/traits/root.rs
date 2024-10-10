@@ -40,7 +40,7 @@ pub(in crate::tests) trait RootImpl: AsFd + std::fmt::Debug + Sized {
     fn resolver(&self) -> Resolver;
 
     // NOTE: We return Self::Cloned so that we can share types with RootRef.
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned;
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned;
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error>;
 
@@ -91,8 +91,8 @@ impl RootImpl for Root {
         }
     }
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
             .with_resolver_backend(resolver.backend)
             .with_resolver_flags(resolver.flags)
     }
@@ -168,8 +168,8 @@ impl RootImpl for &Root {
         }
     }
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
             .with_resolver_backend(resolver.backend)
             .with_resolver_flags(resolver.flags)
     }
@@ -245,8 +245,8 @@ impl RootImpl for RootRef<'_> {
         }
     }
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
             .with_resolver_backend(resolver.backend)
             .with_resolver_flags(resolver.flags)
     }
@@ -322,8 +322,8 @@ impl RootImpl for &RootRef<'_> {
         }
     }
 
-    fn from_fd_unchecked<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
-        Self::Cloned::from_fd_unchecked(fd)
+    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+        Self::Cloned::from_fd(fd)
             .with_resolver_backend(resolver.backend)
             .with_resolver_flags(resolver.flags)
     }

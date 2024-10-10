@@ -448,7 +448,7 @@ mod utils {
         );
         let root_fd: OwnedFd = root_clone.into();
 
-        Ok(R::from_fd_unchecked(root_fd, root.resolver()))
+        Ok(R::from_fd(root_fd, root.resolver()))
     }
 
     pub(super) fn check_root_create<R: RootImpl, P: AsRef<Path>>(

@@ -63,7 +63,7 @@ pub(crate) fn resolve<F: AsFd, P: AsRef<Path>>(
     // error out.
     for _ in 0..16 {
         match syscalls::openat2(&root, path.as_ref(), &how) {
-            Ok(file) => return Ok(Handle::from_fd_unchecked(file)),
+            Ok(file) => return Ok(Handle::from_fd(file)),
             Err(err) => match err.root_cause().raw_os_error() {
                 Some(libc::ENOSYS) => {
                     // shouldn't happen
@@ -126,7 +126,7 @@ pub(crate) fn resolve_partial<F: AsFd>(
     Ok(PartialLookup::Partial {
         handle: root
             .try_clone_to_owned()
-            .map(Handle::from_fd_unchecked)
+            .map(Handle::from_fd)
             .map_err(|err| ErrorImpl::OsError {
                 operation: "clone root".into(),
                 source: err,

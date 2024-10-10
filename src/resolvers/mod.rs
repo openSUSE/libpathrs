@@ -183,7 +183,7 @@ impl From<PartialLookup<Rc<OwnedFd>>> for PartialLookup<Handle> {
         // We are now sure that there is only a single reference to whatever
         // current points to. There is nowhere else we could've stashed a
         // reference, and we only do Rc::clone for root (which we've dropped).
-        let handle = Handle::from_fd_unchecked(
+        let handle = Handle::from_fd(
             // MSRV(1.70): Use Rc::into_inner().
             Rc::try_unwrap(rc)
                 .expect("current handle in lookup should only have a single Rc reference"),
