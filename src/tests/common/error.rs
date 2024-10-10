@@ -38,9 +38,11 @@ where
     match (result, expected) {
         (Err(error), Err(expected_kind)) => {
             let kind = error.kind();
-            if kind != *expected_kind {
+            let (result_errno, expected_errno) = (kind.errno(), expected_kind.errno());
+
+            if kind != *expected_kind && result_errno != expected_errno {
                 anyhow::bail!(
-                    "expected error {expected_kind:?} but got {error:?} (kind: {kind:?})"
+                    "expected error {expected_kind:?} (errno: {expected_errno:?}) but got {error:?} (kind: {kind:?}, errno: {result_errno:?})"
                 );
             }
         }

@@ -132,6 +132,24 @@ impl ErrorImpl {
     }
 }
 
+impl ErrorKind {
+    /// Return a C-like errno for the [`ErrorKind`].
+    ///
+    /// Aside from fetching the errno represented by standard
+    /// [`ErrorKind::OsError`] errors, pure-Rust errors are also mapped to C
+    /// errno values where appropriate.
+    #[cfg(any(feature = "capi", test))]
+    pub(crate) fn errno(&self) -> Option<i32> {
+        match self {
+            ErrorKind::NotImplemented => Some(libc::ENOSYS),
+            ErrorKind::InvalidArgument => Some(libc::EINVAL),
+            ErrorKind::OsError(errno) => *errno,
+            // TODO: Should we remap SafetyViolation?
+            _ => None,
+        }
+    }
+}
+
 // Private trait necessary to work around the "orphan trait" restriction.
 pub(crate) trait ErrorExt: Sized {
     /// Wrap a `Result<..., Error>` with an additional context string.
@@ -173,5 +191,31 @@ impl<T, E: ErrorExt> ErrorExt for Result<T, E> {
         F: FnOnce() -> String,
     {
         self.map_err(|err| err.with_wrap(context_fn))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn error_kind_errno() {
+        assert_eq!(
+            ErrorKind::InvalidArgument.errno(),
+            Some(libc::EINVAL),
+            "ErrorKind::InvalidArgument is equivalent to EINVAL"
+        );
+        assert_eq!(
+            ErrorKind::NotImplemented.errno(),
+            Some(libc::ENOSYS),
+            "ErrorKind::NotImplemented is equivalent to ENOSYS"
+        );
+        assert_eq!(
+            ErrorKind::OsError(Some(libc::ENOANO)).errno(),
+            Some(libc::ENOANO),
+            "ErrorKind::OsError(...)::errno() returns the inner errno"
+        );
     }
 }

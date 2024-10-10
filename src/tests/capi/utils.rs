@@ -69,9 +69,10 @@ impl ErrorImpl for CapiError {
         if let Some(errno) = self.errno {
             ErrorKind::OsError(Some(errno.0))
         } else {
-            // TODO TODO: We should probably expose the libpathrs internal
-            // ErrorKind types in the C API somehow?
-            ErrorKind::InvalidArgument
+            // TODO: We should probably have an actual "no-op" error here that
+            //       is unused except for these tests so we can properly detect
+            //       a bad ErrorKind.
+            ErrorKind::ParseError
         }
     }
 }
