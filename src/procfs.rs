@@ -37,6 +37,7 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
+use rustix::fs::{self as rustix_fs, Access, AtFlags};
 
 /// A `procfs` handle to which is used globally by libpathrs.
 // MSRV(1.80): Use LazyLock.
@@ -531,9 +532,8 @@ impl ProcfsHandle {
         // then hidepid is probably not relevant.
         let is_subset = [/* subset=pid */ "stat", /* hidepid=n */ "1"]
             .iter()
-            .any(|subpath| {
-                resolver
-                    .resolve(&inner, subpath, OpenFlags::O_PATH, ResolverFlags::empty())
+            .any(|&subpath| {
+                rustix_fs::accessat(&inner, subpath, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
                     .is_err()
             });
 
