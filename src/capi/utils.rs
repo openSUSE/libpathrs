@@ -131,21 +131,20 @@ pub(crate) unsafe fn copy_path_into_buffer<P: AsRef<Path>>(
 ) -> Result<c_int, Error> {
     let path = CString::new(path.as_ref().as_os_str().as_bytes())
         .expect("link from readlink should not contain any nulls");
+    // MSRV(1.79): Switch to .count_bytes().
+    let path_len = path.to_bytes().len();
 
     // If the linkbuf is null, we just return the number of bytes we
     // would've written.
     if !buf.is_null() && bufsize > 0 {
-        // MSRV(1.79): Switch to .count_bytes().
-        let to_copy = cmp::min(path.to_bytes().len(), bufsize);
         // SAFETY: The C caller guarantees that buf is safe to write to
         // up to bufsize bytes.
         unsafe {
+            let to_copy = cmp::min(path_len, bufsize);
             ptr::copy_nonoverlapping(path.as_ptr(), buf, to_copy);
         }
     }
-
-    // MSRV(1.79): Switch to .count_bytes().
-    Ok(path.to_bytes().len() as c_int)
+    Ok(path_len as c_int)
 }
 
 pub(crate) trait Leakable: Sized {
