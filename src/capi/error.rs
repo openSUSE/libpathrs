@@ -31,15 +31,12 @@ use std::{
 };
 
 use libc::{c_char, c_int};
+use once_cell::sync::Lazy;
 use rand::{self, Rng};
 
-// TODO: Switch this to using a slab or similar structure, possibly using a less
-// heavy-weight lock? Maybe sharded-slab?
-// MSRV(1.70): Use OnceLock.
+// TODO: Switch this to using a slab or similar structure, possibly using a less heavy-weight lock?
 // MSRV(1.80): Use LazyLock.
-lazy_static! {
-    static ref ERROR_MAP: Mutex<HashMap<CReturn, Error>> = Mutex::new(HashMap::new());
-}
+static ERROR_MAP: Lazy<Mutex<HashMap<CReturn, Error>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub(crate) fn store_error(err: Error) -> CReturn {
     let mut err_map = ERROR_MAP.lock().unwrap();

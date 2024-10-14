@@ -38,6 +38,7 @@ use std::{
 };
 
 use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
+use once_cell::sync::Lazy;
 
 // TODO: Figure out how we can put a backtrace here (it seems we can't use
 //       thiserror's backtrace support without nightly Rust because thiserror
@@ -51,13 +52,6 @@ pub(crate) const AT_FDCWD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw
 // SAFETY: BADFD is not a valid file descriptor, but it's not -1.
 #[cfg(test)]
 pub(crate) const BADFD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(-libc::EBADF) };
-
-// MSRV(1.70): Use OnceLock.
-// MSRV(1.80): Use LazyLock.
-lazy_static! {
-    pub(crate) static ref OPENAT2_IS_SUPPORTED: bool =
-        openat2(AT_FDCWD, ".", &Default::default()).is_ok();
-}
 
 /// Representation of a file descriptor and its associated path at a given point
 /// in time.
@@ -561,23 +555,14 @@ pub(crate) fn renameat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
     }
 }
 
-// MSRV(1.70): Use OnceLock.
 // MSRV(1.80): Use LazyLock.
-lazy_static! {
-    pub(crate) static ref RENAME_FLAGS_SUPPORTED: bool = {
-        match renameat2(
-            AT_FDCWD,
-            ".",
-            AT_FDCWD,
-            ".",
-            libc::RENAME_EXCHANGE,
-        ) {
-            Ok(_) => true,
-            // We expect EBUSY, but just to be safe we only check for ENOSYS.
-            Err(err) => err.root_cause().raw_os_error() != Some(libc::ENOSYS),
-        }
-    };
-}
+pub(crate) static RENAME_FLAGS_SUPPORTED: Lazy<bool> = Lazy::new(|| {
+    match renameat2(AT_FDCWD, ".", AT_FDCWD, ".", libc::RENAME_EXCHANGE) {
+        Ok(_) => true,
+        // We expect EBUSY, but just to be safe we only check for ENOSYS.
+        Err(err) => err.root_cause().raw_os_error() != Some(libc::ENOSYS),
+    }
+});
 
 /// Wrapper for `renameat2(2)`.
 ///
@@ -716,6 +701,10 @@ pub(crate) fn statx<Fd: AsFd, P: AsRef<Path>>(
         })
     }
 }
+
+// MSRV(1.80): Use LazyLock.
+pub(crate) static OPENAT2_IS_SUPPORTED: Lazy<bool> =
+    Lazy::new(|| openat2(AT_FDCWD, ".", &Default::default()).is_ok());
 
 bitflags! {
     /// Wrapper for the underlying `libc`'s `RESOLVE_*` flags.
