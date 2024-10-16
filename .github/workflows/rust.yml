@@ -57,6 +57,40 @@ jobs:
           toolchain: ${{ env.RUST_MSRV }}
       - run: cargo check --workspace --all-features --all-targets
 
+  check-cross:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - arm-unknown-linux-gnueabi
+          - arm-unknown-linux-gnueabihf
+          - armv7-unknown-linux-gnueabihf
+          - i686-unknown-linux-gnu
+          - loongarch64-unknown-linux-gnu
+          - loongarch64-unknown-linux-musl
+          - powerpc-unknown-linux-gnu
+          - powerpc64-unknown-linux-gnu
+          - powerpc64le-unknown-linux-gnu
+          - riscv64gc-unknown-linux-gnu
+          - sparc64-unknown-linux-gnu
+          - s390x-unknown-linux-gnu
+    name: cargo check (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # TODO: Should we use MSRV for this?
+          targets: ${{ matrix.target }}
+      - name: cargo check --target=${{ matrix.target }}
+        run: >-
+          cargo check --target=${{ matrix.target }} --workspace --all-features --all-targets
+      - name: cargo build --target=${{ matrix.target }}
+        run: >-
+          cargo build --target=${{ matrix.target }} --release --all-features
+
   rustdoc:
     name: cargo doc
     runs-on: ubuntu-latest
@@ -132,6 +166,7 @@ jobs:
     needs:
       - check
       - check-msrv
+      - check-cross
       - rustdoc
       - test
       - examples
@@ -155,6 +190,7 @@ jobs:
     needs:
       - check
       - check-msrv
+      - check-cross
       - rustdoc
       - test
       - examples
