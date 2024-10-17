@@ -106,6 +106,7 @@ bitflags! {
         const O_SYNC = libc::O_SYNC;
         const O_ASYNC = libc::O_ASYNC;
         const O_DSYNC = libc::O_DSYNC;
+        #[cfg(not(target_env = "musl"))] // musl doesn't provide FSYNC
         const O_FSYNC = libc::O_FSYNC;
         const O_RSYNC = libc::O_RSYNC;
         const O_DIRECT = libc::O_DIRECT;
