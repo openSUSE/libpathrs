@@ -17,31 +17,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{
-    ffi::CString,
-    fs, io,
-    os::unix::{ffi::OsStrExt, fs as unixfs},
-    path::Path,
-};
+use std::{fs, os::unix::fs as unixfs, path::Path};
+
+use crate::syscalls;
 
 use anyhow::{Context, Error};
 use rustix::fs::{self as rustix_fs, AtFlags, OFlags, CWD};
-#[cfg(feature = "_test_as_root")]
-use rustix::process::{Gid, Uid};
 use tempfile::TempDir;
-
-fn mknod<P: AsRef<Path>>(path: P, mode: libc::mode_t, dev: libc::dev_t) -> Result<(), io::Error> {
-    let path = CString::new(path.as_ref().as_os_str().as_bytes()).expect("CString::new failed");
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::mknod(path.as_ptr(), mode, dev) };
-    let err = io::Error::last_os_error();
-
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(err)
-    }
-}
 
 macro_rules! create_inode {
     // "/foo/bar" @ chmod 0o755
@@ -57,8 +39,8 @@ macro_rules! create_inode {
             CWD,
             $path,
             // SAFETY: We pick valid uids and gids for this.
-            Some(unsafe { Uid::from_raw($uid) }),
-            Some(unsafe { Gid::from_raw($gid) }),
+            Some(unsafe { ::rustix::process::Uid::from_raw($uid) }),
+            Some(unsafe { ::rustix::process::Gid::from_raw($gid) }),
             AtFlags::SYMLINK_NOFOLLOW,
         )
         .with_context(|| format!("chown {}:{} {}", $uid, $gid, $path.display()))?;
@@ -70,7 +52,7 @@ macro_rules! create_inode {
             CWD,
             $path,
             // SAFETY: We pick valid uids and gids for this.
-            Some(unsafe { Uid::from_raw($uid) }),
+            Some(unsafe { ::rustix::process::Uid::from_raw($uid) }),
             None,
             AtFlags::SYMLINK_NOFOLLOW,
         )
@@ -84,7 +66,7 @@ macro_rules! create_inode {
             $path,
             // SAFETY: We pick valid uids and gids for this.
             None,
-            Some(unsafe { Gid::from_raw($gid) }),
+            Some(unsafe { ::rustix::process::Gid::from_raw($gid) }),
             AtFlags::SYMLINK_NOFOLLOW,
         )
         .with_context(|| format!("chown <none>:{} {}", $gid, $path.display()))?;
@@ -108,7 +90,7 @@ macro_rules! create_inode {
     };
     // "/foo/bar" => fifo
     ($path:expr => fifo $(, {$($extra:tt)*})*) => {
-        mknod($path, libc::S_IFIFO | 0o644, 0)
+        syscalls::mknodat(rustix_fs::CWD, $path, libc::S_IFIFO | 0o644, 0)
             .with_context(|| format!("mkfifo {}", $path.display()))?;
         $(
             create_inode!(@do $path, $($extra)*);
@@ -116,7 +98,7 @@ macro_rules! create_inode {
     };
     // "/foo/bar" => sock
     ($path:expr => sock $(,{$($extra:tt)*})*) => {
-        mknod($path, libc::S_IFSOCK | 0o644, 0)
+        syscalls::mknodat(rustix_fs::CWD, $path, libc::S_IFSOCK | 0o644, 0)
             .with_context(|| format!("mksock {}", $path.display()))?;
         $(
             create_inode!(@do $path, $($extra)*);

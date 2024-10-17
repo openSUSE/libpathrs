@@ -24,11 +24,12 @@ use crate::{
     flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
     resolvers::procfs::ProcfsResolver,
-    syscalls::{self, OpenTreeFlags},
+    syscalls,
 };
 use utils::ExpectedResult;
 
 use anyhow::Error;
+use rustix::mount::OpenTreeFlags;
 
 macro_rules! procfs_tests {
     // Create the actual test functions.

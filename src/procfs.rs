@@ -25,19 +25,25 @@ use crate::{
     error::{Error, ErrorExt, ErrorImpl, ErrorKind},
     flags::{OpenFlags, ResolverFlags},
     resolvers::procfs::ProcfsResolver,
-    syscalls::{self, FsmountFlags, FsopenFlags, OpenTreeFlags},
-    utils,
+    syscalls,
+    utils::{self, FdExt},
 };
 
 use std::{
     fs::File,
     io::Error as IOError,
-    os::unix::io::{AsFd, BorrowedFd, OwnedFd},
+    os::unix::{
+        fs::MetadataExt,
+        io::{AsFd, BorrowedFd, OwnedFd},
+    },
     path::{Path, PathBuf},
 };
 
 use once_cell::sync::Lazy;
-use rustix::fs::{self as rustix_fs, Access, AtFlags};
+use rustix::{
+    fs::{self as rustix_fs, Access, AtFlags},
+    mount::{FsMountFlags, FsOpenFlags, MountAttrFlags, OpenTreeFlags},
+};
 
 /// A `procfs` handle to which is used globally by libpathrs.
 // MSRV(1.80): Use LazyLock.
@@ -181,7 +187,7 @@ impl ProcfsHandle {
     /// against racing attackers changing the mount table and is guaranteed to
     /// have no overmounts because it is a brand-new procfs.
     pub(crate) fn new_fsopen(subset: bool) -> Result<Self, Error> {
-        let sfd = syscalls::fsopen("proc", FsopenFlags::FSOPEN_CLOEXEC).map_err(|err| {
+        let sfd = syscalls::fsopen("proc", FsOpenFlags::FSOPEN_CLOEXEC).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "create procfs suberblock".into(),
                 source: err,
@@ -202,8 +208,10 @@ impl ProcfsHandle {
 
         syscalls::fsmount(
             &sfd,
-            FsmountFlags::FSMOUNT_CLOEXEC,
-            libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_NOSUID,
+            FsMountFlags::FSMOUNT_CLOEXEC,
+            MountAttrFlags::MOUNT_ATTR_NODEV
+                | MountAttrFlags::MOUNT_ATTR_NOEXEC
+                | MountAttrFlags::MOUNT_ATTR_NOSUID,
         )
         .map_err(|err| {
             ErrorImpl::RawOsError {
@@ -243,7 +251,7 @@ impl ProcfsHandle {
         syscalls::openat(
             syscalls::AT_FDCWD,
             "/proc",
-            libc::O_PATH | libc::O_DIRECTORY,
+            OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
             0,
         )
         .map_err(|err| {
@@ -386,7 +394,7 @@ impl ProcfsHandle {
         // for the ProcfsHandle::{new_fsopen,new_open_tree} cases.
         verify_same_mnt(parent_mnt_id, &parent, trailing)?;
 
-        syscalls::openat_follow(parent, trailing, oflags.bits(), 0)
+        syscalls::openat_follow(parent, trailing, oflags, 0)
             .map(File::from)
             .map_err(|err| {
                 ErrorImpl::RawOsError {
@@ -511,9 +519,7 @@ impl ProcfsHandle {
         // And make sure it's the root of procfs. The root directory is
         // guaranteed to have an inode number of PROC_ROOT_INO. If this check
         // ever stops working, it's a kernel regression.
-        let ino = syscalls::fstatat(&inner, "")
-            .expect("fstat(/proc) should work")
-            .st_ino;
+        let ino = inner.metadata().expect("fstat(/proc) should work").ino();
         if ino != Self::PROC_ROOT_INO {
             Err(ErrorImpl::SafetyViolation {
                 description: format!(
@@ -553,14 +559,14 @@ pub(crate) fn verify_is_procfs<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
             source: err,
         })?
         .f_type;
-    if fs_type != libc::PROC_SUPER_MAGIC {
+    if fs_type != rustix_fs::PROC_SUPER_MAGIC {
         Err(ErrorImpl::OsError {
             operation: "verify lookup is still on a procfs mount".into(),
             source: IOError::from_raw_os_error(libc::EXDEV),
         })
         .wrap(format!(
             "fstype mismatch in restricted procfs resolver (f_type is 0x{fs_type:X}, not 0x{:X})",
-            libc::PROC_SUPER_MAGIC,
+            rustix_fs::PROC_SUPER_MAGIC,
         ))?
     }
     Ok(())

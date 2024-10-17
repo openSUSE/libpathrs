@@ -39,7 +39,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use libc::dev_t;
+use rustix::fs::{self as rustix_fs, AtFlags};
 
 /// An inode type to be created with [`Root::create`].
 #[derive(Clone, Debug)]
@@ -85,12 +85,12 @@ pub enum InodeType {
     /// Character device, as in [`mknod(2)`] with `S_IFCHR`.
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
-    CharacterDevice(Permissions, dev_t),
+    CharacterDevice(Permissions, rustix_fs::Dev),
 
     /// Block device, as in [`mknod(2)`] with `S_IFBLK`.
     ///
     /// [`mknod(2)`]: http://man7.org/linux/man-pages/man2/mknod.2.html
-    BlockDevice(Permissions, dev_t),
+    BlockDevice(Permissions, rustix_fs::Dev),
     // XXX: Does this really make sense?
     //// "Detached" unix socket, as in [`mknod(2)`] with `S_IFSOCK`.
     ////
@@ -158,7 +158,7 @@ impl Root {
         let file = syscalls::openat(
             syscalls::AT_FDCWD,
             path,
-            libc::O_PATH | libc::O_DIRECTORY,
+            OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
             0,
         )
         .map_err(|err| ErrorImpl::RawOsError {
@@ -757,7 +757,7 @@ impl RootRef<'_> {
                     name: "target".into(),
                     description: "hardlink target has trailing slash".into(),
                 })?;
-                syscalls::linkat(olddir, oldname, dir, name, 0)
+                syscalls::linkat(olddir, oldname, dir, name, AtFlags::empty())
             }
             InodeType::Fifo(perm) => {
                 let mode = perm.mode() & !libc::S_IFMT;
@@ -827,7 +827,7 @@ impl RootRef<'_> {
         // O_NOFOLLOW. We might want to expose that here, though because it
         // can't be done with the emulated backend that might be a bad idea.
         flags.insert(OpenFlags::O_CREAT);
-        let fd = syscalls::openat(dir, name, flags.bits(), perm.mode()).map_err(|err| {
+        let fd = syscalls::openat(dir, name, flags, perm.mode()).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "pathrs create_file".into(),
                 source: err,
@@ -1003,8 +1003,8 @@ impl RootRef<'_> {
         })?;
 
         let flags = match inode_type {
-            RemoveInodeType::Regular => 0,
-            RemoveInodeType::Directory => libc::AT_REMOVEDIR,
+            RemoveInodeType::Regular => AtFlags::empty(),
+            RemoveInodeType::Directory => AtFlags::REMOVEDIR,
         };
         syscalls::unlinkat(dir, name, flags).map_err(|err| {
             ErrorImpl::RawOsError {
@@ -1118,7 +1118,7 @@ impl RootRef<'_> {
             description: "rename destination path has trailing slash".into(),
         })?;
 
-        syscalls::renameat2(src_dir, src_name, dst_dir, dst_name, rflags.bits()).map_err(|err| {
+        syscalls::renameat2(src_dir, src_name, dst_dir, dst_name, rflags).map_err(|err| {
             ErrorImpl::RawOsError {
                 operation: "pathrs rename".into(),
                 source: err,

@@ -19,6 +19,7 @@
 
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
+    flags::OpenFlags,
     syscalls,
 };
 
@@ -28,16 +29,16 @@ use std::{
     path::Path,
 };
 
-use rustix::fs::Dir;
+use rustix::fs::{AtFlags, Dir};
 
 fn remove_inode<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> {
     let dirfd = dirfd.as_fd();
 
     // To ensure we return a useful error, we try both unlink and rmdir and
     // try to avoid returning EISDIR/ENOTDIR if both failed.
-    syscalls::unlinkat(dirfd, name, 0)
+    syscalls::unlinkat(dirfd, name, AtFlags::empty())
         .or_else(|unlink_err| {
-            syscalls::unlinkat(dirfd, name, libc::AT_REMOVEDIR).map_err(|rmdir_err| {
+            syscalls::unlinkat(dirfd, name, AtFlags::REMOVEDIR).map_err(|rmdir_err| {
                 if rmdir_err.root_cause().raw_os_error() == Some(libc::ENOTDIR) {
                     unlink_err
                 } else {
@@ -74,7 +75,7 @@ pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> 
     // try to make this loop forever by consistently creating inodes, but
     // there's not much we can do about it and I suspect they would eventually
     // lose the race.
-    let subdir = syscalls::openat(dirfd, name, libc::O_DIRECTORY, 0).map_err(|err| {
+    let subdir = syscalls::openat(dirfd, name, OpenFlags::O_DIRECTORY, 0).map_err(|err| {
         ErrorImpl::RawOsError {
             operation: "open directory to scan entries".into(),
             source: err,

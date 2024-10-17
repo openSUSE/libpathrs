@@ -181,12 +181,16 @@ fn opath_resolve<F: AsFd, P: AsRef<Path>>(
         }
 
         // Get our next element.
-        let next = syscalls::openat(&current, &part, libc::O_PATH | libc::O_NOFOLLOW, 0).map_err(
-            |err| ErrorImpl::RawOsError {
-                operation: "open next component of resolution".into(),
-                source: err,
-            },
-        )?;
+        let next = syscalls::openat(
+            &current,
+            &part,
+            OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW,
+            0,
+        )
+        .map_err(|err| ErrorImpl::RawOsError {
+            operation: "open next component of resolution".into(),
+            source: err,
+        })?;
 
         // Check that the next component is on the same mountpoint.
         // NOTE: If the root is the host /proc mount, this is only safe if there
@@ -256,7 +260,7 @@ fn opath_resolve<F: AsFd, P: AsRef<Path>>(
             // continue walking).
             && oflags.intersection(OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW | OpenFlags::O_DIRECTORY) != OpenFlags::O_PATH
         {
-            match syscalls::openat(&current, &part, oflags.bits() | libc::O_NOFOLLOW, 0) {
+            match syscalls::openat(&current, &part, oflags | OpenFlags::O_NOFOLLOW, 0) {
                 Ok(final_reopen) => {
                     // Re-verify the next component is on the same mount.
                     procfs::verify_same_mnt(root_mnt_id, &final_reopen, "")

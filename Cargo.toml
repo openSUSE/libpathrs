@@ -55,7 +55,7 @@ once_cell = "^1"
 # MSRV(1.65): Update to >=0.4.1 which uses let_else. 0.4.0 was broken.
 open-enum = { version = "=0.3.0", optional = true }
 rand = { version = "^0.8", optional = true }
-rustix = { version = "^0.38", features = ["fs"] }
+rustix = { version = "^0.38", features = ["fs", "process", "thread", "mount"] }
 thiserror = "^1"
 
 [dev-dependencies]
@@ -65,8 +65,6 @@ errno = "^0.3"
 tempfile = "^3"
 paste = "^1"
 pretty_assertions = "^1"
-# Enable the "process" feature for getcwd() in our tests.
-rustix = { version = "^0.38", features = ["process"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

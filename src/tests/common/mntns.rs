@@ -17,60 +17,19 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::{flags::OpenFlags, syscalls, utils::FdExt};
+
 use std::{
-    ffi::CString,
     fs::File,
-    io::Error as IOError,
-    os::unix::io::{AsRawFd, RawFd},
+    os::unix::io::{AsFd, AsRawFd},
     path::{Path, PathBuf},
-    ptr,
 };
 
-use crate::{syscalls, utils::ToCString};
-
-use anyhow::Error;
-use libc::c_int;
-
-unsafe fn unshare(flags: c_int) -> Result<(), IOError> {
-    // SAFETY: Caller guarantees that this unshare operation is safe.
-    let ret = unsafe { libc::unshare(flags) };
-    let err = IOError::last_os_error();
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(err)
-    }
-}
-
-unsafe fn setns(fd: RawFd, flags: c_int) -> Result<(), IOError> {
-    // SAFETY: Caller guarantees that this setns operation is safe.
-    let ret = unsafe { libc::setns(fd, flags) };
-    let err = IOError::last_os_error();
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(err)
-    }
-}
-
-fn make_slave<P: AsRef<Path>>(path: P) -> Result<(), IOError> {
-    // SAFETY: Obviously safe syscall.
-    let ret = unsafe {
-        libc::mount(
-            ptr::null(),
-            path.as_ref().to_c_string().as_ptr(),
-            ptr::null(),
-            libc::MS_SLAVE | libc::MS_REC,
-            ptr::null(),
-        )
-    };
-    let err = IOError::last_os_error();
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(err)
-    }
-}
+use anyhow::{Context, Error};
+use rustix::{
+    mount::{self as rustix_mount, MountFlags, MountPropagationFlags},
+    thread::{self as rustix_thread, LinkNameSpaceType, UnshareFlags},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum MountType {
@@ -80,42 +39,50 @@ pub(crate) enum MountType {
 
 pub(in crate::tests) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> {
     let dst = dst.as_ref();
-    let dst_file = syscalls::openat(syscalls::AT_FDCWD, dst, libc::O_NOFOLLOW | libc::O_PATH, 0)?;
-    let dst_path = CString::new(format!("/proc/self/fd/{}", dst_file.as_raw_fd()))?;
+    let dst_file = syscalls::openat(
+        syscalls::AT_FDCWD,
+        dst,
+        OpenFlags::O_NOFOLLOW | OpenFlags::O_PATH,
+        0,
+    )?;
+    let dst_path = format!("/proc/self/fd/{}", dst_file.as_raw_fd());
 
-    let ret = match ty {
-        MountType::Tmpfs => unsafe {
-            libc::mount(
-                // MSRV(1.77): Use c"".
-                CString::new("")?.as_ptr(),
-                dst_path.as_ptr(),
-                // MSRV(1.77): Use c"tmpfs".
-                CString::new("tmpfs")?.as_ptr(),
-                0,
-                ptr::null(),
+    match ty {
+        MountType::Tmpfs => rustix_mount::mount2(
+            None::<&Path>,
+            &dst_path,
+            Some("tmpfs"),
+            MountFlags::empty(),
+            None,
+        )
+        .with_context(|| {
+            format!(
+                "mount tmpfs on {:?}",
+                dst_file
+                    .as_unsafe_path_unchecked()
+                    .unwrap_or(dst_path.into())
             )
-        },
+        }),
         MountType::Bind { src } => {
-            let src_file =
-                syscalls::openat(syscalls::AT_FDCWD, src, libc::O_NOFOLLOW | libc::O_PATH, 0)?;
-            let src_path = CString::new(format!("/proc/self/fd/{}", src_file.as_raw_fd()))?;
-            unsafe {
-                libc::mount(
-                    src_path.as_ptr(),
-                    dst_path.as_ptr(),
-                    ptr::null(),
-                    libc::MS_BIND,
-                    ptr::null(),
+            let src_file = syscalls::openat(
+                syscalls::AT_FDCWD,
+                src,
+                OpenFlags::O_NOFOLLOW | OpenFlags::O_PATH,
+                0,
+            )?;
+            let src_path = format!("/proc/self/fd/{}", src_file.as_raw_fd());
+            rustix_mount::mount_bind(&src_path, &dst_path).with_context(|| {
+                format!(
+                    "bind-mount {:?} -> {:?}",
+                    src_file
+                        .as_unsafe_path_unchecked()
+                        .unwrap_or(src_path.into()),
+                    dst_file
+                        .as_unsafe_path_unchecked()
+                        .unwrap_or(dst_path.into())
                 )
-            }
+            })
         }
-    };
-    let err = IOError::last_os_error();
-
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(err.into())
     }
 }
 
@@ -127,15 +94,18 @@ where
 
     // TODO: Run this in a subprocess.
 
-    unsafe { unshare(libc::CLONE_FS | libc::CLONE_NEWNS) }
+    rustix_thread::unshare(UnshareFlags::FS | UnshareFlags::NEWNS)
         .expect("unable to create a mount namespace");
 
     // Mark / as MS_SLAVE to avoid DoSing the host.
-    make_slave("/")?;
+    rustix_mount::mount_change(
+        "/",
+        MountPropagationFlags::SLAVE | MountPropagationFlags::REC,
+    )?;
 
     let ret = func();
 
-    unsafe { setns(old_ns.as_raw_fd(), libc::CLONE_NEWNS) }
+    rustix_thread::move_into_link_name_space(old_ns.as_fd(), Some(LinkNameSpaceType::Mount))
         .expect("unable to rejoin old namespace");
 
     ret

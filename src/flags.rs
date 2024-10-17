@@ -123,6 +123,12 @@ bitflags! {
     }
 }
 
+impl From<OpenFlags> for rustix::fs::OFlags {
+    fn from(flags: OpenFlags) -> Self {
+        Self::from_bits_retain(flags.bits() as u32)
+    }
+}
+
 impl OpenFlags {
     /// Grab the access mode bits from the flags.
     ///
@@ -189,6 +195,12 @@ bitflags! {
 
         // Don't clobber unknown RENAME_* bits.
         const _ = !0;
+    }
+}
+
+impl From<RenameFlags> for rustix::fs::RenameFlags {
+    fn from(flags: RenameFlags) -> Self {
+        Self::from_bits_retain(flags.bits())
     }
 }
 

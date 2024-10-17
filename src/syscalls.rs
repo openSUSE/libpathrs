@@ -21,24 +21,31 @@
 #![allow(unsafe_code)]
 
 use crate::{
-    flags::OpenFlags,
+    flags::{OpenFlags, RenameFlags},
     utils::{FdExt, ToCString},
 };
 
 use std::{
-    ffi::{CString, OsStr},
+    ffi::OsStr,
     fmt,
     io::Error as IOError,
+    mem::MaybeUninit,
     os::unix::{
         ffi::OsStrExt,
         io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
     },
     path::{Path, PathBuf},
-    ptr,
 };
 
-use libc::{c_int, c_uint, dev_t, mode_t, stat, statfs};
 use once_cell::sync::Lazy;
+use rustix::{
+    fs::{
+        self as rustix_fs, AtFlags, Dev, FileType, Mode, RawMode, Stat, StatFs, Statx, StatxFlags,
+    },
+    io::Errno,
+    mount::{self as rustix_mount, FsMountFlags, FsOpenFlags, MountAttrFlags, OpenTreeFlags},
+    process as rustix_process, thread as rustix_thread,
+};
 
 // TODO: Figure out how we can put a backtrace here (it seems we can't use
 //       thiserror's backtrace support without nightly Rust because thiserror
@@ -48,7 +55,7 @@ use once_cell::sync::Lazy;
 // MSRV(1.65): Use std::backtrace::Backtrace.
 
 // SAFETY: AT_FDCWD is always a valid file descriptor.
-pub(crate) const AT_FDCWD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(libc::AT_FDCWD) };
+pub(crate) const AT_FDCWD: BorrowedFd<'static> = rustix_fs::CWD;
 // SAFETY: BADFD is not a valid file descriptor, but it's not -1.
 #[cfg(test)]
 pub(crate) const BADFD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(-libc::EBADF) };
@@ -63,7 +70,7 @@ pub(crate) const BADFD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(-l
 /// Note that the file descriptor value is very unlikely to reference a live
 /// file descriptor. Its value is only used for informational purposes.
 #[derive(Clone, Debug)]
-pub(crate) struct FrozenFd(c_int, Option<PathBuf>);
+pub(crate) struct FrozenFd(RawFd, Option<PathBuf>);
 
 // TODO: Should probably be a pub(crate) impl.
 impl<Fd: AsFd> From<Fd> for FrozenFd {
@@ -98,13 +105,17 @@ impl fmt::Display for FrozenFd {
 /// [`Error`]: crate::error::Error
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
-    #[error("openat({dirfd}, {path}, 0x{flags:x}, 0o{mode:o})")]
+    // NOTE: This is temporary until the issue is fixed in rustix.
+    #[error("invalid file descriptor {fd} (see <https://github.com/bytecodealliance/rustix/issues/1187> for more details)")]
+    InvalidFd { fd: RawFd, source: Errno },
+
+    #[error("openat({dirfd}, {path}, {flags:?}, 0o{mode:o})")]
     Openat {
         dirfd: FrozenFd,
         path: PathBuf,
         flags: OpenFlags,
         mode: u32,
-        source: IOError,
+        source: Errno,
     },
 
     #[error("openat2({dirfd}, {path}, {how}, {size})")]
@@ -113,14 +124,14 @@ pub(crate) enum Error {
         path: PathBuf,
         how: OpenHow,
         size: usize,
-        source: IOError,
+        source: Errno,
     },
 
     #[error("readlinkat({dirfd}, {path})")]
     Readlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
-        source: IOError,
+        source: Errno,
     },
 
     #[error("mkdirat({dirfd}, {path}, 0o{mode:o})")]
@@ -128,7 +139,7 @@ pub(crate) enum Error {
         dirfd: FrozenFd,
         path: PathBuf,
         mode: u32,
-        source: IOError,
+        source: Errno,
     },
 
     #[error("mknodat({dirfd}, {path}, 0o{mode:o}, {major}:{minor})")]
@@ -138,25 +149,25 @@ pub(crate) enum Error {
         mode: u32,
         major: u32,
         minor: u32,
-        source: IOError,
+        source: Errno,
     },
 
-    #[error("unlinkat({dirfd}, {path}, 0x{flags:x})")]
+    #[error("unlinkat({dirfd}, {path}, {flags:?})")]
     Unlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
-        flags: i32,
-        source: IOError,
+        flags: AtFlags,
+        source: Errno,
     },
 
-    #[error("linkat({olddirfd}, {oldpath}, {newdirfd}, {newpath}, 0x{flags:x})")]
+    #[error("linkat({old_dirfd}, {old_path}, {new_dirfd}, {new_path}, {flags:?})")]
     Linkat {
-        olddirfd: FrozenFd,
-        oldpath: PathBuf,
-        newdirfd: FrozenFd,
-        newpath: PathBuf,
-        flags: i32,
-        source: IOError,
+        old_dirfd: FrozenFd,
+        old_path: PathBuf,
+        new_dirfd: FrozenFd,
+        new_path: PathBuf,
+        flags: AtFlags,
+        source: Errno,
     },
 
     #[error("symlinkat({dirfd}, {path}, {target})")]
@@ -164,72 +175,72 @@ pub(crate) enum Error {
         dirfd: FrozenFd,
         path: PathBuf,
         target: PathBuf,
-        source: IOError,
+        source: Errno,
     },
 
-    #[error("renameat({olddirfd}, {oldpath}, {newdirfd}, {newpath})")]
+    #[error("renameat({old_dirfd}, {old_path}, {new_dirfd}, {new_path})")]
     Renameat {
-        olddirfd: FrozenFd,
-        oldpath: PathBuf,
-        newdirfd: FrozenFd,
-        newpath: PathBuf,
-        source: IOError,
+        old_dirfd: FrozenFd,
+        old_path: PathBuf,
+        new_dirfd: FrozenFd,
+        new_path: PathBuf,
+        source: Errno,
     },
 
-    #[error("renameat2({olddirfd}, {oldpath}, {newdirfd}, {newpath}, 0x{flags:x})")]
+    #[error("renameat2({old_dirfd}, {old_path}, {new_dirfd}, {new_path}, {flags:?})")]
     Renameat2 {
-        olddirfd: FrozenFd,
-        oldpath: PathBuf,
-        newdirfd: FrozenFd,
-        newpath: PathBuf,
-        flags: u32,
-        source: IOError,
+        old_dirfd: FrozenFd,
+        old_path: PathBuf,
+        new_dirfd: FrozenFd,
+        new_path: PathBuf,
+        flags: RenameFlags,
+        source: Errno,
     },
 
     #[error("fstatfs({fd})")]
-    Fstatfs { fd: FrozenFd, source: IOError },
+    Fstatfs { fd: FrozenFd, source: Errno },
 
     #[error("fstatat({dirfd}, {path}, 0x{flags:x})")]
     Fstatat {
         dirfd: FrozenFd,
         path: PathBuf,
-        flags: i32,
-        source: IOError,
+        flags: AtFlags,
+        source: Errno,
     },
 
     #[error("statx({dirfd}, {path}, flags=0x{flags:x}, mask=0x{mask:x})")]
     Statx {
         dirfd: FrozenFd,
         path: PathBuf,
-        flags: i32,
-        mask: u32,
-        source: IOError,
+        flags: AtFlags,
+        mask: StatxFlags,
+        source: Errno,
     },
 
     #[error("fsopen({fstype}, {flags:?})")]
     Fsopen {
         fstype: String,
-        flags: FsopenFlags,
-        source: IOError,
+        flags: FsOpenFlags,
+        source: Errno,
     },
 
     #[error("fsconfig({sfd}, FSCONFIG_CMD_CREATE)")]
-    FsconfigCreate { sfd: FrozenFd, source: IOError },
+    FsconfigCreate { sfd: FrozenFd, source: Errno },
 
     #[error("fsconfig({sfd}, FSCONFIG_SET_STRING, {key:?}, {value:?})")]
     FsconfigSetString {
         sfd: FrozenFd,
         key: String,
         value: String,
-        source: IOError,
+        source: Errno,
     },
 
-    #[error("fsmount({sfd}, {flags:?}, 0x{mount_attrs:x})")]
+    #[error("fsmount({sfd}, {flags:?}, {mount_attrs:?})")]
     Fsmount {
         sfd: FrozenFd,
-        flags: FsmountFlags,
-        mount_attrs: u64,
-        source: IOError,
+        flags: FsMountFlags,
+        mount_attrs: MountAttrFlags,
+        source: Errno,
     },
 
     #[error("open_tree({dirfd}, {path}, {flags:?})")]
@@ -237,14 +248,15 @@ pub(crate) enum Error {
         dirfd: FrozenFd,
         path: PathBuf,
         flags: OpenTreeFlags,
-        source: IOError,
+        source: Errno,
     },
 }
 
 impl Error {
-    pub(crate) fn root_cause(&self) -> &IOError {
+    fn errno(&self) -> &Errno {
         // XXX: This should probably be a macro...
         match self {
+            Error::InvalidFd { source, .. } => source,
             Error::Openat { source, .. } => source,
             Error::Openat2 { source, .. } => source,
             Error::Readlinkat { source, .. } => source,
@@ -265,12 +277,30 @@ impl Error {
             Error::OpenTree { source, .. } => source,
         }
     }
+
+    // TODO: Switch to returning &Errno.
+    pub(crate) fn root_cause(&self) -> IOError {
+        IOError::from_raw_os_error(self.errno().raw_os_error())
+    }
 }
 
-// TODO: We probably want to switch to rustix for most of these wrappers, though
-//       the interfaces provided by rustix are slightly non-ergonomic. I much
-//       prefer these simpler C-like bindings. We also have the ability to check
-//       for support of each syscall.
+// FIXME: Temporary fix for rustix panicking if a passed file descriptor is
+// non-standard <https://github.com/bytecodealliance/rustix/issues/1187>.
+trait HotfixRustixFd: Sized {
+    fn hotfix_rustix_fd(self) -> Result<Self, Error>;
+}
+
+impl<Fd: AsFd + Sized> HotfixRustixFd for Fd {
+    fn hotfix_rustix_fd(self) -> Result<Self, Error> {
+        match self.as_fd().as_raw_fd() {
+            libc::AT_FDCWD | 0.. => Ok(self),
+            fd => Err(Error::InvalidFd {
+                fd,
+                source: Errno::BADF,
+            }),
+        }
+    }
+}
 
 /// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
 ///
@@ -279,29 +309,25 @@ impl Error {
 pub(crate) fn openat_follow<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
-    flags: c_int,
-    mode: mode_t,
+    mut flags: OpenFlags,
+    mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<OwnedFd, Error> {
-    let dirfd = dirfd.as_fd();
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
-    let flags = libc::O_CLOEXEC | libc::O_NOCTTY | flags;
 
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe { libc::openat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), flags, mode) };
-    let err = IOError::last_os_error();
+    // O_CLOEXEC is needed for obvious reasons, and O_NOCTTY ensures that a
+    // malicious file won't take control of our terminal.
+    flags.insert(OpenFlags::O_CLOEXEC | OpenFlags::O_NOCTTY);
 
-    if fd >= 0 {
-        // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-    } else {
-        Err(Error::Openat {
+    rustix_fs::openat(dirfd, path, flags.into(), Mode::from_raw_mode(mode)).map_err(|errno| {
+        Error::Openat {
             dirfd: dirfd.into(),
             path: path.into(),
-            flags: OpenFlags::from_bits_retain(flags),
+            flags,
             mode,
-            source: err,
-        })
-    }
+            source: errno,
+        }
+    })
 }
 
 /// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOCTTY | O_NOFOLLOW`.
@@ -311,10 +337,11 @@ pub(crate) fn openat_follow<Fd: AsFd, P: AsRef<Path>>(
 pub(crate) fn openat<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
-    flags: c_int,
-    mode: mode_t,
+    mut flags: OpenFlags,
+    mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<OwnedFd, Error> {
-    openat_follow(dirfd, path, libc::O_NOFOLLOW | flags, mode)
+    flags.insert(OpenFlags::O_NOFOLLOW);
+    openat_follow(dirfd, path, flags, mode)
 }
 
 /// Wrapper for `readlinkat(2)`.
@@ -323,36 +350,34 @@ pub(crate) fn openat<Fd: AsFd, P: AsRef<Path>>(
 /// argument of `readlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
 pub(crate) fn readlinkat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<PathBuf, Error> {
-    let dirfd = dirfd.as_fd();
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
 
-    // If the contents of the symlink are larger than this, we raise a
-    // SafetyViolation to avoid DoS vectors (because there is no way to get the
-    // size of a symlink beforehand, you just have to read it).
-    let mut buffer = [0_u8; 32 * libc::PATH_MAX as usize];
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let len = unsafe {
-        libc::readlinkat(
-            dirfd.as_raw_fd(),
-            path.to_c_string().as_ptr(),
-            buffer.as_mut_ptr() as *mut i8,
-            buffer.len(),
-        )
-    };
-    let mut err = IOError::last_os_error();
-    let maybe_truncated = len >= (buffer.len() as isize);
-    if len < 0 || maybe_truncated {
-        if maybe_truncated {
-            err = IOError::from_raw_os_error(libc::ENAMETOOLONG);
-        }
+    // If the contents of the symlink are larger than this, we bail out avoid
+    // DoS vectors (because there is no way to get the size of a symlink
+    // beforehand, you just have to read it).
+    // MSRV(1.79): Use const {}?
+    let mut linkbuf: [MaybeUninit<u8>; 32 * 4096] =
+        [MaybeUninit::uninit(); 32 * libc::PATH_MAX as usize];
+
+    let (target, trailing) =
+        rustix_fs::readlinkat_raw(dirfd, path, &mut linkbuf[..]).map_err(|errno| {
+            Error::Readlinkat {
+                dirfd: dirfd.into(),
+                path: path.into(),
+                source: errno,
+            }
+        })?;
+
+    if trailing.is_empty() {
+        // The buffer was too small, return an error.
         Err(Error::Readlinkat {
             dirfd: dirfd.into(),
             path: path.into(),
-            source: err,
+            source: Errno::NAMETOOLONG,
         })
     } else {
-        let content = OsStr::from_bytes(&buffer[..(len as usize)]);
-        Ok(PathBuf::from(content))
+        Ok(PathBuf::from(OsStr::from_bytes(target)))
     }
 }
 
@@ -363,29 +388,21 @@ pub(crate) fn readlinkat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result
 pub(crate) fn mkdirat<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
-    mode: mode_t,
+    mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<(), Error> {
-    let dirfd = dirfd.as_fd();
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::mkdirat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), mode) };
-    let err = IOError::last_os_error();
 
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::Mkdirat {
-            dirfd: dirfd.into(),
-            path: path.into(),
-            mode,
-            source: err,
-        })
-    }
+    rustix_fs::mkdirat(dirfd, path, Mode::from_raw_mode(mode)).map_err(|errno| Error::Mkdirat {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        mode,
+        source: errno,
+    })
 }
 
-pub(crate) fn devmajorminor(dev: dev_t) -> (c_uint, c_uint) {
-    // SAFETY: Obviously safe-to-use libc function.
-    unsafe { (libc::major(dev), libc::minor(dev)) }
+pub(crate) fn devmajorminor(dev: Dev) -> (u32, u32) {
+    (rustix_fs::major(dev), rustix_fs::minor(dev))
 }
 
 /// Wrapper for `mknodat(2)`.
@@ -395,28 +412,27 @@ pub(crate) fn devmajorminor(dev: dev_t) -> (c_uint, c_uint) {
 pub(crate) fn mknodat<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
-    mode: mode_t,
-    dev: dev_t,
+    raw_mode: RawMode, // TODO: Should we take rustix::fs::{Mode,FileType} directly?
+    dev: Dev,
 ) -> Result<(), Error> {
-    let dirfd = dirfd.as_fd();
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::mknodat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), mode, dev) };
-    let err = IOError::last_os_error();
+    let (file_type, mode) = (
+        FileType::from_raw_mode(raw_mode),
+        Mode::from_raw_mode(raw_mode),
+    );
 
-    if ret >= 0 {
-        Ok(())
-    } else {
+    rustix_fs::mknodat(dirfd, path, file_type, mode, dev).map_err(|errno| {
         let (major, minor) = devmajorminor(dev);
-        Err(Error::Mknodat {
+        Error::Mknodat {
             dirfd: dirfd.into(),
             path: path.into(),
-            mode,
+            mode: raw_mode,
             major,
             minor,
-            source: err,
-        })
-    }
+            source: errno,
+        }
+    })
 }
 
 /// Wrapper for `unlinkat(2)`.
@@ -426,24 +442,17 @@ pub(crate) fn mknodat<Fd: AsFd, P: AsRef<Path>>(
 pub(crate) fn unlinkat<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
-    flags: c_int,
+    flags: AtFlags,
 ) -> Result<(), Error> {
-    let dirfd = dirfd.as_fd();
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::unlinkat(dirfd.as_raw_fd(), path.to_c_string().as_ptr(), flags) };
-    let err = IOError::last_os_error();
 
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::Unlinkat {
-            dirfd: dirfd.into(),
-            path: path.into(),
-            flags,
-            source: err,
-        })
-    }
+    rustix_fs::unlinkat(dirfd, path, flags).map_err(|errno| Error::Unlinkat {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        flags,
+        source: errno,
+    })
 }
 
 /// Wrapper for `linkat(2)`.
@@ -451,38 +460,25 @@ pub(crate) fn unlinkat<Fd: AsFd, P: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `linkat(2)`. We need the dirfd argument, so we need a wrapper.
 pub(crate) fn linkat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
-    olddirfd: Fd1,
-    oldpath: P1,
-    newdirfd: Fd2,
-    newpath: P2,
-    flags: c_int,
+    old_dirfd: Fd1,
+    old_path: P1,
+    new_dirfd: Fd2,
+    new_path: P2,
+    flags: AtFlags,
 ) -> Result<(), Error> {
-    let (olddirfd, newdirfd) = (olddirfd.as_fd(), newdirfd.as_fd());
-    let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::linkat(
-            olddirfd.as_raw_fd(),
-            oldpath.to_c_string().as_ptr(),
-            newdirfd.as_raw_fd(),
-            newpath.to_c_string().as_ptr(),
-            flags,
-        )
-    };
-    let err = IOError::last_os_error();
+    let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
+    let (new_dirfd, new_path) = (new_dirfd.as_fd().hotfix_rustix_fd()?, new_path.as_ref());
 
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::Linkat {
-            olddirfd: olddirfd.into(),
-            oldpath: oldpath.into(),
-            newdirfd: newdirfd.into(),
-            newpath: newpath.into(),
+    rustix_fs::linkat(old_dirfd, old_path, new_dirfd, new_path, flags).map_err(|errno| {
+        Error::Linkat {
+            old_dirfd: old_dirfd.into(),
+            old_path: old_path.into(),
+            new_dirfd: new_dirfd.into(),
+            new_path: new_path.into(),
             flags,
-            source: err,
-        })
-    }
+            source: errno,
+        }
+    })
 }
 
 /// Wrapper for `symlinkat(2)`.
@@ -495,28 +491,15 @@ pub(crate) fn symlinkat<P1: AsRef<Path>, Fd: AsFd, P2: AsRef<Path>>(
     dirfd: Fd,
     path: P2,
 ) -> Result<(), Error> {
-    let dirfd = dirfd.as_fd();
-    let (target, path) = (target.as_ref(), path.as_ref());
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::symlinkat(
-            target.to_c_string().as_ptr(),
-            dirfd.as_raw_fd(),
-            path.to_c_string().as_ptr(),
-        )
-    };
-    let err = IOError::last_os_error();
+    let (dirfd, path) = (dirfd.as_fd().hotfix_rustix_fd()?, path.as_ref());
+    let target = target.as_ref();
 
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::Symlinkat {
-            dirfd: dirfd.into(),
-            path: path.into(),
-            target: target.into(),
-            source: err,
-        })
-    }
+    rustix_fs::symlinkat(target, dirfd, path).map_err(|errno| Error::Symlinkat {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        target: target.into(),
+        source: errno,
+    })
 }
 
 /// Wrapper for `renameat(2)`.
@@ -524,40 +507,26 @@ pub(crate) fn symlinkat<P1: AsRef<Path>, Fd: AsFd, P2: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `renameat(2)`. We need the dirfd argument, so we need a wrapper.
 pub(crate) fn renameat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
-    olddirfd: Fd1,
-    oldpath: P1,
-    newdirfd: Fd2,
-    newpath: P2,
+    old_dirfd: Fd1,
+    old_path: P1,
+    new_dirfd: Fd2,
+    new_path: P2,
 ) -> Result<(), Error> {
-    let (olddirfd, newdirfd) = (olddirfd.as_fd(), newdirfd.as_fd());
-    let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::renameat(
-            olddirfd.as_raw_fd(),
-            oldpath.to_c_string().as_ptr(),
-            newdirfd.as_raw_fd(),
-            newpath.to_c_string().as_ptr(),
-        )
-    };
-    let err = IOError::last_os_error();
+    let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
+    let (new_dirfd, new_path) = (new_dirfd.as_fd().hotfix_rustix_fd()?, new_path.as_ref());
 
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::Renameat {
-            olddirfd: olddirfd.into(),
-            oldpath: oldpath.into(),
-            newdirfd: newdirfd.into(),
-            newpath: newpath.into(),
-            source: err,
-        })
-    }
+    rustix_fs::renameat(old_dirfd, old_path, new_dirfd, new_path).map_err(|errno| Error::Renameat {
+        old_dirfd: old_dirfd.into(),
+        old_path: old_path.into(),
+        new_dirfd: new_dirfd.into(),
+        new_path: new_path.into(),
+        source: errno,
+    })
 }
 
 // MSRV(1.80): Use LazyLock.
 pub(crate) static RENAME_FLAGS_SUPPORTED: Lazy<bool> = Lazy::new(|| {
-    match renameat2(AT_FDCWD, ".", AT_FDCWD, ".", libc::RENAME_EXCHANGE) {
+    match renameat2(AT_FDCWD, ".", AT_FDCWD, ".", RenameFlags::RENAME_EXCHANGE) {
         Ok(_) => true,
         // We expect EBUSY, but just to be safe we only check for ENOSYS.
         Err(err) => err.root_cause().raw_os_error() != Some(libc::ENOSYS),
@@ -569,137 +538,77 @@ pub(crate) static RENAME_FLAGS_SUPPORTED: Lazy<bool> = Lazy::new(|| {
 /// This is needed because Rust doesn't provide any interface for `renameat2(2)`
 /// (especially not an interface for the dirfd).
 pub(crate) fn renameat2<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
-    olddirfd: Fd1,
-    oldpath: P1,
-    newdirfd: Fd2,
-    newpath: P2,
-    flags: c_uint,
+    old_dirfd: Fd1,
+    old_path: P1,
+    new_dirfd: Fd2,
+    new_path: P2,
+    flags: RenameFlags,
 ) -> Result<(), Error> {
     // Use renameat(2) if no flags are specified.
-    if flags == 0 {
-        return renameat(olddirfd, oldpath, newdirfd, newpath);
+    if flags.is_empty() {
+        return renameat(old_dirfd, old_path, new_dirfd, new_path);
     }
 
-    let (olddirfd, newdirfd) = (olddirfd.as_fd(), newdirfd.as_fd());
-    let (oldpath, newpath) = (oldpath.as_ref(), newpath.as_ref());
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::renameat2(
-            olddirfd.as_raw_fd(),
-            oldpath.to_c_string().as_ptr(),
-            newdirfd.as_raw_fd(),
-            newpath.to_c_string().as_ptr(),
-            flags,
-        )
-    };
-    let err = IOError::last_os_error();
+    let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
+    let (new_dirfd, new_path) = (new_dirfd.as_fd().hotfix_rustix_fd()?, new_path.as_ref());
 
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::Renameat2 {
-            olddirfd: olddirfd.into(),
-            oldpath: oldpath.into(),
-            newdirfd: newdirfd.into(),
-            newpath: newpath.into(),
+    rustix_fs::renameat_with(old_dirfd, old_path, new_dirfd, new_path, flags.into()).map_err(
+        |errno| Error::Renameat2 {
+            old_dirfd: old_dirfd.into(),
+            old_path: old_path.into(),
+            new_dirfd: new_dirfd.into(),
+            new_path: new_path.into(),
             flags,
-            source: err,
-        })
-    }
+            source: errno,
+        },
+    )
 }
 
 /// Wrapper for `fstatfs(2)`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatfs(2)`.
-pub(crate) fn fstatfs<Fd: AsFd>(fd: Fd) -> Result<statfs, Error> {
-    // SAFETY: repr(C) struct without internal references is definitely valid. C
-    //         callers are expected to zero it as well.
-    let mut buf: statfs = unsafe { std::mem::zeroed() };
-    let fd = fd.as_fd();
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe { libc::fstatfs(fd.as_raw_fd(), &mut buf as *mut statfs) };
-    let err = IOError::last_os_error();
+pub(crate) fn fstatfs<Fd: AsFd>(fd: Fd) -> Result<StatFs, Error> {
+    let fd = fd.as_fd().hotfix_rustix_fd()?;
 
-    if ret >= 0 {
-        Ok(buf)
-    } else {
-        Err(Error::Fstatfs {
-            fd: fd.into(),
-            source: err,
-        })
-    }
+    rustix_fs::fstatfs(fd).map_err(|errno| Error::Fstatfs {
+        fd: fd.into(),
+        source: errno,
+    })
 }
 
 /// Wrapper for `fstatat(2)`, which auto-sets `AT_NO_AUTOMOUNT |
 /// AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatat(2)`.
-pub(crate) fn fstatat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<stat, Error> {
-    // SAFETY: repr(C) struct without internal references is definitely valid. C
-    //         callers are expected to zero it as well.
-    let mut buf: stat = unsafe { std::mem::zeroed() };
-    let dirfd = dirfd.as_fd();
+pub(crate) fn fstatat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<Stat, Error> {
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
-    let flags = libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH;
+    let flags = AtFlags::NO_AUTOMOUNT | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
 
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::fstatat(
-            dirfd.as_raw_fd(),
-            path.to_c_string().as_ptr(),
-            &mut buf as *mut stat,
-            flags,
-        )
-    };
-    let err = IOError::last_os_error();
-
-    if ret >= 0 {
-        Ok(buf)
-    } else {
-        Err(Error::Fstatat {
-            dirfd: dirfd.into(),
-            path: path.into(),
-            flags,
-            source: err,
-        })
-    }
+    rustix_fs::statat(dirfd, path, flags).map_err(|errno| Error::Fstatat {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        flags,
+        source: errno,
+    })
 }
 
 pub(crate) fn statx<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
-    mask: u32,
-) -> Result<libc::statx, Error> {
-    // SAFETY: repr(C) struct without internal references is definitely valid. C
-    //         callers are expected to zero it as well.
-    let mut buf: libc::statx = unsafe { std::mem::zeroed() };
-    let dirfd = dirfd.as_fd();
+    mask: StatxFlags,
+) -> Result<Statx, Error> {
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
-    let flags = libc::AT_NO_AUTOMOUNT | libc::AT_SYMLINK_NOFOLLOW | libc::AT_EMPTY_PATH;
+    let flags = AtFlags::NO_AUTOMOUNT | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
 
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::statx(
-            dirfd.as_raw_fd(),
-            path.to_c_string().as_ptr(),
-            flags,
-            mask,
-            &mut buf as *mut _,
-        )
-    };
-    let err = IOError::last_os_error();
-
-    if ret >= 0 {
-        Ok(buf)
-    } else {
-        Err(Error::Statx {
-            dirfd: dirfd.into(),
-            path: path.into(),
-            flags,
-            mask,
-            source: err,
-        })
-    }
+    rustix_fs::statx(dirfd, path, flags, mask).map_err(|errno| Error::Statx {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        flags,
+        mask,
+        source: errno,
+    })
 }
 
 // MSRV(1.80): Use LazyLock.
@@ -728,7 +637,6 @@ bitflags! {
 }
 
 /// Arguments for how `openat2` should open the target path.
-// TODO: Maybe switch to libc::open_how?
 #[repr(C)]
 #[derive(Clone, Debug, Default)]
 pub struct OpenHow {
@@ -763,12 +671,14 @@ impl fmt::Display for OpenHow {
     }
 }
 
+// NOTE: rustix's openat2 wrapper is not extensible-friendly so we use our own
+// for now. See <https://github.com/bytecodealliance/rustix/issues/1186>.
 pub(crate) fn openat2<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
     how: &OpenHow,
 ) -> Result<OwnedFd, Error> {
-    let dirfd = dirfd.as_fd();
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
 
     // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
@@ -797,89 +707,46 @@ pub(crate) fn openat2<Fd: AsFd, P: AsRef<Path>>(
             path: path.into(),
             how,
             size: std::mem::size_of::<OpenHow>(),
-            source: err,
+            source: err
+                .raw_os_error()
+                .map(Errno::from_raw_os_error)
+                .expect("syscall failure must result in a real OS error"),
         })
     }
 }
 
 #[cfg(test)]
-pub(crate) fn getpid() -> libc::pid_t {
-    // SAFETY: Obviously safe libc function.
-    unsafe { libc::getpid() }
+pub(crate) fn getpid() -> rustix_process::RawPid {
+    rustix_process::Pid::as_raw(Some(rustix_process::getpid()))
 }
 
-pub(crate) fn gettid() -> libc::pid_t {
-    // SAFETY: Obviously safe libc function.
-    unsafe { libc::gettid() }
+pub(crate) fn gettid() -> rustix_process::RawPid {
+    rustix_process::Pid::as_raw(Some(rustix_thread::gettid()))
 }
 
-pub(crate) fn geteuid() -> libc::uid_t {
-    // SAFETY: Obviously safe libc function.
-    unsafe { libc::geteuid() }
+pub(crate) fn geteuid() -> rustix_process::RawUid {
+    rustix_process::geteuid().as_raw()
 }
 
 #[cfg(test)]
-pub(crate) fn getegid() -> libc::gid_t {
-    // SAFETY: Obviously safe libc function.
-    unsafe { libc::getegid() }
+pub(crate) fn getegid() -> rustix_process::RawGid {
+    rustix_process::getegid().as_raw()
 }
 
 #[cfg(test)]
 pub(crate) fn getcwd() -> Result<PathBuf, anyhow::Error> {
     let buffer = Vec::with_capacity(libc::PATH_MAX as usize);
-    Ok(OsStr::from_bytes(rustix::process::getcwd(buffer)?.to_bytes()).into())
+    Ok(OsStr::from_bytes(rustix_process::getcwd(buffer)?.to_bytes()).into())
 }
 
-bitflags! {
-    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
-    pub struct FsopenFlags: i32 {
-        const FSOPEN_CLOEXEC = 0x1;
-    }
-
-    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
-    pub struct FsmountFlags: i32 {
-        const FSMOUNT_CLOEXEC = 0x1;
-    }
-
-    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
-    pub struct OpenTreeFlags: i32 {
-        const AT_RECURSIVE = libc::AT_RECURSIVE;
-        const OPEN_TREE_CLOEXEC = libc::O_CLOEXEC;
-        const OPEN_TREE_CLONE = 0x1;
-    }
-}
-
-#[repr(i32)]
-#[allow(dead_code)]
-enum FsconfigCmd {
-    SetFlag = 0x0,      // FSCONFIG_SET_FLAG
-    SetString = 0x1,    // FSCONFIG_SET_STRING
-    SetBinary = 0x2,    // FSCONFIG_SET_BINARY
-    SetPath = 0x3,      // FSCONFIG_SET_PATH
-    SetPathEmpty = 0x4, // FSCONFIG_SET_PATH_EMPTY
-    SetFd = 0x5,        // FSCONFIG_SET_FD
-    Create = 0x6,       // FSCONFIG_CREATE
-    Reconfigure = 0x7,  // FSCONFIG_RECONFIGURE
-}
-
-pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsopenFlags) -> Result<OwnedFd, Error> {
+pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsOpenFlags) -> Result<OwnedFd, Error> {
     let fstype = fstype.as_ref();
-    let c_fstype = CString::new(fstype).expect("fsopen argument should be valid C string");
 
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe { libc::syscall(libc::SYS_fsopen, c_fstype.as_ptr(), flags.bits()) } as RawFd;
-    let err = IOError::last_os_error();
-
-    if fd >= 0 {
-        // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-    } else {
-        Err(Error::Fsopen {
-            fstype: fstype.into(),
-            flags,
-            source: err,
-        })
-    }
+    rustix_mount::fsopen(fstype, flags).map_err(|errno| Error::Fsopen {
+        fstype: fstype.into(),
+        flags,
+        source: errno,
+    })
 }
 
 pub(crate) fn fsconfig_set_string<Fd: AsFd, K: AsRef<str>, V: AsRef<str>>(
@@ -887,93 +754,40 @@ pub(crate) fn fsconfig_set_string<Fd: AsFd, K: AsRef<str>, V: AsRef<str>>(
     key: K,
     value: V,
 ) -> Result<(), Error> {
-    let sfd = sfd.as_fd();
+    let sfd = sfd.as_fd().hotfix_rustix_fd()?;
     let key = key.as_ref();
-    let c_key = CString::new(key).expect("fsconfig_set_string key should be valid C string");
     let value = value.as_ref();
-    let c_value = CString::new(value).expect("fsconfig_set_string value should be valid C string");
 
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::syscall(
-            libc::SYS_fsconfig,
-            sfd.as_raw_fd(),
-            FsconfigCmd::SetString,
-            c_key.as_ptr(),
-            c_value.as_ptr(),
-            0,
-        )
-    };
-    let err = IOError::last_os_error();
-
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::FsconfigSetString {
-            sfd: sfd.into(),
-            key: key.into(),
-            value: value.into(),
-            source: err,
-        })
-    }
+    rustix_mount::fsconfig_set_string(sfd, key, value).map_err(|errno| Error::FsconfigSetString {
+        sfd: sfd.into(),
+        key: key.into(),
+        value: value.into(),
+        source: errno,
+    })
 }
 
-// clippy doesn't understand that we need to specify a type for ptr::null() here
-// because libc::syscall() is variadic.
-#[allow(clippy::unnecessary_cast)]
 pub(crate) fn fsconfig_create<Fd: AsFd>(sfd: Fd) -> Result<(), Error> {
-    let sfd = sfd.as_fd();
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let ret = unsafe {
-        libc::syscall(
-            libc::SYS_fsconfig,
-            sfd.as_raw_fd(),
-            FsconfigCmd::Create,
-            ptr::null() as *const (),
-            ptr::null() as *const (),
-            0,
-        )
-    };
-    let err = IOError::last_os_error();
+    let sfd = sfd.as_fd().hotfix_rustix_fd()?;
 
-    if ret >= 0 {
-        Ok(())
-    } else {
-        Err(Error::FsconfigCreate {
-            sfd: sfd.into(),
-            source: err,
-        })
-    }
+    rustix_mount::fsconfig_create(sfd).map_err(|errno| Error::FsconfigCreate {
+        sfd: sfd.into(),
+        source: errno,
+    })
 }
 
 pub(crate) fn fsmount<Fd: AsFd>(
     sfd: Fd,
-    flags: FsmountFlags,
-    mount_attrs: u64,
+    flags: FsMountFlags,
+    mount_attrs: MountAttrFlags,
 ) -> Result<OwnedFd, Error> {
-    let sfd = sfd.as_fd();
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_fsmount,
-            sfd.as_raw_fd(),
-            flags.bits(),
-            mount_attrs,
-        )
-    } as RawFd;
-    let err = IOError::last_os_error();
+    let sfd = sfd.as_fd().hotfix_rustix_fd()?;
 
-    if fd >= 0 {
-        // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-    } else {
-        Err(Error::Fsmount {
-            sfd: sfd.into(),
-            flags,
-            mount_attrs,
-            source: err,
-        })
-    }
+    rustix_mount::fsmount(sfd, flags, mount_attrs).map_err(|errno| Error::Fsmount {
+        sfd: sfd.into(),
+        flags,
+        mount_attrs,
+        source: errno,
+    })
 }
 
 pub(crate) fn open_tree<Fd: AsFd, P: AsRef<Path>>(
@@ -981,30 +795,13 @@ pub(crate) fn open_tree<Fd: AsFd, P: AsRef<Path>>(
     path: P,
     flags: OpenTreeFlags,
 ) -> Result<OwnedFd, Error> {
-    let dirfd = dirfd.as_fd();
+    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
-    let c_path = path.to_c_string();
 
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_open_tree,
-            dirfd.as_raw_fd(),
-            c_path.as_ptr(),
-            flags.bits(),
-        )
-    } as RawFd;
-    let err = IOError::last_os_error();
-
-    if fd >= 0 {
-        // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-    } else {
-        Err(Error::OpenTree {
-            dirfd: dirfd.into(),
-            path: path.into(),
-            flags,
-            source: err,
-        })
-    }
+    rustix_mount::open_tree(dirfd, path, flags).map_err(|errno| Error::OpenTree {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        flags,
+        source: errno,
+    })
 }
