@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a
   raw `WrappedFd` (os opposed to `Root.creat` which returns an `os.fdopen`).
 
+### Changed ###
+- syscalls: switch to rustix for most of our syscall wrappers to simplify how
+  much code we have for wrapper raw syscalls. This also lets us build on
+  musl-based targets because musl doesn't support some of the syscalls we need.
+
+  There are some outstanding issues with rustix that make this switch a little
+  uglier than necessary ([rustix#1186][], [rustix#1187][]), but this is a net
+  improvement overall.
+
+[rustix#1186]: https://github.com/bytecodealliance/rustix/issues/1186
+[rustix#1187]: https://github.com/bytecodealliance/rustix/issues/1187
+
 ## [0.1.3] - 2024-10-10 ##
 
 > 自動化って物は試しとすればいい物だ

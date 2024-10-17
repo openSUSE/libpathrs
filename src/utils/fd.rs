@@ -33,7 +33,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(crate) struct Metadata(libc::stat);
+use rustix::fs::{self as rustix_fs, StatExt, StatxFlags};
+
+pub(crate) struct Metadata(rustix_fs::Stat);
 
 impl Metadata {
     pub(crate) fn is_symlink(&self) -> bool {
@@ -75,27 +77,27 @@ impl MetadataExt for Metadata {
     }
 
     fn atime(&self) -> i64 {
-        self.0.st_atime
+        self.0.atime()
     }
 
     fn atime_nsec(&self) -> i64 {
-        self.0.st_atime_nsec
+        self.0.st_atime_nsec as i64
     }
 
     fn mtime(&self) -> i64 {
-        self.0.st_mtime
+        self.0.mtime()
     }
 
     fn mtime_nsec(&self) -> i64 {
-        self.0.st_mtime_nsec
+        self.0.st_mtime_nsec as i64
     }
 
     fn ctime(&self) -> i64 {
-        self.0.st_ctime
+        self.0.ctime()
     }
 
     fn ctime_nsec(&self) -> i64 {
-        self.0.st_ctime_nsec
+        self.0.st_ctime_nsec as i64
     }
 
     fn blksize(&self) -> u64 {
@@ -177,7 +179,7 @@ const DANGEROUS_FILESYSTEMS: [i64; 2] = [
     0x5a3c_69f0,            // apparmorfs
 ];
 
-impl<T: AsFd> FdExt for T {
+impl<Fd: AsFd> FdExt for Fd {
     fn metadata(&self) -> Result<Metadata, Error> {
         let stat = syscalls::fstatat(self.as_fd(), "").map_err(|err| ErrorImpl::RawOsError {
             operation: "get fd metadata".into(),
@@ -261,15 +263,18 @@ pub(crate) fn fetch_mnt_id<Fd: AsFd, P: AsRef<Path>>(
     // [2]: Linux commit 990d6c2d7aee ("vfs: Add name to file handle conversion support")
     // [3]: Linux commit 64343119d7b8 ("exportfs: support encoding non-decodeable file handles by default")
 
-    const STATX_MNT_ID_UNIQUE: u32 = 0x4000;
-    let want_mask = libc::STATX_MNT_ID | STATX_MNT_ID_UNIQUE;
+    const STATX_MNT_ID_UNIQUE: StatxFlags = StatxFlags::from_bits_retain(0x4000);
+    let want_mask = StatxFlags::MNT_ID | STATX_MNT_ID_UNIQUE;
 
     match syscalls::statx(dirfd, path, want_mask) {
-        Ok(stx) => Ok(if stx.stx_mask & want_mask != 0 {
-            Some(stx.stx_mnt_id)
-        } else {
-            None
-        }),
+        Ok(stx) => {
+            let got_mask = StatxFlags::from_bits_retain(stx.stx_mask);
+            Ok(if got_mask.intersects(want_mask) {
+                Some(stx.stx_mnt_id)
+            } else {
+                None
+            })
+        }
         Err(err) => match err.root_cause().raw_os_error() {
             // We have to handle STATX_MNT_ID not being supported on pre-5.8
             // kernels, so treat an ENOSYS or EINVAL the same so that we can

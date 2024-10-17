@@ -38,7 +38,7 @@
 
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
-    flags::ResolverFlags,
+    flags::{OpenFlags, ResolverFlags},
     procfs::GLOBAL_PROCFS_HANDLE,
     resolvers::{opath::SymlinkStack, PartialLookup, MAX_SYMLINK_TRAVERSALS},
     syscalls,
@@ -262,15 +262,19 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
 
         // Get our next element.
         // MSRV(1.69): Remove &*.
-        match syscalls::openat(&*current, &part, libc::O_PATH | libc::O_NOFOLLOW, 0).map_err(
-            |err| {
-                ErrorImpl::RawOsError {
-                    operation: "open next component of resolution".into(),
-                    source: err,
-                }
-                .into()
-            },
-        ) {
+        match syscalls::openat(
+            &*current,
+            &part,
+            OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW,
+            0,
+        )
+        .map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "open next component of resolution".into(),
+                source: err,
+            }
+            .into()
+        }) {
             Err(err) => {
                 return Ok(PartialLookup::Partial {
                     handle: current,

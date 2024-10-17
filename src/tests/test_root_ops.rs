@@ -436,8 +436,11 @@ mod utils {
     };
 
     use anyhow::Error;
-    use libc::mode_t;
     use pretty_assertions::{assert_eq, assert_ne};
+    use rustix::{
+        fs::{Mode, RawMode},
+        process as rustix_process,
+    };
 
     fn root_roundtrip<R: RootImpl>(root: R) -> Result<R::Cloned, Error> {
         let root_clone = root.try_clone()?;
@@ -455,12 +458,12 @@ mod utils {
         root: R,
         path: P,
         inode_type: InodeType,
-        expected_result: Result<(&str, mode_t), ErrorKind>,
+        expected_result: Result<(&str, RawMode), ErrorKind>,
     ) -> Result<(), Error> {
         let path = path.as_ref();
         // Just clear the umask so all of the tests can use all of the
         // permission bits.
-        let _ = unsafe { libc::umask(0) };
+        let _ = rustix_process::umask(Mode::empty());
 
         // Update the expected path to have the rootdir as a prefix.
         let root_dir = root.as_fd().as_unsafe_path_unchecked()?;
@@ -528,7 +531,7 @@ mod utils {
         let path = path.as_ref();
         // Just clear the umask so all of the tests can use all of the
         // permission bits.
-        let _ = unsafe { libc::umask(0) };
+        let _ = rustix_process::umask(Mode::empty());
 
         // Get a handle to the original path if it existed beforehand.
         let pre_create_handle = root.resolve_nofollow(path); // do not unwrap
