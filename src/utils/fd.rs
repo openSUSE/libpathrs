@@ -43,13 +43,14 @@ impl Metadata {
     }
 }
 
+#[allow(clippy::useless_conversion)] // 32-bit arches
 impl MetadataExt for Metadata {
     fn dev(&self) -> u64 {
-        self.0.st_dev
+        self.0.st_dev.into()
     }
 
     fn ino(&self) -> u64 {
-        self.0.st_ino
+        self.0.st_ino.into()
     }
 
     fn mode(&self) -> u32 {
@@ -57,7 +58,7 @@ impl MetadataExt for Metadata {
     }
 
     fn nlink(&self) -> u64 {
-        self.0.st_nlink
+        self.0.st_nlink.into()
     }
 
     fn uid(&self) -> u32 {
@@ -69,7 +70,7 @@ impl MetadataExt for Metadata {
     }
 
     fn rdev(&self) -> u64 {
-        self.0.st_rdev
+        self.0.st_rdev.into()
     }
 
     fn size(&self) -> u64 {
@@ -174,9 +175,9 @@ fn proc_subpath<Fd: AsRawFd>(fd: Fd) -> Result<String, Error> {
 /// [kcommit-a481f4d91783]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a481f4d917835cad86701fc0d1e620c74bb5cd5f
 // TODO: Remove the explicit size once generic_arg_infer is stable.
 //       <https://github.com/rust-lang/rust/issues/85077>
-const DANGEROUS_FILESYSTEMS: [i64; 2] = [
-    libc::PROC_SUPER_MAGIC, // procfs
-    0x5a3c_69f0,            // apparmorfs
+const DANGEROUS_FILESYSTEMS: [rustix_fs::FsWord; 2] = [
+    rustix_fs::PROC_SUPER_MAGIC, // procfs
+    0x5a3c_69f0,                 // apparmorfs
 ];
 
 impl<Fd: AsFd> FdExt for Fd {
