@@ -30,8 +30,8 @@ target/debug: $(SRC_FILES)
 	# For some reason, --crate-types needs separate invocations. We can't use
 	# #![crate_type] unfortunately, as using it with #![cfg_attr] has been
 	# deprecated. <https://github.com/rust-lang/rust/issues/91632>
-	$(CARGO) $(CARGO_FLAGS) rustc --crate-type=cdylib    $(RUSTC_FLAGS)
-	$(CARGO) $(CARGO_FLAGS) rustc --crate-type=staticlib $(RUSTC_FLAGS)
+	$(CARGO) rustc $(CARGO_FLAGS) --crate-type=cdylib    $(RUSTC_FLAGS)
+	$(CARGO) rustc $(CARGO_FLAGS) --crate-type=staticlib $(RUSTC_FLAGS)
 
 .PHONY: release
 release: target/release
@@ -40,8 +40,8 @@ target/release: $(SRC_FILES)
 	# For some reason, --crate-types needs separate invocations. We can't use
 	# #![crate_type] unfortunately, as using it with #![cfg_attr] has been
 	# deprecated. <https://github.com/rust-lang/rust/issues/91632>
-	$(CARGO) $(CARGO_FLAGS) rustc --release --crate-type=cdylib    $(RUSTC_FLAGS)
-	$(CARGO) $(CARGO_FLAGS) rustc --release --crate-type=staticlib $(RUSTC_FLAGS)
+	$(CARGO) rustc $(CARGO_FLAGS) --release --crate-type=cdylib    $(RUSTC_FLAGS)
+	$(CARGO) rustc $(CARGO_FLAGS) --release --crate-type=staticlib $(RUSTC_FLAGS)
 
 .PHONY: smoke-test
 smoke-test:
@@ -58,7 +58,7 @@ lint: lint-rust
 lint-rust:
 	$(CARGO_NIGHTLY) fmt --all -- --check
 	$(CARGO) clippy --all-features --all-targets
-	$(CARGO) check --all-features --all-targets
+	$(CARGO) check $(CARGO_FLAGS) --all-features --all-targets
 
 .PHONY: test-rust-doctest
 test-rust-doctest:

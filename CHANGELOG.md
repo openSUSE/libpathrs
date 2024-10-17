@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a
   raw `WrappedFd` (os opposed to `Root.creat` which returns an `os.fdopen`).
 
+### Fixes ###
+- multiarch: we now build correctly on 32-bit architectures as well as
+  architectures that have unsigned char. We also have CI jobs that verify that
+  builds work on a fairly large number of architectures (all relevant tier-1
+  and tier-2-with-host-tools architectures). If there is an architecture you
+  would like us to add to the build matrix and it is well-supported by `rustc`,
+  feel free to open an issue or PR!
+
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how
   much code we have for wrapper raw syscalls. This also lets us build on
