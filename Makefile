@@ -20,7 +20,7 @@ CARGO_NIGHTLY ?= cargo +nightly
 RUSTC_FLAGS := --features=capi -- -C panic=abort
 CARGO_FLAGS ?=
 
-SRC_FILES = $(shell find . -name '*.rs')
+SRC_FILES = $(wildcard Cargo.*) $(shell find . -name '*.rs')
 
 .DEFAULT: debug
 .PHONY: debug
