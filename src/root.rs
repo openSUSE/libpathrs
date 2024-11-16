@@ -289,6 +289,40 @@ impl Root {
         self.as_ref().resolve_nofollow(path)
     }
 
+    /// Open a path without creating an intermediate [`Handle`] object.
+    ///
+    /// This is effectively just shorthand for [`resolve`] followed by
+    /// [`Handle::reopen`]. However, some resolvers (such as the `openat2`
+    /// resolver) can implement [`open_subpath`] slightly more efficiently than
+    /// naively doing a two-step open operation with [`Handle::reopen`]. If you
+    /// wish to create an [`OpenFlags::O_PATH`] file handle, it probably makes
+    /// more sense to use [`resolve`] or [`resolve_nofollow`].
+    ///
+    /// If `flags` contains [`OpenFlags::O_NOFOLLOW`] and the path refers to a
+    /// symlink then this method will match the behaviour of [`openat2`] (this
+    /// is in contrast to [`Handle::reopen`] which does not permit re-opening a
+    /// handle to a symlink):
+    ///
+    ///  * If `flags` also contains [`OpenFlags::O_PATH`] then the returned file
+    ///    is equivalent to the [`Handle`] that would've been returned from
+    ///    [`resolve_nofollow`].
+    ///  * Otherwise, an error will be returned to match the behaviour of
+    ///    [`OpenFlags::O_NOFOLLOW`] when encountering a trailing symlink.
+    ///
+    /// [`openat2`]: https://man7.org/linux/man-pages/man2/openat2.2.html
+    /// [`open_subpath`]: Self::open_subpath
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
+    #[doc(alias = "pathrs_inroot_open")]
+    #[inline]
+    pub fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Error> {
+        self.as_ref().open_subpath(path, flags)
+    }
+
     /// Get the target of a symlink within a [`Root`].
     ///
     /// **NOTE**: The returned path is not modified to be "safe" outside of the
@@ -677,6 +711,40 @@ impl RootRef<'_> {
     #[inline]
     pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.resolver.resolve(self, path, true)
+    }
+
+    /// Open a path without creating an intermediate [`Handle`] object.
+    ///
+    /// This is effectively just shorthand for [`resolve`] followed by
+    /// [`Handle::reopen`]. However, some resolvers (such as the `openat2`
+    /// resolver) can implement [`open_subpath`] slightly more efficiently than
+    /// naively doing a two-step open operation with [`Handle::reopen`]. If you
+    /// wish to create an [`OpenFlags::O_PATH`] file handle, it probably makes
+    /// more sense to use [`resolve`] or [`resolve_nofollow`].
+    ///
+    /// If `flags` contains [`OpenFlags::O_NOFOLLOW`] and the path refers to a
+    /// symlink then this method will match the behaviour of [`openat2`] (this
+    /// is in contrast to [`Handle::reopen`] which does not permit re-opening a
+    /// handle to a symlink):
+    ///
+    ///  * If `flags` also contains [`OpenFlags::O_PATH`] then the returned file
+    ///    is equivalent to the [`Handle`] that would've been returned from
+    ///    [`resolve_nofollow`].
+    ///  * Otherwise, an error will be returned to match the behaviour of
+    ///    [`OpenFlags::O_NOFOLLOW`] when encountering a trailing symlink.
+    ///
+    /// [`openat2`]: https://man7.org/linux/man-pages/man2/openat2.2.html
+    /// [`open_subpath`]: Self::open_subpath
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
+    #[doc(alias = "pathrs_inroot_open")]
+    #[inline]
+    pub fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Error> {
+        self.resolver.open(self, path, flags)
     }
 
     // Used in operations where we need to get a handle to the parent directory.

@@ -22,12 +22,16 @@
 //! Resolver implementations for libpathrs.
 
 use crate::{
-    error::{Error, ErrorKind},
-    flags::ResolverFlags,
-    syscalls, Handle,
+    error::{Error, ErrorImpl, ErrorKind},
+    flags::{OpenFlags, ResolverFlags},
+    syscalls,
+    utils::FdExt,
+    Handle,
 };
 
 use std::{
+    fs::File,
+    io::Error as IOError,
     os::unix::io::{AsFd, OwnedFd},
     path::{Path, PathBuf},
     rc::Rc,
@@ -202,7 +206,68 @@ impl From<PartialLookup<Rc<OwnedFd>>> for PartialLookup<Handle> {
 }
 
 impl Resolver {
-    /// Internal dispatcher to the relevant backend.
+    pub(crate) fn open<Fd: AsFd, P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        root: Fd,
+        path: P,
+        flags: F,
+    ) -> Result<File, Error> {
+        let flags = flags.into();
+
+        // O_CREAT cannot be emulated by the O_PATH resolver (and in the
+        // fallback case the flag gets silently ignored unless you also set
+        // O_EXCL) so we need to explicitly return an error if it is provided.
+        if flags.intersects(OpenFlags::O_CREAT | OpenFlags::O_EXCL) {
+            Err(ErrorImpl::InvalidArgument {
+                name: "oflags".into(),
+                description: "open flags to one-shot open cannot contain O_CREAT or O_EXCL".into(),
+            })?
+        }
+
+        match self.backend {
+            // For backends without an accelerated one-shot open()
+            // implementation, we can just do the lookup+reopen thing in one go.
+            // For cffi users, this makes plain "open" operations faster.
+            _ => {
+                let handle = self.resolve(root, path, flags.contains(OpenFlags::O_NOFOLLOW))?;
+
+                // O_NOFOLLOW makes things a little tricky. Unlike
+                // FdExt::reopen, we have to support O_NOFOLLOW|O_PATH of
+                // symlinks, but that is easily emulated by returning the handle
+                // directly without a reopen.
+                if handle.metadata()?.is_symlink() {
+                    // If the user also asked for O_DIRECTORY, make sure we
+                    // return the right error.
+                    if flags.contains(OpenFlags::O_DIRECTORY) {
+                        Err(ErrorImpl::OsError {
+                            operation: "emulated openat2".into(),
+                            source: IOError::from_raw_os_error(libc::ENOTDIR),
+                        })?;
+                    }
+
+                    // If the user requested O_PATH|O_NOFOLLOW, then the only
+                    // option we have is to return the handle we got. Without
+                    // O_EMPTYPATH there is no easy way to apply any extra flags
+                    // a user might've requested.
+                    // TODO: Should we error out if the user asks for extra
+                    // flags that don't match the flags for our handles?
+                    if flags.contains(OpenFlags::O_PATH) {
+                        return Ok(OwnedFd::from(handle).into());
+                    }
+
+                    // Otherwise, the user asked for O_NOFOLLOW and we saw a
+                    // symlink, so return ELOOP like openat2 would.
+                    Err(ErrorImpl::OsError {
+                        operation: "emulated openat2".into(),
+                        source: IOError::from_raw_os_error(libc::ELOOP),
+                    })?;
+                }
+
+                handle.reopen(flags)
+            }
+        }
+    }
+
     #[inline]
     pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
         &self,

@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added ###
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a
   raw `WrappedFd` (os opposed to `Root.creat` which returns an `os.fdopen`).
+- Root: it is now possible to open a file in one shot without having to do an
+  intermediate `resolve` step with `Root::open_subpath`. This can be more
+  efficient in some scenarios (especially with the openat2-based resolver or
+  for C FFI users where function calls are expensive) as it saves one file
+  descriptor allocation and extra function calls.
 
 ### Fixes ###
 - multiarch: we now build correctly on 32-bit architectures as well as
