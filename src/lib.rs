@@ -151,10 +151,6 @@
 // <https://github.com/rust-lang/rust/issues/84605>
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
-#[macro_use]
-extern crate bitflags;
-extern crate libc;
-
 // `Handle` implementation.
 mod handle;
 #[doc(inline)]

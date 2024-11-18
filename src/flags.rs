@@ -23,6 +23,8 @@
 
 use crate::syscalls;
 
+use bitflags::bitflags;
+
 bitflags! {
     /// Wrapper for the underlying `libc`'s `O_*` flags.
     ///
