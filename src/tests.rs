@@ -17,11 +17,48 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-pub(crate) mod common;
+pub(crate) mod common {
+    mod root;
+    pub(crate) use root::*;
+
+    mod mntns;
+    pub(in crate::tests) use mntns::*;
+
+    mod handle;
+    pub(in crate::tests) use handle::*;
+}
 
 #[cfg(feature = "capi")]
-pub(in crate::tests) mod capi;
-pub(in crate::tests) mod traits;
+#[allow(unsafe_code)]
+pub(in crate::tests) mod capi {
+    mod utils;
+
+    mod root;
+    pub(in crate::tests) use root::*;
+
+    mod handle;
+    pub(in crate::tests) use handle::*;
+
+    mod procfs;
+    pub(in crate::tests) use procfs::*;
+}
+
+pub(in crate::tests) mod traits {
+    // TODO: Unless we can figure out a way to get Deref working, we might want
+    // to have these traits be included in the actual library...
+
+    mod root;
+    pub(in crate::tests) use root::*;
+
+    mod handle;
+    pub(in crate::tests) use handle::*;
+
+    mod procfs;
+    pub(in crate::tests) use procfs::*;
+
+    mod error;
+    pub(in crate::tests) use error::*;
+}
 
 mod test_procfs;
 mod test_resolve;
