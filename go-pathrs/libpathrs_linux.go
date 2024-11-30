@@ -53,11 +53,11 @@ func fetchError(errID C.int) error {
 	return err
 }
 
-func pathrsRootOpen(path string) (uintptr, error) {
+func pathrsOpenRoot(path string) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	fd := C.pathrs_root_open(cPath)
+	fd := C.pathrs_open_root(cPath)
 	return uintptr(fd), fetchError(fd)
 }
 

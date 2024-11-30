@@ -73,7 +73,7 @@
 //!         handle = -EBADF,
 //!         fd = -EBADF;
 //!
-//!     root = pathrs_root_open(root_path);
+//!     root = pathrs_open_root(root_path);
 //!     if (root < 0) {
 //!         liberr = root;
 //!         goto err;

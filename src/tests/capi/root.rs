@@ -49,7 +49,7 @@ impl CapiRoot {
     pub(in crate::tests) fn open<P: AsRef<Path>>(path: P) -> Result<Self, CapiError> {
         let path = capi_utils::path_to_cstring(path);
 
-        capi_utils::call_capi_fd(|| unsafe { capi::core::pathrs_root_open(path.as_ptr()) })
+        capi_utils::call_capi_fd(|| unsafe { capi::core::pathrs_open_root(path.as_ptr()) })
             .map(Self::from_fd)
     }
 

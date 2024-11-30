@@ -153,7 +153,7 @@ impl Root {
     /// `path` must be an existing directory, and must (at the moment) be a
     /// fully-resolved pathname with no symlink components. This restriction
     /// might be relaxed in the future.
-    #[doc(alias = "pathrs_root_open")]
+    #[doc(alias = "pathrs_open_root")]
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = syscalls::openat(
             syscalls::AT_FDCWD,

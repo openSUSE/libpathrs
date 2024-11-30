@@ -57,7 +57,7 @@ use libc::{c_char, c_int, c_uint, dev_t, size_t};
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
+pub unsafe extern "C" fn pathrs_open_root(path: *const c_char) -> RawFd {
     unsafe { utils::parse_path(path) } // SAFETY: C caller says path is safe.
         .and_then(Root::open)
         .into_c_return()

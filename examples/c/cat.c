@@ -53,7 +53,7 @@ int open_in_root(const char *root_path, const char *unsafe_path)
 	int rootfd = -EBADF, handlefd = -EBADF;
 	int fd = -EBADF;
 
-	rootfd = pathrs_root_open(root_path);
+	rootfd = pathrs_open_root(root_path);
 	if (rootfd < 0) {
 		liberr = rootfd;
 		goto err;

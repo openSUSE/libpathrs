@@ -508,7 +508,7 @@ class Root(WrappedFd):
         """
         if isinstance(file_or_path, str):
             path = _cstr(file_or_path)
-            fd = libpathrs_so.pathrs_root_open(path)
+            fd = libpathrs_so.pathrs_open_root(path)
             if fd < 0:
                 raise Error._fetch(fd) or INTERNAL_ERROR
             file: FileLike = fd

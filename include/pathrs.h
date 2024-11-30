@@ -106,7 +106,7 @@ typedef struct __CBINDGEN_ALIGNED(8) {
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_root_open(const char *path);
+int pathrs_open_root(const char *path);
 
 /**
  * "Upgrade" an O_PATH file descriptor to a usable fd, suitable for reading and

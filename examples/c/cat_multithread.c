@@ -127,7 +127,7 @@ int main(int argc, char **argv)
 	root_path = argv[1];
 	path = argv[2];
 
-	rootfd = pathrs_root_open(root_path);
+	rootfd = pathrs_open_root(root_path);
 	if (rootfd < 0) {
 		liberr = rootfd;
 		goto err;

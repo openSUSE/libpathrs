@@ -40,7 +40,7 @@ type Root struct {
 
 // OpenRoot creates a new Root handle to the directory at the given path.
 func OpenRoot(path string) (*Root, error) {
-	fd, err := pathrsRootOpen(path)
+	fd, err := pathrsOpenRoot(path)
 	if err != nil {
 		return nil, err
 	}
