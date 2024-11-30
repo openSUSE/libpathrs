@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - python bindings: `Root.creat` has had its `filemode` and `flags` arguments
   swapped to match the argument order of `openat2` (and `Root.creat_raw`). This
   also now makes `filemode` have a default value of `0o644` if unspecified.
+- Most of the C FFI functions have been renamed:
+  - Operations on a `Root` have been renamed to have a `pathrs_inroot_` prefix.
 
 ### Added ###
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a

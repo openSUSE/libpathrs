@@ -99,7 +99,7 @@ typedef struct __CBINDGEN_ALIGNED(8) {
  * # Return Value
  *
  * On success, this function returns a file descriptor that can be used as a
- * root handle in subsequent pathrs_* operations.
+ * root handle in subsequent pathrs_inroot_* operations.
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
@@ -115,7 +115,7 @@ int pathrs_root_open(const char *path);
  *
  * It should be noted that the use of O_CREAT *is not* supported (and will
  * result in an error). Handles only refer to *existing* files. Instead you
- * need to use pathrs_creat().
+ * need to use pathrs_inroot_creat().
  *
  * In addition, O_NOCTTY is automatically set when opening the path. If you
  * want to use the path as a controlling terminal, you will have to do
@@ -138,7 +138,7 @@ int pathrs_reopen(int fd, int flags);
  *
  * All symlinks (including trailing symlinks) are followed, but they are
  * resolved within the rootfs. If you wish to open a handle to the symlink
- * itself, use pathrs_resolve_nofollow().
+ * itself, use pathrs_inroot_resolve_nofollow().
  *
  * # Return Value
  *
@@ -150,13 +150,14 @@ int pathrs_reopen(int fd, int flags);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_resolve(int root_fd, const char *path);
+int pathrs_inroot_resolve(int root_fd, const char *path);
 
 /**
- * pathrs_resolve_nofollow() is effectively an O_NOFOLLOW version of
- * pathrs_resolve(). Their behaviour is identical, except that *trailing*
- * symlinks will not be followed. If the final component is a trailing symlink,
- * an O_PATH|O_NOFOLLOW handle to the symlink itself is returned.
+ * pathrs_inroot_resolve_nofollow() is effectively an O_NOFOLLOW version of
+ * pathrs_inroot_resolve(). Their behaviour is identical, except that
+ * *trailing* symlinks will not be followed. If the final component is a
+ * trailing symlink, an O_PATH|O_NOFOLLOW handle to the symlink itself is
+ * returned.
  *
  * # Return Value
  *
@@ -168,19 +169,19 @@ int pathrs_resolve(int root_fd, const char *path);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_resolve_nofollow(int root_fd, const char *path);
+int pathrs_inroot_resolve_nofollow(int root_fd, const char *path);
 
 /**
  * Get the target of a symlink within the rootfs referenced by root_fd.
  *
  * NOTE: The returned path is not modified to be "safe" outside of the
  * root. You should not use this path for doing further path lookups -- use
- * pathrs_resolve() instead.
+ * pathrs_inroot_resolve() instead.
  *
  * This method is just shorthand for:
  *
  * ```c
- * int linkfd = pathrs_resolve_nofollow(rootfd, path);
+ * int linkfd = pathrs_inroot_resolve_nofollow(rootfd, path);
  * if (linkfd < 0) {
  *     liberr = fd; // for use with pathrs_errorinfo()
  *     goto err;
@@ -198,19 +199,19 @@ int pathrs_resolve_nofollow(int root_fd, const char *path);
  * treated as zero-size buffers.
  *
  * NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
- * contain the symlink contents, pathrs_readlink() will return *the number of
- * bytes it would have copied if the buffer was large enough*. This matches the
- * behaviour of pathrs_proc_readlink().
+ * contain the symlink contents, pathrs_inroot_readlink() will return *the
+ * number of bytes it would have copied if the buffer was large enough*. This
+ * matches the behaviour of pathrs_proc_readlink().
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_readlink(int root_fd,
-                    const char *path,
-                    char *linkbuf,
-                    size_t linkbuf_size);
+int pathrs_inroot_readlink(int root_fd,
+                           const char *path,
+                           char *linkbuf,
+                           size_t linkbuf_size);
 
 /**
  * Rename a path within the rootfs referenced by root_fd. The flags argument is
@@ -225,10 +226,10 @@ int pathrs_readlink(int root_fd,
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_rename(int root_fd,
-                  const char *src,
-                  const char *dst,
-                  uint32_t flags);
+int pathrs_inroot_rename(int root_fd,
+                         const char *src,
+                         const char *dst,
+                         uint32_t flags);
 
 /**
  * Remove the empty directory at path within the rootfs referenced by root_fd.
@@ -246,7 +247,7 @@ int pathrs_rename(int root_fd,
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_rmdir(int root_fd, const char *path);
+int pathrs_inroot_rmdir(int root_fd, const char *path);
 
 /**
  * Remove the file (a non-directory inode) at path within the rootfs referenced
@@ -264,7 +265,7 @@ int pathrs_rmdir(int root_fd, const char *path);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_unlink(int root_fd, const char *path);
+int pathrs_inroot_unlink(int root_fd, const char *path);
 
 /**
  * Recursively delete the path and any children it contains if it is a
@@ -279,26 +280,26 @@ int pathrs_unlink(int root_fd, const char *path);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_remove_all(int root_fd, const char *path);
+int pathrs_inroot_remove_all(int root_fd, const char *path);
 
 /**
  * Create a new regular file within the rootfs referenced by root_fd. This is
- * effectively an O_CREAT operation, and so (unlike pathrs_resolve()), this
- * function can be used on non-existent paths.
+ * effectively an O_CREAT operation, and so (unlike pathrs_inroot_resolve()),
+ * this function can be used on non-existent paths.
  *
  * If you want to ensure the creation is a new file, use O_EXCL.
  *
  * If you want to create a file without opening a handle to it, you can do
- * pathrs_mknod(root_fd, path, S_IFREG|mode, 0) instead.
+ * pathrs_inroot_mknod(root_fd, path, S_IFREG|mode, 0) instead.
  *
  * As with pathrs_reopen(), O_NOCTTY is automatically set when opening the
  * path. If you want to use the path as a controlling terminal, you will have
  * to do ioctl(fd, TIOCSCTTY, 0) yourself.
  *
- * NOTE: Unlike O_CREAT, pathrs_creat() will return an error if the final
- * component is a dangling symlink. O_CREAT will create such files, and while
- * openat2 does support this it would be difficult to implement this in the
- * emulated resolver.
+ * NOTE: Unlike O_CREAT, pathrs_inroot_creat() will return an error if the
+ * final component is a dangling symlink. O_CREAT will create such files, and
+ * while openat2 does support this it would be difficult to implement this in
+ * the emulated resolver.
  *
  * # Return Value
  *
@@ -310,12 +311,15 @@ int pathrs_remove_all(int root_fd, const char *path);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_creat(int root_fd, const char *path, int flags, unsigned int mode);
+int pathrs_inroot_creat(int root_fd,
+                        const char *path,
+                        int flags,
+                        unsigned int mode);
 
 /**
  * Create a new directory within the rootfs referenced by root_fd.
  *
- * This is shorthand for pathrs_mknod(root_fd, path, S_IFDIR|mode, 0).
+ * This is shorthand for pathrs_inroot_mknod(root_fd, path, S_IFDIR|mode, 0).
  *
  * # Return Value
  *
@@ -326,7 +330,7 @@ int pathrs_creat(int root_fd, const char *path, int flags, unsigned int mode);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_mkdir(int root_fd, const char *path, unsigned int mode);
+int pathrs_inroot_mkdir(int root_fd, const char *path, unsigned int mode);
 
 /**
  * Create a new directory (and any of its path components if they don't exist)
@@ -342,7 +346,7 @@ int pathrs_mkdir(int root_fd, const char *path, unsigned int mode);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_mkdir_all(int root_fd, const char *path, unsigned int mode);
+int pathrs_inroot_mkdir_all(int root_fd, const char *path, unsigned int mode);
 
 /**
  * Create a inode within the rootfs referenced by root_fd. The type of inode to
@@ -357,7 +361,10 @@ int pathrs_mkdir_all(int root_fd, const char *path, unsigned int mode);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_mknod(int root_fd, const char *path, unsigned int mode, dev_t dev);
+int pathrs_inroot_mknod(int root_fd,
+                        const char *path,
+                        unsigned int mode,
+                        dev_t dev);
 
 /**
  * Create a symlink within the rootfs referenced by root_fd. Note that the
@@ -372,7 +379,7 @@ int pathrs_mknod(int root_fd, const char *path, unsigned int mode, dev_t dev);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_symlink(int root_fd, const char *path, const char *target);
+int pathrs_inroot_symlink(int root_fd, const char *path, const char *target);
 
 /**
  * Create a hardlink within the rootfs referenced by root_fd. Both the hardlink
@@ -387,7 +394,7 @@ int pathrs_symlink(int root_fd, const char *path, const char *target);
  * the system errno(7) value associated with the error, etc), use
  * pathrs_errorinfo().
  */
-int pathrs_hardlink(int root_fd, const char *path, const char *target);
+int pathrs_inroot_hardlink(int root_fd, const char *path, const char *target);
 
 /**
  * Safely open a path inside a `/proc` handle.
@@ -460,7 +467,7 @@ int pathrs_proc_open(pathrs_proc_base_t base, const char *path, int flags);
  * NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
  * contain the symlink contents, pathrs_proc_readlink() will return *the number
  * of bytes it would have copied if the buffer was large enough*. This matches
- * the behaviour of pathrs_readlink().
+ * the behaviour of pathrs_inroot_readlink().
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
@@ -480,7 +487,7 @@ int pathrs_proc_readlink(pathrs_proc_base_t base,
  * that information:
  *
  * ```c
- * fd = pathrs_resolve(root, "/foo/bar");
+ * fd = pathrs_inroot_resolve(root, "/foo/bar");
  * if (fd < 0) {
  *     // fd is an error id
  *     pathrs_error_t *error = pathrs_errorinfo(fd);

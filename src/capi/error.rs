@@ -136,7 +136,7 @@ impl Drop for CError {
 /// that information:
 ///
 /// ```c
-/// fd = pathrs_resolve(root, "/foo/bar");
+/// fd = pathrs_inroot_resolve(root, "/foo/bar");
 /// if (fd < 0) {
 ///     // fd is an error id
 ///     pathrs_error_t *error = pathrs_errorinfo(fd);

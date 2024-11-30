@@ -170,7 +170,7 @@ pub unsafe extern "C" fn pathrs_proc_open(
 /// NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
 /// contain the symlink contents, pathrs_proc_readlink() will return *the number
 /// of bytes it would have copied if the buffer was large enough*. This matches
-/// the behaviour of pathrs_readlink().
+/// the behaviour of pathrs_inroot_readlink().
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,

@@ -59,7 +59,7 @@ int open_in_root(const char *root_path, const char *unsafe_path)
 		goto err;
 	}
 
-	handlefd = pathrs_resolve(rootfd, unsafe_path);
+	handlefd = pathrs_inroot_resolve(rootfd, unsafe_path);
 	if (handlefd < 0) {
 		liberr = handlefd;
 		goto err;

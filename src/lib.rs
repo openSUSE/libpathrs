@@ -79,7 +79,7 @@
 //!         goto err;
 //!     }
 //!
-//!     handle = pathrs_resolve(root, unsafe_path);
+//!     handle = pathrs_inroot_resolve(root, unsafe_path);
 //!     if (handle < 0) {
 //!         liberr = handle;
 //!         goto err;
