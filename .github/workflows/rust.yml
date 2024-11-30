@@ -156,7 +156,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pin the Rust version to avoid Rust updates breaking our clippy lints.
+      - uses: dtolnay/rust-toolchain@1.83
         with:
           components: clippy
       - run: cargo clippy --all-features --all-targets
