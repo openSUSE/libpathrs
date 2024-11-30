@@ -212,9 +212,9 @@ impl From<PartialLookup<Rc<OwnedFd>>> for PartialLookup<Handle> {
 impl Resolver {
     /// Internal dispatcher to the relevant backend.
     #[inline]
-    pub(crate) fn resolve<F: AsFd, P: AsRef<Path>>(
+    pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
         &self,
-        root: F,
+        root: Fd,
         path: P,
         no_follow_trailing: bool,
     ) -> Result<Handle, Error> {
@@ -229,9 +229,9 @@ impl Resolver {
     }
 
     #[inline]
-    pub(crate) fn resolve_partial<F: AsFd, P: AsRef<Path>>(
+    pub(crate) fn resolve_partial<Fd: AsFd, P: AsRef<Path>>(
         &self,
-        root: F,
+        root: Fd,
         path: P,
         no_follow_trailing: bool,
     ) -> Result<PartialLookup<Handle>, Error> {

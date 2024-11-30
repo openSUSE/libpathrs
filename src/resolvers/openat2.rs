@@ -32,8 +32,8 @@ use std::{
 };
 
 /// Resolve `path` within `root` through `openat2(2)`.
-pub(crate) fn resolve<F: AsFd, P: AsRef<Path>>(
-    root: F,
+pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
+    root: Fd,
     path: P,
     rflags: ResolverFlags,
     no_follow_trailing: bool,
@@ -89,8 +89,8 @@ pub(crate) fn resolve<F: AsFd, P: AsRef<Path>>(
 
 /// Resolve as many components as possible in `path` within `root` using
 /// `openat2(2)`.
-pub(crate) fn resolve_partial<F: AsFd>(
-    root: F,
+pub(crate) fn resolve_partial<Fd: AsFd>(
+    root: Fd,
     path: &Path,
     rflags: ResolverFlags,
     no_follow_trailing: bool,
