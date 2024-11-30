@@ -37,6 +37,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use bitflags::bitflags;
 use once_cell::sync::Lazy;
 use rustix::{
     fs::{

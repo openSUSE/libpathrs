@@ -24,10 +24,7 @@ use crate::{
     procfs::{ProcfsBase, GLOBAL_PROCFS_HANDLE},
 };
 
-use std::{
-    convert::TryFrom,
-    os::unix::io::{OwnedFd, RawFd},
-};
+use std::os::unix::io::{OwnedFd, RawFd};
 
 use libc::{c_char, c_int, size_t};
 use open_enum::open_enum;

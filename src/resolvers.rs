@@ -36,9 +36,17 @@ use std::{
 use once_cell::sync::Lazy;
 
 /// `O_PATH`-based userspace resolver.
-pub(crate) mod opath;
+pub(crate) mod opath {
+    mod r#impl;
+    pub(crate) use r#impl::*;
+
+    mod symlink_stack;
+    pub(crate) use symlink_stack::{SymlinkStack, SymlinkStackError};
+}
+
 /// `openat2(2)`-based in-kernel resolver.
 pub(crate) mod openat2;
+
 /// A limited resolver only used for `/proc` lookups in `ProcfsHandle`.
 pub(crate) mod procfs;
 
