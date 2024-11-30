@@ -82,6 +82,14 @@ func pathrsInRootResolveNoFollow(rootFd uintptr, path string) (uintptr, error) {
 	return uintptr(fd), fetchError(fd)
 }
 
+func pathrsInRootOpen(rootFd uintptr, path string, flags int) (uintptr, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	fd := C.pathrs_inroot_open(C.int(rootFd), cPath, C.int(flags))
+	return uintptr(fd), fetchError(fd)
+}
+
 func pathrsInRootReadlink(rootFd uintptr, path string) (string, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))

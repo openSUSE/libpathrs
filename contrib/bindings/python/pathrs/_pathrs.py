@@ -518,11 +518,6 @@ class Root(WrappedFd):
         # XXX: Is this necessary?
         super().__init__(file)
 
-    @classmethod
-    def open(cls, path: str, /) -> Self:
-        "Identical to Root(path)."
-        return cls(path)
-
     def resolve(self, path: str, /, *, follow_trailing: bool = True) -> Handle:
         """
         Resolve the given path inside the Root and return a Handle.
@@ -541,6 +536,54 @@ class Root(WrappedFd):
         if fd < 0:
             raise Error._fetch(fd) or INTERNAL_ERROR
         return Handle(fd)
+
+    def open(
+        self,
+        path: str,
+        mode: str = "r",
+        /,
+        *,
+        follow_trailing: bool = True,
+        extra_flags: int = 0,
+    ) -> IO[Any]:
+        """
+        Resolve and open a path inside the Root and return an os.fdopen() file
+        handle.
+
+        This is effectively shorthand for Root.resolve(path).reopen(...), but
+        for the openat2-based resolver this is slightly more efficient if you
+        just want to open a file and don't need to do multiple reopens of the
+        Handle.
+
+        mode is a Python mode string, and extra_flags can be used to indicate
+        extra O_* flags you wish to pass to the open operation.
+
+        follow_trailing has the same behaviour as Root.resolve(), and is
+        equivalent to passing os.O_NOFOLLOW to extra_flags.
+        """
+        flags = _convert_mode(mode) | extra_flags
+        if not follow_trailing:
+            flags |= os.O_NOFOLLOW
+        with self.open_raw(path, flags) as file:
+            return file.fdopen(mode)
+
+    def open_raw(self, path: str, flags: int, /) -> WrappedFd:
+        """
+        Resolve and open a path inside the Root and return a WrappedFd file
+        handle.
+
+        This is effectively shorthand for Root.resolve(path).reopen_raw(flags),
+        but for the openat2-based resolver this is slightly more efficient if
+        you just want to open a file and don't need to do multiple reopens of
+        the Handle.
+
+        If flags contains os.O_NOFOLLOW, then the resolution is done as if you
+        passed follow_trailing=False to Root.resolve().
+        """
+        fd = libpathrs_so.pathrs_inroot_open(self.fileno(), _cstr(path), flags)
+        if fd < 0:
+            raise Error._fetch(fd) or INTERNAL_ERROR
+        return WrappedFd(fd)
 
     def readlink(self, path: str, /) -> str:
         """

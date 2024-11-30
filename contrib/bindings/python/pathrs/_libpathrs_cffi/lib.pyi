@@ -53,6 +53,9 @@ def pathrs_inroot_resolve(rootfd: RawFd, path: CString) -> Union[RawFd, ErrorId]
 def pathrs_inroot_resolve_nofollow(
     rootfd: RawFd, path: CString
 ) -> Union[RawFd, ErrorId]: ...
+def pathrs_inroot_open(
+    rootfd: RawFd, path: CString, flags: int
+) -> Union[RawFd, ErrorId]: ...
 def pathrs_inroot_creat(
     rootfd: RawFd, path: CString, flags: int, filemode: int
 ) -> Union[RawFd, ErrorId]: ...

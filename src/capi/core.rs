@@ -161,6 +161,44 @@ pub unsafe extern "C" fn pathrs_inroot_resolve_nofollow(
     .into_c_return()
 }
 
+/// pathrs_inroot_open() is effectively shorthand for pathrs_inroot_resolve()
+/// followed by pathrs_reopen(). If you only need to open a path and don't care
+/// about re-opening it later, this can be slightly more efficient than the
+/// alternative for the openat2-based resolver as it doesn't require allocating
+/// an extra file descriptor. For languages where C FFI is expensive (such as
+/// Go), using this also saves a function call.
+///
+/// If flags contains O_NOFOLLOW, the behaviour is like that of
+/// pathrs_inroot_resolve_nofollow() followed by pathrs_reopen().
+///
+/// In addition, O_NOCTTY is automatically set when opening the path. If you
+/// want to use the path as a controlling terminal, you will have to do
+/// ioctl(fd, TIOCSCTTY, 0) yourself.
+///
+/// # Return Value
+///
+/// On success, this function returns a file descriptor.
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub unsafe extern "C" fn pathrs_inroot_open(
+    root_fd: CBorrowedFd<'_>,
+    path: *const c_char,
+    flags: c_int,
+) -> RawFd {
+    || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
+        let root = RootRef::from_fd(root_fd);
+        let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
+        let flags = OpenFlags::from_bits_retain(flags);
+        root.open_subpath(path, flags)
+    }()
+    .into_c_return()
+}
+
 /// Get the target of a symlink within the rootfs referenced by root_fd.
 ///
 /// NOTE: The returned path is not modified to be "safe" outside of the

@@ -172,6 +172,32 @@ int pathrs_inroot_resolve(int root_fd, const char *path);
 int pathrs_inroot_resolve_nofollow(int root_fd, const char *path);
 
 /**
+ * pathrs_inroot_open() is effectively shorthand for pathrs_inroot_resolve()
+ * followed by pathrs_reopen(). If you only need to open a path and don't care
+ * about re-opening it later, this can be slightly more efficient than the
+ * alternative for the openat2-based resolver as it doesn't require allocating
+ * an extra file descriptor. For languages where C FFI is expensive (such as
+ * Go), using this also saves a function call.
+ *
+ * If flags contains O_NOFOLLOW, the behaviour is like that of
+ * pathrs_inroot_resolve_nofollow() followed by pathrs_reopen().
+ *
+ * In addition, O_NOCTTY is automatically set when opening the path. If you
+ * want to use the path as a controlling terminal, you will have to do
+ * ioctl(fd, TIOCSCTTY, 0) yourself.
+ *
+ * # Return Value
+ *
+ * On success, this function returns a file descriptor.
+ *
+ * If an error occurs, this function will return a negative error code. To
+ * retrieve information about the error (such as a string describing the error,
+ * the system errno(7) value associated with the error, etc), use
+ * pathrs_errorinfo().
+ */
+int pathrs_inroot_open(int root_fd, const char *path, int flags);
+
+/**
  * Get the target of a symlink within the rootfs referenced by root_fd.
  *
  * NOTE: The returned path is not modified to be "safe" outside of the

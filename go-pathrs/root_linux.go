@@ -103,6 +103,33 @@ func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
 	})
 }
 
+// Open is effectively shorthand for Resolve followed by Handle.Open, but can
+// be slightly more efficient (it reduces CGo overhead and the number of
+// syscalls used when using the openat2-based resolver) and is arguably more
+// ergonomic to use.
+func (r *Root) Open(path string) (*os.File, error) {
+	return r.OpenFile(path, os.O_RDONLY)
+}
+
+// OpenFile is effectively shorthand for Resolve followed by Handle.OpenFile,
+// but can be slightly more efficient (it reduces CGo overhead and the number
+// of syscalls used when using the openat2-based resolver) and is arguably more
+// ergonomic to use.
+//
+// However, if flags contains os.O_NOFOLLOW and the path is a symlink, then
+// OpenFile's behaviour will match that of openat2. In most cases an error will
+// be returned, but if os.O_PATH is provided along with os.O_NOFOLLOW then a
+// file equivalent to ResolveNoFollow will be returned instead.
+func (r *Root) OpenFile(path string, flags int) (*os.File, error) {
+	return withFileFd(r.inner, func(rootFd uintptr) (*os.File, error) {
+		fd, err := pathrsInRootOpen(rootFd, path, flags)
+		if err != nil {
+			return nil, err
+		}
+		return mkFile(fd)
+	})
+}
+
 // Create creates a file within the Root's directory tree at the given path,
 // and returns a handle to the file. The provided mode is used for the new file
 // (the process's umask applies).
