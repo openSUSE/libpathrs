@@ -136,7 +136,7 @@ impl<'a> Iterator for RawComponents<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for RawComponents<'a> {
+impl DoubleEndedIterator for RawComponents<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         match self.inner {
             None => None,
