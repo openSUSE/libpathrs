@@ -34,7 +34,8 @@ use libc::{c_char, c_int};
 use once_cell::sync::Lazy;
 use rand::{self, Rng};
 
-// TODO: Switch this to using a slab or similar structure, possibly using a less heavy-weight lock?
+// TODO: Switch this to using a slab or similar structure, possibly using a less
+// heavy-weight lock?
 // MSRV(1.80): Use LazyLock.
 static ERROR_MAP: Lazy<Mutex<HashMap<CReturn, Error>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
