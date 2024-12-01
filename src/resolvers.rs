@@ -170,14 +170,6 @@ impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Handle> {
     }
 }
 
-impl TryInto<(Handle, Option<PathBuf>)> for PartialLookup<Rc<OwnedFd>> {
-    type Error = Error;
-
-    fn try_into(self) -> Result<(Handle, Option<PathBuf>), Self::Error> {
-        PartialLookup::<Handle>::from(self).try_into()
-    }
-}
-
 impl From<PartialLookup<Rc<OwnedFd>>> for PartialLookup<Handle> {
     fn from(result: PartialLookup<Rc<OwnedFd>>) -> Self {
         let (rc, partial) = match result {
