@@ -48,6 +48,12 @@ pub(in crate::tests) trait RootImpl: AsFd + std::fmt::Debug + Sized {
 
     fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error>;
 
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error>;
+
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error>;
 
     fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Self::Error>;
@@ -107,6 +113,14 @@ impl RootImpl for Root {
 
     fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
         self.resolve_nofollow(path)
+    }
+
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        self.open_subpath(path, flags)
     }
 
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {
@@ -186,6 +200,14 @@ impl RootImpl for &Root {
         Root::resolve_nofollow(self, path)
     }
 
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        Root::open_subpath(self, path, flags)
+    }
+
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {
         Root::readlink(self, path)
     }
@@ -263,6 +285,14 @@ impl RootImpl for RootRef<'_> {
         self.resolve_nofollow(path)
     }
 
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        self.open_subpath(path, flags)
+    }
+
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {
         self.readlink(path)
     }
@@ -338,6 +368,14 @@ impl RootImpl for &RootRef<'_> {
 
     fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
         RootRef::resolve_nofollow(self, path)
+    }
+
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        RootRef::open_subpath(self, path, flags)
     }
 
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {

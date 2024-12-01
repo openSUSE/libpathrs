@@ -81,6 +81,21 @@ impl CapiRoot {
         .map(CapiHandle::from_fd)
     }
 
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, CapiError> {
+        let root_fd = self.inner.as_fd();
+        let path = capi_utils::path_to_cstring(path);
+        let flags = flags.into();
+
+        capi_utils::call_capi_fd(|| unsafe {
+            capi::core::pathrs_inroot_open(root_fd.into(), path.as_ptr(), flags.bits())
+        })
+        .map(From::from)
+    }
+
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
@@ -269,6 +284,14 @@ impl RootImpl for CapiRoot {
         self.resolve_nofollow(path)
     }
 
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        self.open_subpath(path, flags)
+    }
+
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {
         self.readlink(path)
     }
@@ -346,6 +369,14 @@ impl RootImpl for &CapiRoot {
 
     fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
         CapiRoot::resolve_nofollow(self, path)
+    }
+
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        CapiRoot::open_subpath(self, path, flags)
     }
 
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {

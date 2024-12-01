@@ -194,7 +194,14 @@ pub unsafe extern "C" fn pathrs_inroot_open(
         let root = RootRef::from_fd(root_fd);
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let flags = OpenFlags::from_bits_retain(flags);
-        root.open_subpath(path, flags)
+        root.open_subpath(path, flags).and_then(|file| {
+            // Rust sets O_CLOEXEC by default, without an opt-out. We need
+            // to disable it if we weren't asked to do O_CLOEXEC.
+            if !flags.contains(OpenFlags::O_CLOEXEC) {
+                utils::fcntl_unset_cloexec(&file).wrap("clear O_CLOEXEC on reopened fd")?;
+            }
+            Ok(file)
+        })
     }()
     .into_c_return()
 }
