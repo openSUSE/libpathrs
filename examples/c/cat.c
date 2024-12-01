@@ -50,8 +50,7 @@ void print_error(pathrs_error_t *error)
 int open_in_root(const char *root_path, const char *unsafe_path)
 {
 	int liberr = 0;
-	int rootfd = -EBADF, handlefd = -EBADF;
-	int fd = -EBADF;
+	int rootfd = -EBADF, fd = -EBADF;
 
 	rootfd = pathrs_open_root(root_path);
 	if (rootfd < 0) {
@@ -59,13 +58,7 @@ int open_in_root(const char *root_path, const char *unsafe_path)
 		goto err;
 	}
 
-	handlefd = pathrs_inroot_resolve(rootfd, unsafe_path);
-	if (handlefd < 0) {
-		liberr = handlefd;
-		goto err;
-	}
-
-	fd = pathrs_reopen(handlefd, O_RDONLY);
+	fd = pathrs_inroot_open(rootfd, unsafe_path, O_RDONLY);
 	if (fd < 0) {
 		liberr = fd;
 		goto err;
@@ -73,7 +66,6 @@ int open_in_root(const char *root_path, const char *unsafe_path)
 
 err:
 	close(rootfd);
-	close(handlefd);
 
 	if (liberr < 0) {
 		pathrs_error_t *error = pathrs_errorinfo(liberr);
