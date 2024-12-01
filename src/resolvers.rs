@@ -225,6 +225,9 @@ impl Resolver {
         }
 
         match self.backend {
+            // openat2 can do the lookup and open in one syscall.
+            ResolverBackend::KernelOpenat2 => openat2::open(root, path.as_ref(), self.flags, flags),
+
             // For backends without an accelerated one-shot open()
             // implementation, we can just do the lookup+reopen thing in one go.
             // For cffi users, this makes plain "open" operations faster.
