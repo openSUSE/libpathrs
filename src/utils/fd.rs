@@ -18,7 +18,7 @@
  */
 
 use crate::{
-    error::{Error, ErrorImpl},
+    error::{Error, ErrorExt, ErrorImpl},
     flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
     syscalls,
@@ -26,6 +26,7 @@ use crate::{
 
 use std::{
     fs,
+    io::Error as IOError,
     os::unix::{
         fs::MetadataExt,
         io::{AsFd, AsRawFd, OwnedFd},
@@ -189,11 +190,29 @@ impl<Fd: AsFd> FdExt for Fd {
         Ok(Metadata(stat))
     }
 
-    fn reopen(&self, procfs: &ProcfsHandle, flags: OpenFlags) -> Result<OwnedFd, Error> {
+    fn reopen(&self, procfs: &ProcfsHandle, mut flags: OpenFlags) -> Result<OwnedFd, Error> {
         let fd = self.as_fd();
-        // TODO: We should look into using O_EMPTYPATH if it's available to
-        //       avoid the /proc dependency -- though then again, as_unsafe_path
-        //       necessarily requires /proc.
+
+        // For file descriptors referencing a symlink (i.e. opened with
+        // O_PATH|O_NOFOLLOW) there is no logic behind trying to do a "reopen"
+        // operation, and you just get confusing results because the reopen
+        // itself is done through a symlink. Even with O_EMPTYPATH you probably
+        // wouldn't ever want to re-open it (all you can get is another
+        // O_PATH|O_EMPTYPATH).
+        if self.metadata()?.is_symlink() {
+            Err(Error::from(ErrorImpl::OsError {
+                operation: "reopen".into(),
+                source: IOError::from_raw_os_error(libc::ELOOP),
+            }))
+            .wrap("symlink file handles cannot be reopened")?
+        }
+
+        // Now that we are sure the file descriptor is not a symlink, we can
+        // clear O_NOFOLLOW since it is a no-op (but due to the procfs reopening
+        // implementation, O_NOFOLLOW will cause strange behaviour).
+        flags.remove(OpenFlags::O_NOFOLLOW);
+
+        // TODO: Add support for O_EMPTYPATH once that exists...
         procfs
             .open_follow(ProcfsBase::ProcThreadSelf, proc_subpath(fd)?, flags)
             .map(OwnedFd::from)
