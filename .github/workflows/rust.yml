@@ -158,7 +158,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Pin the Rust version to avoid Rust updates breaking our clippy lints.
-      - uses: dtolnay/rust-toolchain@1.83
+      - uses: dtolnay/rust-toolchain@1.90
         with:
           components: clippy
       - run: cargo clippy --all-features --all-targets
