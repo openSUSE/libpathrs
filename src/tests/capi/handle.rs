@@ -70,9 +70,6 @@ impl HandleImpl for CapiHandle {
     type Cloned = CapiHandle;
     type Error = CapiError;
 
-    // C implementation *DOES NOT* set O_CLOEXEC by default.
-    const FORCED_CLOEXEC: bool = false;
-
     fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
         Self::Cloned::from_fd(fd)
     }
@@ -89,9 +86,6 @@ impl HandleImpl for CapiHandle {
 impl HandleImpl for &CapiHandle {
     type Cloned = CapiHandle;
     type Error = CapiError;
-
-    // C implementation *DOES NOT* set O_CLOEXEC by default.
-    const FORCED_CLOEXEC: bool = false;
 
     fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
         Self::Cloned::from_fd(fd)

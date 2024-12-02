@@ -22,7 +22,7 @@ use crate::{
         ret::IntoCReturn,
         utils::{self, CBorrowedFd},
     },
-    error::{Error, ErrorExt, ErrorImpl},
+    error::{Error, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
     procfs::GLOBAL_PROCFS_HANDLE,
     utils::FdExt,
@@ -50,7 +50,8 @@ use libc::{c_char, c_int, c_uint, dev_t, size_t};
 /// # Return Value
 ///
 /// On success, this function returns a file descriptor that can be used as a
-/// root handle in subsequent pathrs_inroot_* operations.
+/// root handle in subsequent pathrs_inroot_* operations. The file descriptor
+/// will have the `O_CLOEXEC` flag automatically applied.
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
@@ -77,7 +78,8 @@ pub unsafe extern "C" fn pathrs_open_root(path: *const c_char) -> RawFd {
 ///
 /// # Return Value
 ///
-/// On success, this function returns a file descriptor.
+/// On success, this function returns a file descriptor. The file descriptor
+/// will have the `O_CLOEXEC` flag automatically applied.
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
@@ -90,14 +92,6 @@ pub extern "C" fn pathrs_reopen(fd: CBorrowedFd<'_>, flags: c_int) -> RawFd {
     || -> Result<_, Error> {
         fd.try_as_borrowed_fd()?
             .reopen(&GLOBAL_PROCFS_HANDLE, flags)
-            .and_then(|file| {
-                // Rust sets O_CLOEXEC by default, without an opt-out. We need
-                // to disable it if we weren't asked to do O_CLOEXEC.
-                if !flags.contains(OpenFlags::O_CLOEXEC) {
-                    utils::fcntl_unset_cloexec(&file).wrap("clear O_CLOEXEC on reopened fd")?;
-                }
-                Ok(file)
-            })
     }()
     .into_c_return()
 }
@@ -177,7 +171,8 @@ pub unsafe extern "C" fn pathrs_inroot_resolve_nofollow(
 ///
 /// # Return Value
 ///
-/// On success, this function returns a file descriptor.
+/// On success, this function returns a file descriptor. The file descriptor
+/// will have the `O_CLOEXEC` flag automatically applied.
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
@@ -194,14 +189,7 @@ pub unsafe extern "C" fn pathrs_inroot_open(
         let root = RootRef::from_fd(root_fd);
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let flags = OpenFlags::from_bits_retain(flags);
-        root.open_subpath(path, flags).and_then(|file| {
-            // Rust sets O_CLOEXEC by default, without an opt-out. We need
-            // to disable it if we weren't asked to do O_CLOEXEC.
-            if !flags.contains(OpenFlags::O_CLOEXEC) {
-                utils::fcntl_unset_cloexec(&file).wrap("clear O_CLOEXEC on reopened fd")?;
-            }
-            Ok(file)
-        })
+        root.open_subpath(path, flags)
     }()
     .into_c_return()
 }
@@ -399,7 +387,8 @@ pub unsafe extern "C" fn pathrs_inroot_remove_all(
 /// # Return Value
 ///
 /// On success, this function returns a file descriptor to the requested file.
-/// The open flags are based on the provided flags.
+/// The open flags are based on the provided flags. The file descriptor will
+/// have the `O_CLOEXEC` flag automatically applied.
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
@@ -418,15 +407,7 @@ pub unsafe extern "C" fn pathrs_inroot_creat(
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
-        let flags = OpenFlags::from_bits_retain(flags);
-        root.create_file(path, flags, &perm).and_then(|file| {
-            // Rust sets O_CLOEXEC by default, without an opt-out. We need
-            // to disable it if we weren't asked to do O_CLOEXEC.
-            if !flags.contains(OpenFlags::O_CLOEXEC) {
-                utils::fcntl_unset_cloexec(&file).wrap("clear O_CLOEXEC on reopened fd")?;
-            }
-            Ok(file)
-        })
+        root.create_file(path, OpenFlags::from_bits_retain(flags), &perm)
     }()
     .into_c_return()
 }

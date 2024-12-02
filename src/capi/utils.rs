@@ -25,14 +25,13 @@ use std::{
     marker::PhantomData,
     os::unix::{
         ffi::OsStrExt,
-        io::{AsFd, AsRawFd, BorrowedFd, RawFd},
+        io::{AsRawFd, BorrowedFd, RawFd},
     },
     path::Path,
     ptr,
 };
 
 use libc::{c_char, c_int, size_t};
-use rustix::io as rustix_io;
 
 /// Equivalent to [`BorrowedFd`], except that there are no restrictions on what
 /// value the inner [`RawFd`] can take. This is necessary because C callers
@@ -87,30 +86,6 @@ impl<'fd> From<BorrowedFd<'fd>> for CBorrowedFd<'fd> {
 
 // TODO: An AsFd impl would be even nicer but I suspect the lifetimes can't be
 //       expressed.
-
-/// Wrapper for `fcntl(F_GETFD)` followed by `fcntl(F_SETFD)`, clearing the
-/// `FD_CLOEXEC` bit.
-///
-/// This is required because Rust automatically sets `O_CLOEXEC` on all new
-/// files, so we need to manually unset it when we return certain fds to the C
-/// FFI (in fairness, `O_CLOEXEC` is a good default).
-pub(crate) fn fcntl_unset_cloexec<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
-    let fd = fd.as_fd();
-
-    let old = rustix_io::fcntl_getfd(fd).map_err(|err| ErrorImpl::OsError {
-        operation: "fcntl(F_GETFD)".into(),
-        source: err.into(),
-    })?;
-    let new = old.difference(rustix_io::FdFlags::CLOEXEC);
-
-    rustix_io::fcntl_setfd(fd, new).map_err(|err| {
-        ErrorImpl::OsError {
-            operation: "fcntl(F_SETFD)".into(),
-            source: err.into(),
-        }
-        .into()
-    })
-}
 
 pub(crate) unsafe fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Error> {
     if path.is_null() {

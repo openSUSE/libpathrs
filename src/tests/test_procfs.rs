@@ -218,6 +218,12 @@ procfs_tests! {
     // No overmounts.
     nomount: open(self, "attr/current", O_RDONLY) => (error: Ok);
     nomount: open_follow(self, "attr/current", O_RDONLY) => (error: Ok);
+    nomount_dir: open(self, "attr", O_RDONLY) => (error: Ok);
+    nomount_dir: open_follow(self, "attr", O_RDONLY) => (error: Ok);
+    nomount_dir_odir: open(self, "attr", O_DIRECTORY|O_RDONLY) => (error: Ok);
+    nomount_dir_odir: open_follow(self, "attr", O_DIRECTORY|O_RDONLY) => (error: Ok);
+    nomount_dir_trailing_slash: open(self, "attr/", O_RDONLY) => (error: Ok);
+    nomount_dir_trailing_slash: open_follow(self, "attr/", O_RDONLY) => (error: Ok);
     global_nomount: open(ProcfsBase::ProcRoot, "filesystems", O_RDONLY) => (error: Ok);
     global_nomount: readlink(ProcfsBase::ProcRoot, "mounts") => (error: Ok);
     // Procfs regular file overmount.
@@ -242,7 +248,11 @@ procfs_tests! {
     magiclink_fd0: open_follow(self, "fd/0", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
     magiclink_fd0: readlink(self, "fd/0") => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
     // Behaviour-related testing.
+    nondir_odir: open_follow(self, "environ", O_DIRECTORY|O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
+    nondir_trailing_slash: open_follow(self, "environ/", O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
+    proc_cwd_odir: open_follow(self, "cwd", O_DIRECTORY|O_RDONLY) => (error: Ok);
     proc_cwd_trailing_slash: open_follow(self, "cwd/", O_RDONLY) => (error: Ok);
+    proc_fdlink_odir: open_follow(self, "fd//1", O_DIRECTORY|O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
     proc_fdlink_trailing_slash: open_follow(self, "fd//1/", O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
     // TODO: root can always open procfs files with O_RDWR even if writes fail.
     // proc_nowrite: open(self, "status", O_RDWR) => (error: Err(ErrorKind::OsError(Some(libc::EACCES))));
@@ -276,6 +286,7 @@ mod utils {
             common::{self as tests_common, MountType},
             traits::{ErrorImpl, ProcfsHandleImpl},
         },
+        utils,
     };
 
     use anyhow::Error;
@@ -434,9 +445,25 @@ mod utils {
         Proc: ProcfsHandleImpl,
         ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
     {
-        check_func(are_over_mounts_visible, expected, || {
-            proc_fn()?.open(base, path, oflags)
-        })
+        check_func(
+            are_over_mounts_visible,
+            expected,
+            || -> Result<_, Proc::Error> {
+                let oflags = oflags.into();
+                let proc = proc_fn()?;
+
+                let f = proc.open(base, path, oflags)?;
+
+                // Check that the flags are what a user would expect.
+                let mut want_oflags = oflags;
+                // O_NOFOLLOW is always set by open.
+                want_oflags.insert(OpenFlags::O_NOFOLLOW);
+                // O_DIRECTORY is *not* set automatically!
+                tests_common::check_oflags(&f, want_oflags).expect("check oflags");
+
+                Ok(f)
+            },
+        )
     }
 
     pub(super) fn check_proc_open_follow<Proc, ProcFn, P: AsRef<Path>, F: Into<OpenFlags>>(
@@ -451,9 +478,35 @@ mod utils {
         Proc: ProcfsHandleImpl,
         ProcFn: FnOnce() -> Result<Proc, Proc::Error>,
     {
-        check_func(are_over_mounts_visible, expected, || {
-            proc_fn()?.open_follow(base, path, oflags)
-        })
+        check_func(
+            are_over_mounts_visible,
+            expected,
+            || -> Result<_, Proc::Error> {
+                let path = path.as_ref();
+                let oflags = oflags.into();
+                let proc = proc_fn()?;
+
+                let f = proc.open_follow(base, path, oflags)?;
+
+                // Check that the flags are what a user would expect.
+                let mut want_oflags = oflags;
+                let (noslash_path, trailing_slash) = utils::path_strip_trailing_slash(path);
+                // If the target is not a symlink, open_follow will act like
+                // open and will insert O_NOFOLLOW automatically as a protection
+                // mechanism.
+                if proc.readlink(base, noslash_path).is_err() {
+                    want_oflags.insert(OpenFlags::O_NOFOLLOW);
+                }
+                // If the path has a trailing slash then open(_follow) will
+                // insert O_DIRECTORY automatically.
+                if trailing_slash {
+                    want_oflags.insert(OpenFlags::O_DIRECTORY);
+                }
+                tests_common::check_oflags(&f, want_oflags).expect("check oflags");
+
+                Ok(f)
+            },
+        )
     }
 
     pub(super) fn check_proc_readlink<Proc, ProcFn, P: AsRef<Path>>(
