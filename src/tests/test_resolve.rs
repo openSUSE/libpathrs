@@ -506,13 +506,15 @@ mod utils {
     use anyhow::Error;
     use pretty_assertions::assert_eq;
 
-    pub(super) fn check_root_resolve<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_resolve<R, H, P: AsRef<Path>>(
         root: R,
         unsafe_path: P,
         no_follow_trailing: bool,
         expected: Result<LookupResult, ErrorKind>,
     ) -> Result<(), Error>
     where
+        H: HandleImpl,
+        R: RootImpl<Handle = H>,
         for<'a> &'a R::Handle: HandleImpl,
     {
         let root_dir = root.as_unsafe_path_unchecked()?;
@@ -568,6 +570,18 @@ mod utils {
             libc::S_IFDIR => {
                 tests_common::check_reopen(&handle, OpenFlags::O_RDONLY, None)?;
                 tests_common::check_reopen(&handle, OpenFlags::O_DIRECTORY, None)?;
+                // Make sure O_NOFOLLOW acts the way you would expect.
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_RDONLY | OpenFlags::O_NOFOLLOW,
+                    None,
+                )?;
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW,
+                    None,
+                )?;
+                tests_common::check_reopen(&handle, OpenFlags::O_PATH, None)?;
                 // Forcefully set O_CLOEXEC.
                 tests_common::check_reopen(
                     &handle,
@@ -583,6 +597,18 @@ mod utils {
             libc::S_IFREG => {
                 tests_common::check_reopen(&handle, OpenFlags::O_RDWR, None)?;
                 tests_common::check_reopen(&handle, OpenFlags::O_DIRECTORY, Some(libc::ENOTDIR))?;
+                // Make sure O_NOFOLLOW acts the way you would expect.
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_RDONLY | OpenFlags::O_NOFOLLOW,
+                    None,
+                )?;
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW,
+                    None,
+                )?;
+                tests_common::check_reopen(&handle, OpenFlags::O_PATH, None)?;
                 // Forcefully set O_CLOEXEC.
                 tests_common::check_reopen(
                     &handle,
@@ -595,12 +621,46 @@ mod utils {
                     Some(libc::ENOTDIR),
                 )?;
             }
+            libc::S_IFLNK => {
+                assert!(
+                    no_follow_trailing,
+                    "we must only get a symlink handle if no_follow_trailing is set"
+                );
+
+                assert_eq!(
+                    H::reopen(&handle, OpenFlags::O_RDONLY)
+                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
+                        .map_err(|err| err.kind()),
+                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
+                    "reopen(O_RDONLY) of a symlink handle should fail with ELOOP"
+                );
+                assert_eq!(
+                    H::reopen(&handle, OpenFlags::O_PATH)
+                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
+                        .map_err(|err| err.kind()),
+                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
+                    "reopen(O_PATH) of a symlink handle should fail with ELOOP"
+                );
+                assert_eq!(
+                    H::reopen(&handle, OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW)
+                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
+                        .map_err(|err| err.kind()),
+                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
+                    "reopen(O_PATH|O_NOFOLLOW) of a symlink handle should fail with ELOOP"
+                );
+            }
             _ => {
                 tests_common::check_reopen(&handle, OpenFlags::O_PATH, None)?;
                 tests_common::check_reopen(
                     &handle,
                     OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
                     Some(libc::ENOTDIR),
+                )?;
+                // Make sure O_NOFOLLOW acts the way you would expect.
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW,
+                    None,
                 )?;
                 // Forcefully set O_CLOEXEC.
                 tests_common::check_reopen(

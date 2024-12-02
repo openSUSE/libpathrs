@@ -818,6 +818,37 @@ mod utils {
                 tests_common::check_reopen(&handle, OpenFlags::O_RDWR, None)?;
                 tests_common::check_reopen(&handle, OpenFlags::O_DIRECTORY, Some(libc::ENOTDIR))?;
             }
+            libc::S_IFLNK => {
+                assert!(
+                    no_follow_trailing,
+                    "we must only get a symlink handle if no_follow_trailing is set"
+                );
+
+                assert_eq!(
+                    handle
+                        .reopen(OpenFlags::O_RDONLY)
+                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
+                        .map_err(|err| err.kind()),
+                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
+                    "reopen(O_RDONLY) of a symlink handle should fail with ELOOP"
+                );
+                assert_eq!(
+                    handle
+                        .reopen(OpenFlags::O_PATH)
+                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
+                        .map_err(|err| err.kind()),
+                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
+                    "reopen(O_PATH) of a symlink handle should fail with ELOOP"
+                );
+                assert_eq!(
+                    handle
+                        .reopen(OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW)
+                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
+                        .map_err(|err| err.kind()),
+                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
+                    "reopen(O_PATH|O_NOFOLLOW) of a symlink handle should fail with ELOOP"
+                );
+            }
             _ => {
                 tests_common::check_reopen(&handle, OpenFlags::O_PATH, None)?;
                 tests_common::check_reopen(
