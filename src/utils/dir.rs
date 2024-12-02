@@ -127,3 +127,64 @@ pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> 
     // then remove_inode will take care of that).
     remove_inode(dirfd, name).with_wrap(|| format!("deleting emptied directory {name:?}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::remove_all;
+    use crate::{error::ErrorKind, tests::common as tests_common, Root};
+
+    use std::{os::unix::io::OwnedFd, path::Path};
+
+    use anyhow::Error;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn remove_all_basic() -> Result<(), Error> {
+        let dir = tests_common::create_basic_tree()?;
+        let dirfd: OwnedFd = Root::open(&dir)?.into();
+
+        assert_eq!(
+            remove_all(&dirfd, Path::new("a")).map_err(|err| err.kind()),
+            Ok(()),
+            "removeall(root, 'a') should work",
+        );
+        assert_eq!(
+            remove_all(&dirfd, Path::new("b")).map_err(|err| err.kind()),
+            Ok(()),
+            "removeall(root, 'b') should work",
+        );
+        assert_eq!(
+            remove_all(&dirfd, Path::new("c")).map_err(|err| err.kind()),
+            Ok(()),
+            "removeall(root, 'c') should work",
+        );
+
+        let _dir = dir; // make sure the tempdir is not dropped early
+        Ok(())
+    }
+
+    #[test]
+    fn remove_all_slash_path() -> Result<(), Error> {
+        let dir = tests_common::create_basic_tree()?;
+        let dirfd: OwnedFd = Root::open(&dir)?.into();
+
+        assert_eq!(
+            remove_all(&dirfd, Path::new("/")).map_err(|err| err.kind()),
+            Err(ErrorKind::SafetyViolation),
+            "removeall(root, '/') should fail",
+        );
+        assert_eq!(
+            remove_all(&dirfd, Path::new("./a")).map_err(|err| err.kind()),
+            Err(ErrorKind::SafetyViolation),
+            "removeall(root, './a') should fail",
+        );
+        assert_eq!(
+            remove_all(&dirfd, Path::new("a/")).map_err(|err| err.kind()),
+            Err(ErrorKind::SafetyViolation),
+            "removeall(root, 'a/') should fail",
+        );
+
+        let _dir = dir; // make sure the tempdir is not dropped early
+        Ok(())
+    }
+}
