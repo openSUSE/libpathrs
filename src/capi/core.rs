@@ -359,7 +359,15 @@ pub unsafe extern "C" fn pathrs_creat(
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let mode = mode & !libc::S_IFMT;
         let perm = Permissions::from_mode(mode);
-        root.create_file(path, OpenFlags::from_bits_retain(flags), &perm)
+        let flags = OpenFlags::from_bits_retain(flags);
+        root.create_file(path, flags, &perm).and_then(|file| {
+            // Rust sets O_CLOEXEC by default, without an opt-out. We need
+            // to disable it if we weren't asked to do O_CLOEXEC.
+            if !flags.contains(OpenFlags::O_CLOEXEC) {
+                utils::fcntl_unset_cloexec(&file).wrap("clear O_CLOEXEC on reopened fd")?;
+            }
+            Ok(file)
+        })
     }()
     .into_c_return()
 }
