@@ -218,6 +218,12 @@ procfs_tests! {
     // No overmounts.
     nomount: open(self, "attr/current", O_RDONLY) => (error: Ok);
     nomount: open_follow(self, "attr/current", O_RDONLY) => (error: Ok);
+    nomount_dir: open(self, "attr", O_RDONLY) => (error: Ok);
+    nomount_dir: open_follow(self, "attr", O_RDONLY) => (error: Ok);
+    nomount_dir_odir: open(self, "attr", O_DIRECTORY|O_RDONLY) => (error: Ok);
+    nomount_dir_odir: open_follow(self, "attr", O_DIRECTORY|O_RDONLY) => (error: Ok);
+    nomount_dir_trailing_slash: open(self, "attr/", O_RDONLY) => (error: Ok);
+    nomount_dir_trailing_slash: open_follow(self, "attr/", O_RDONLY) => (error: Ok);
     global_nomount: open(ProcfsBase::ProcRoot, "filesystems", O_RDONLY) => (error: Ok);
     global_nomount: readlink(ProcfsBase::ProcRoot, "mounts") => (error: Ok);
     // Procfs regular file overmount.
@@ -242,7 +248,11 @@ procfs_tests! {
     magiclink_fd0: open_follow(self, "fd/0", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
     magiclink_fd0: readlink(self, "fd/0") => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
     // Behaviour-related testing.
+    nondir_odir: open_follow(self, "environ", O_DIRECTORY|O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
+    nondir_trailing_slash: open_follow(self, "environ/", O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
+    proc_cwd_odir: open_follow(self, "cwd", O_DIRECTORY|O_RDONLY) => (error: Ok);
     proc_cwd_trailing_slash: open_follow(self, "cwd/", O_RDONLY) => (error: Ok);
+    proc_fdlink_odir: open_follow(self, "fd//1", O_DIRECTORY|O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
     proc_fdlink_trailing_slash: open_follow(self, "fd//1/", O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
     // TODO: root can always open procfs files with O_RDWR even if writes fail.
     // proc_nowrite: open(self, "status", O_RDWR) => (error: Err(ErrorKind::OsError(Some(libc::EACCES))));
