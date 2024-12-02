@@ -190,7 +190,7 @@ impl<Fd: AsFd> FdExt for Fd {
         Ok(Metadata(stat))
     }
 
-    fn reopen(&self, procfs: &ProcfsHandle, flags: OpenFlags) -> Result<OwnedFd, Error> {
+    fn reopen(&self, procfs: &ProcfsHandle, mut flags: OpenFlags) -> Result<OwnedFd, Error> {
         let fd = self.as_fd();
 
         // For file descriptors referencing a symlink (i.e. opened with
@@ -206,6 +206,11 @@ impl<Fd: AsFd> FdExt for Fd {
             }))
             .wrap("symlink file handles cannot be reopened")?
         }
+
+        // Now that we are sure the file descriptor is not a symlink, we can
+        // clear O_NOFOLLOW since it is a no-op (but due to the procfs reopening
+        // implementation, O_NOFOLLOW will cause strange behaviour).
+        flags.remove(OpenFlags::O_NOFOLLOW);
 
         // TODO: Add support for O_EMPTYPATH once that exists...
         procfs

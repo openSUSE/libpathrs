@@ -132,7 +132,12 @@ pub(in crate::tests) fn check_reopen<H: HandleImpl>(
         "cloned handle should be equivalent to old handle",
     );
 
-    check_oflags(&file, flags, H::FORCED_CLOEXEC)?;
+    check_oflags(
+        &file,
+        // NOTE: Handle::reopen() drops O_NOFOLLOW, so we shouldn't see it.
+        flags.difference(OpenFlags::O_NOFOLLOW),
+        H::FORCED_CLOEXEC,
+    )?;
 
     Ok(())
 }

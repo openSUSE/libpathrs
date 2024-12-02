@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   you would get various errors and unexpected behaviour. If you wish to make an
   `O_PATH|O_NOFOLLOW` copy of a symlink handle, you can simply use `try_clone`
   (i.e. `dup(2)` the file descriptor).
+- `Handle::reopen(O_NOFOLLOW)` will now return reasonable results. Previously,
+  it would return `-ELOOP` in most cases and in other cases it would return
+  unexpected results because the `O_NOFOLLOW` would have an effect on the
+  magic-link used internally by `Handle::reopen`.
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how
