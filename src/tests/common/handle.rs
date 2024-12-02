@@ -27,6 +27,8 @@ use crate::{
     utils::FdExt,
 };
 
+use std::os::unix::io::AsFd;
+
 use anyhow::{Context, Error};
 use errno::Errno;
 use pretty_assertions::assert_eq;
@@ -42,6 +44,50 @@ pub(in crate::tests) fn errno_description(err: ErrorKind) -> String {
         ErrorKind::OsError(Some(errno)) => format!("{err:?} ({})", Errno(errno)),
         _ => format!("{err:?}"),
     }
+}
+
+pub(in crate::tests) fn check_oflags<Fd: AsFd>(
+    fd: Fd,
+    flags: OpenFlags,
+    forced_cloexec: bool,
+) -> Result<(), Error> {
+    let fd = fd.as_fd();
+
+    // Convert to OFlags so we can compare them.
+    let mut wanted_flags = OFlags::from_bits_retain(flags.bits() as u32);
+    // Add O_CLOEXEC to the set of wanted flags if its forced by the impl.
+    if forced_cloexec {
+        wanted_flags.insert(OFlags::CLOEXEC)
+    }
+
+    // The kernel clears several flags from f_flags in do_dentry_open(), so we
+    // need to drop them from the expected flag set.
+    wanted_flags.remove(OFlags::CREATE | OFlags::EXCL | OFlags::NOCTTY | OFlags::TRUNC);
+
+    // Check regular file flags.
+    let got_file_flags = rustix_fs::fcntl_getfl(fd).context("failed to F_GETFL")?;
+    assert_eq!(
+        // Ignore O_LARGEFILE since it's basically a kernel internal.
+        got_file_flags & !OFlags::LARGEFILE,
+        // O_CLOEXEC is represented in the fd flags, not file flags.
+        wanted_flags & !OFlags::CLOEXEC,
+        "expected the reopened file's flags to match the requested flags"
+    );
+
+    // Check fd flags (namely O_CLOEXEC).
+    let got_fd_flags = rustix_io::fcntl_getfd(fd).context("failed to F_GETFD")?;
+    assert_eq!(
+        got_fd_flags.contains(FdFlags::CLOEXEC),
+        wanted_flags.contains(OFlags::CLOEXEC),
+        "expected the reopened file's O_CLOEXEC to be correct (oflags: {flags:?}, is O_CLOEXEC forced? {forced_cloexec})",
+    );
+    assert!(
+        got_fd_flags.difference(FdFlags::CLOEXEC).is_empty(),
+        "expected fd flags to not contain anything other than FD_CLOEXEC (got flags: 0x{:x})",
+        got_fd_flags.bits()
+    );
+
+    Ok(())
 }
 
 pub(in crate::tests) fn check_reopen<H: HandleImpl>(
@@ -86,31 +132,7 @@ pub(in crate::tests) fn check_reopen<H: HandleImpl>(
         "cloned handle should be equivalent to old handle",
     );
 
-    // Convert to OFlags so we can compare them.
-    let mut wanted_flags = OFlags::from_bits_retain(flags.bits() as u32);
-    // Add O_CLOEXEC to the set of wanted flags if the HandleImpl forces it.
-    if H::FORCED_CLOEXEC {
-        wanted_flags.insert(OFlags::CLOEXEC);
-    }
-
-    // Check regular file flags.
-    let got_file_flags = rustix_fs::fcntl_getfl(&file).context("failed to F_GETFL")?;
-    assert_eq!(
-        // Ignore O_LARGEFILE since it's basically a kernel internal.
-        got_file_flags & !OFlags::LARGEFILE,
-        // O_CLOEXEC is represented in the fd flags, not file flags.
-        wanted_flags & !OFlags::CLOEXEC,
-        "expected the reopened file's flags to match the requested flags"
-    );
-
-    // Check fd flags (namely O_CLOEXEC).
-    let got_fd_flags = rustix_io::fcntl_getfd(&file).context("failed to F_GETFD")?;
-    assert_eq!(
-        got_fd_flags.contains(FdFlags::CLOEXEC),
-        wanted_flags.contains(OFlags::CLOEXEC),
-        "expected the reopened file's O_CLOEXEC to be correct (oflags: {:?}, is O_CLOEXEC forced? {})",
-        flags, H::FORCED_CLOEXEC,
-    );
+    check_oflags(&file, flags, H::FORCED_CLOEXEC)?;
 
     Ok(())
 }

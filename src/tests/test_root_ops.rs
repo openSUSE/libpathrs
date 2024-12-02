@@ -421,7 +421,10 @@ mod utils {
         flags::{OpenFlags, RenameFlags},
         resolvers::PartialLookup,
         syscalls,
-        tests::traits::{ErrorImpl, RootImpl},
+        tests::{
+            common as tests_common,
+            traits::{ErrorImpl, HandleImpl, RootImpl},
+        },
         utils::{FdExt, PathIterExt},
         Handle, InodeType,
     };
@@ -582,7 +585,14 @@ mod utils {
                     "expected ino of {path:?} handles to be the same",
                 );
 
-                // TODO: Check open flags.
+                // Note that create_file is always implemented as a two-step
+                // process (open the parent, create the file) with O_NOFOLLOW
+                // always being applied to the created handle (to avoid races).
+                tests_common::check_oflags(
+                    &file,
+                    oflags | OpenFlags::O_NOFOLLOW,
+                    R::Handle::FORCED_CLOEXEC,
+                )?;
             }
         }
         Ok(())
