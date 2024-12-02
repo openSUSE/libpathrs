@@ -46,19 +46,13 @@ pub(in crate::tests) fn errno_description(err: ErrorKind) -> String {
     }
 }
 
-pub(in crate::tests) fn check_oflags<Fd: AsFd>(
-    fd: Fd,
-    flags: OpenFlags,
-    forced_cloexec: bool,
-) -> Result<(), Error> {
+pub(in crate::tests) fn check_oflags<Fd: AsFd>(fd: Fd, flags: OpenFlags) -> Result<(), Error> {
     let fd = fd.as_fd();
 
     // Convert to OFlags so we can compare them.
     let mut wanted_flags = OFlags::from_bits_retain(flags.bits() as u32);
-    // Add O_CLOEXEC to the set of wanted flags if its forced by the impl.
-    if forced_cloexec {
-        wanted_flags.insert(OFlags::CLOEXEC)
-    }
+    // O_CLOEXEC is always automatically enabled by libpathrs.
+    wanted_flags.insert(OFlags::CLOEXEC);
 
     // The kernel clears several flags from f_flags in do_dentry_open(), so we
     // need to drop them from the expected flag set.
@@ -79,7 +73,7 @@ pub(in crate::tests) fn check_oflags<Fd: AsFd>(
     assert_eq!(
         got_fd_flags.contains(FdFlags::CLOEXEC),
         wanted_flags.contains(OFlags::CLOEXEC),
-        "expected the reopened file's O_CLOEXEC to be correct (oflags: {flags:?}, is O_CLOEXEC forced? {forced_cloexec})",
+        "expected the reopened file's O_CLOEXEC to be correct (oflags: {flags:?})",
     );
     assert!(
         got_fd_flags.difference(FdFlags::CLOEXEC).is_empty(),
@@ -136,7 +130,6 @@ pub(in crate::tests) fn check_reopen<H: HandleImpl>(
         &file,
         // NOTE: Handle::reopen() drops O_NOFOLLOW, so we shouldn't see it.
         flags.difference(OpenFlags::O_NOFOLLOW),
-        H::FORCED_CLOEXEC,
     )?;
 
     Ok(())

@@ -447,7 +447,7 @@ mod utils {
         syscalls,
         tests::{
             common as tests_common,
-            traits::{ErrorImpl, HandleImpl, RootImpl},
+            traits::{ErrorImpl, RootImpl},
         },
         utils::{FdExt, PathIterExt},
         Handle, InodeType,
@@ -612,11 +612,7 @@ mod utils {
                 // Note that create_file is always implemented as a two-step
                 // process (open the parent, create the file) with O_NOFOLLOW
                 // always being applied to the created handle (to avoid races).
-                tests_common::check_oflags(
-                    &file,
-                    oflags | OpenFlags::O_NOFOLLOW,
-                    R::Handle::FORCED_CLOEXEC,
-                )?;
+                tests_common::check_oflags(&file, oflags | OpenFlags::O_NOFOLLOW)?;
             }
         }
         Ok(())
@@ -658,7 +654,7 @@ mod utils {
                     "expected real path of {path:?} handles to be the same",
                 );
 
-                tests_common::check_oflags(&file, oflags, R::Handle::FORCED_CLOEXEC)?;
+                tests_common::check_oflags(&file, oflags)?;
             }
         }
         Ok(())

@@ -114,7 +114,8 @@ impl From<ProcfsBase> for CProcfsBase {
 ///
 /// # Return Value
 ///
-/// On success, this function returns a file descriptor.
+/// On success, this function returns a file descriptor. The file descriptor
+/// will have the `O_CLOEXEC` flag automatically applied.
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
