@@ -73,13 +73,13 @@
 //!         handle = -EBADF,
 //!         fd = -EBADF;
 //!
-//!     root = pathrs_root_open(root_path);
+//!     root = pathrs_open_root(root_path);
 //!     if (root < 0) {
 //!         liberr = root;
 //!         goto err;
 //!     }
 //!
-//!     handle = pathrs_resolve(root, unsafe_path);
+//!     handle = pathrs_inroot_resolve(root, unsafe_path);
 //!     if (handle < 0) {
 //!         liberr = handle;
 //!         goto err;

@@ -153,7 +153,7 @@ impl Root {
     /// `path` must be an existing directory, and must (at the moment) be a
     /// fully-resolved pathname with no symlink components. This restriction
     /// might be relaxed in the future.
-    #[doc(alias = "pathrs_root_open")]
+    #[doc(alias = "pathrs_open_root")]
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let file = syscalls::openat(
             syscalls::AT_FDCWD,
@@ -268,7 +268,7 @@ impl Root {
     /// resolution.
     ///
     /// [`resolve_nofollow`]: Self::resolve_nofollow
-    #[doc(alias = "pathrs_resolve")]
+    #[doc(alias = "pathrs_inroot_resolve")]
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.as_ref().resolve(path)
@@ -283,10 +283,44 @@ impl Root {
     ///
     /// [`resolve`]: Self::resolve
     /// [`resolve_nofollow`]: Self::resolve_nofollow
-    #[doc(alias = "pathrs_resolve_nofollow")]
+    #[doc(alias = "pathrs_inroot_resolve_nofollow")]
     #[inline]
     pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.as_ref().resolve_nofollow(path)
+    }
+
+    /// Open a path without creating an intermediate [`Handle`] object.
+    ///
+    /// This is effectively just shorthand for [`resolve`] followed by
+    /// [`Handle::reopen`]. However, some resolvers (such as the `openat2`
+    /// resolver) can implement [`open_subpath`] slightly more efficiently than
+    /// naively doing a two-step open operation with [`Handle::reopen`]. If you
+    /// wish to create an [`OpenFlags::O_PATH`] file handle, it probably makes
+    /// more sense to use [`resolve`] or [`resolve_nofollow`].
+    ///
+    /// If `flags` contains [`OpenFlags::O_NOFOLLOW`] and the path refers to a
+    /// symlink then this method will match the behaviour of [`openat2`] (this
+    /// is in contrast to [`Handle::reopen`] which does not permit re-opening a
+    /// handle to a symlink):
+    ///
+    ///  * If `flags` also contains [`OpenFlags::O_PATH`] then the returned file
+    ///    is equivalent to the [`Handle`] that would've been returned from
+    ///    [`resolve_nofollow`].
+    ///  * Otherwise, an error will be returned to match the behaviour of
+    ///    [`OpenFlags::O_NOFOLLOW`] when encountering a trailing symlink.
+    ///
+    /// [`openat2`]: https://man7.org/linux/man-pages/man2/openat2.2.html
+    /// [`open_subpath`]: Self::open_subpath
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
+    #[doc(alias = "pathrs_inroot_open")]
+    #[inline]
+    pub fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Error> {
+        self.as_ref().open_subpath(path, flags)
     }
 
     /// Get the target of a symlink within a [`Root`].
@@ -300,7 +334,7 @@ impl Root {
     ///
     /// [`resolve`]: Self::resolve
     /// [`resolve_nofollow`]: Self::resolve_nofollow
-    #[doc(alias = "pathrs_readlink")]
+    #[doc(alias = "pathrs_inroot_readlink")]
     #[inline]
     pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
         self.as_ref().readlink(path)
@@ -313,10 +347,10 @@ impl Root {
     ///
     /// If the path already exists (regardless of the type of the existing
     /// inode), an error is returned.
-    #[doc(alias = "pathrs_mkdir")]
-    #[doc(alias = "pathrs_mknod")]
-    #[doc(alias = "pathrs_symlink")]
-    #[doc(alias = "pathrs_hardlink")]
+    #[doc(alias = "pathrs_inroot_mkdir")]
+    #[doc(alias = "pathrs_inroot_mknod")]
+    #[doc(alias = "pathrs_inroot_symlink")]
+    #[doc(alias = "pathrs_inroot_hardlink")]
     #[inline]
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
         self.as_ref().create(path, inode_type)
@@ -346,8 +380,8 @@ impl Root {
     /// [`create`]: Self::create
     /// [`create_file`]: Self::create_file
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
-    #[doc(alias = "pathrs_creat")]
-    #[doc(alias = "pathrs_create")]
+    #[doc(alias = "pathrs_inroot_creat")]
+    #[doc(alias = "pathrs_inroot_create")]
     #[inline]
     pub fn create_file<P: AsRef<Path>>(
         &self,
@@ -384,7 +418,7 @@ impl Root {
     /// `path` to have been created despite this method returning an error.
     ///
     /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
-    #[doc(alias = "pathrs_mkdir_all")]
+    #[doc(alias = "pathrs_inroot_mkdir_all")]
     #[inline]
     pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
         self.as_ref().mkdir_all(path, perm)
@@ -403,7 +437,7 @@ impl Root {
     /// directory and all of its children, you can use [`remove_all`].
     ///
     /// [`remove_all`]: Self::remove_all
-    #[doc(alias = "pathrs_rmdir")]
+    #[doc(alias = "pathrs_inroot_rmdir")]
     #[inline]
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.as_ref().remove_dir(path)
@@ -423,7 +457,7 @@ impl Root {
     /// is a non-empty directory), you can use [`remove_all`].
     ///
     /// [`remove_all`]: Self::remove_all
-    #[doc(alias = "pathrs_unlink")]
+    #[doc(alias = "pathrs_inroot_unlink")]
     #[inline]
     pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.as_ref().remove_file(path)
@@ -444,7 +478,7 @@ impl Root {
     /// deletion process an error will be returned.
     ///
     /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
-    #[doc(alias = "pathrs_remove_all")]
+    #[doc(alias = "pathrs_inroot_remove_all")]
     #[inline]
     pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.as_ref().remove_all(path)
@@ -459,7 +493,7 @@ impl Root {
     /// The error rules are identical to [`renameat2(2)`].
     ///
     /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
-    #[doc(alias = "pathrs_rename")]
+    #[doc(alias = "pathrs_inroot_rename")]
     pub fn rename<P: AsRef<Path>>(
         &self,
         source: P,
@@ -658,7 +692,7 @@ impl RootRef<'_> {
     /// resolution.
     ///
     /// [`resolve_nofollow`]: Self::resolve_nofollow
-    #[doc(alias = "pathrs_resolve")]
+    #[doc(alias = "pathrs_inroot_resolve")]
     #[inline]
     pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.resolver.resolve(self, path, false)
@@ -673,10 +707,44 @@ impl RootRef<'_> {
     ///
     /// [`resolve`]: Self::resolve
     /// [`resolve_nofollow`]: Self::resolve_nofollow
-    #[doc(alias = "pathrs_resolve_nofollow")]
+    #[doc(alias = "pathrs_inroot_resolve_nofollow")]
     #[inline]
     pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
         self.resolver.resolve(self, path, true)
+    }
+
+    /// Open a path without creating an intermediate [`Handle`] object.
+    ///
+    /// This is effectively just shorthand for [`resolve`] followed by
+    /// [`Handle::reopen`]. However, some resolvers (such as the `openat2`
+    /// resolver) can implement [`open_subpath`] slightly more efficiently than
+    /// naively doing a two-step open operation with [`Handle::reopen`]. If you
+    /// wish to create an [`OpenFlags::O_PATH`] file handle, it probably makes
+    /// more sense to use [`resolve`] or [`resolve_nofollow`].
+    ///
+    /// If `flags` contains [`OpenFlags::O_NOFOLLOW`] and the path refers to a
+    /// symlink then this method will match the behaviour of [`openat2`] (this
+    /// is in contrast to [`Handle::reopen`] which does not permit re-opening a
+    /// handle to a symlink):
+    ///
+    ///  * If `flags` also contains [`OpenFlags::O_PATH`] then the returned file
+    ///    is equivalent to the [`Handle`] that would've been returned from
+    ///    [`resolve_nofollow`].
+    ///  * Otherwise, an error will be returned to match the behaviour of
+    ///    [`OpenFlags::O_NOFOLLOW`] when encountering a trailing symlink.
+    ///
+    /// [`openat2`]: https://man7.org/linux/man-pages/man2/openat2.2.html
+    /// [`open_subpath`]: Self::open_subpath
+    /// [`resolve`]: Self::resolve
+    /// [`resolve_nofollow`]: Self::resolve_nofollow
+    #[doc(alias = "pathrs_inroot_open")]
+    #[inline]
+    pub fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Error> {
+        self.resolver.open(self, path, flags)
     }
 
     // Used in operations where we need to get a handle to the parent directory.
@@ -700,7 +768,7 @@ impl RootRef<'_> {
     ///
     /// [`resolve`]: Self::resolve
     /// [`resolve_nofollow`]: Self::resolve_nofollow
-    #[doc(alias = "pathrs_readlink")]
+    #[doc(alias = "pathrs_inroot_readlink")]
     pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
         let link = self
             .resolve_nofollow(path)
@@ -721,10 +789,10 @@ impl RootRef<'_> {
     ///
     /// If the path already exists (regardless of the type of the existing
     /// inode), an error is returned.
-    #[doc(alias = "pathrs_mkdir")]
-    #[doc(alias = "pathrs_mknod")]
-    #[doc(alias = "pathrs_symlink")]
-    #[doc(alias = "pathrs_hardlink")]
+    #[doc(alias = "pathrs_inroot_mkdir")]
+    #[doc(alias = "pathrs_inroot_mknod")]
+    #[doc(alias = "pathrs_inroot_symlink")]
+    #[doc(alias = "pathrs_inroot_hardlink")]
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
         // The path doesn't exist yet, so we need to get a safe reference to the
         // parent and just operate on the final (slashless) component.
@@ -805,8 +873,8 @@ impl RootRef<'_> {
     /// [`create`]: Self::create
     /// [`create_file`]: Self::create_file
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
-    #[doc(alias = "pathrs_creat")]
-    #[doc(alias = "pathrs_create")]
+    #[doc(alias = "pathrs_inroot_creat")]
+    #[doc(alias = "pathrs_inroot_create")]
     pub fn create_file<P: AsRef<Path>>(
         &self,
         path: P,
@@ -865,7 +933,7 @@ impl RootRef<'_> {
     /// `path` to have been created despite this method returning an error.
     ///
     /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
-    #[doc(alias = "pathrs_mkdir_all")]
+    #[doc(alias = "pathrs_inroot_mkdir_all")]
     pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
         if perm.mode() & !0o7777 != 0 {
             Err(ErrorImpl::InvalidArgument {
@@ -1028,7 +1096,7 @@ impl RootRef<'_> {
     /// directory and all of its children, you can use [`remove_all`].
     ///
     /// [`remove_all`]: Self::remove_all
-    #[doc(alias = "pathrs_rmdir")]
+    #[doc(alias = "pathrs_inroot_rmdir")]
     #[inline]
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Directory)
@@ -1048,7 +1116,7 @@ impl RootRef<'_> {
     /// is a non-empty directory), you can use [`remove_all`].
     ///
     /// [`remove_all`]: Self::remove_all
-    #[doc(alias = "pathrs_unlink")]
+    #[doc(alias = "pathrs_inroot_unlink")]
     #[inline]
     pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Regular)
@@ -1069,7 +1137,7 @@ impl RootRef<'_> {
     /// deletion process an error will be returned.
     ///
     /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
-    #[doc(alias = "pathrs_remove_all")]
+    #[doc(alias = "pathrs_inroot_remove_all")]
     pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         let (dir, name) = self
             .resolve_parent(path.as_ref())
@@ -1093,7 +1161,7 @@ impl RootRef<'_> {
     /// The error rules are identical to [`renameat2(2)`].
     ///
     /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
-    #[doc(alias = "pathrs_rename")]
+    #[doc(alias = "pathrs_inroot_rename")]
     pub fn rename<P: AsRef<Path>>(
         &self,
         source: P,

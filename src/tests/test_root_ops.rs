@@ -205,6 +205,15 @@ macro_rules! root_op_tests {
         }
     };
 
+    ($(#[cfg($ignore_meta:meta)])* @impl open_subpath $test_name:ident ($path:expr, $($oflag:ident)|+) => $expected_result:expr) => {
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            fn $test_name(root) {
+                utils::check_root_open_subpath(&root, $path, $(OpenFlags::$oflag)|*, $expected_result)
+            }
+        }
+    };
+
     ($(#[cfg($ignore_meta:meta)])* @impl remove_dir $test_name:ident ($path:expr) => $expected_result:expr) => {
         root_op_tests!{
             $(#[cfg_attr(not($ignore_meta), ignore)])*
@@ -318,6 +327,21 @@ root_op_tests! {
     symlink: create_file("b-file", O_RDONLY, 0o100) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
     oexcl_symlink: create_file("b-file", O_EXCL|O_RDONLY, 0o100) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
     oexcl_dangling_symlink: create_file("a-fake1", O_EXCL|O_RDONLY, 0o100) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+
+    ocreat: open_subpath("abc", O_CREAT|O_RDONLY) => Err(ErrorKind::InvalidArgument);
+    oexcl: open_subpath("abc", O_EXCL|O_RDONLY) => Err(ErrorKind::InvalidArgument);
+    ocreat_oexcl: open_subpath("abc", O_CREAT|O_EXCL|O_RDONLY) => Err(ErrorKind::InvalidArgument);
+    enoent: open_subpath("abc", O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    exist_file: open_subpath("b/c/file", O_RDONLY) => Ok("b/c/file");
+    exist_dir: open_subpath("b/c/d", O_RDONLY) => Ok("b/c/d");
+    symlink: open_subpath("b-file", O_RDONLY) => Ok("b/c/file");
+    ocreat_symlink: open_subpath("b-file", O_CREAT|O_RDONLY) => Err(ErrorKind::InvalidArgument);
+    nofollow_symlink: open_subpath("b-file", O_NOFOLLOW|O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+    opath_nofollow_symlink: open_subpath("b-file", O_PATH|O_NOFOLLOW) => Ok("b-file");
+    nofollow_odir_symlink:  open_subpath("b-file", O_DIRECTORY|O_NOFOLLOW) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    opath_nofollow_odir_symlink:  open_subpath("b-file", O_DIRECTORY|O_PATH|O_NOFOLLOW) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dangling_symlink: open_subpath("a-fake1",O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    ocreat_dangling_symlink: open_subpath("a-fake1", O_CREAT|O_RDONLY) => Err(ErrorKind::InvalidArgument);
 
     empty_dir: remove_dir("a") => Ok(());
     empty_dir: remove_file("a") => Err(ErrorKind::OsError(Some(libc::EISDIR)));
@@ -593,6 +617,48 @@ mod utils {
                     oflags | OpenFlags::O_NOFOLLOW,
                     R::Handle::FORCED_CLOEXEC,
                 )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_root_open_subpath<R: RootImpl, P: AsRef<Path>>(
+        root: R,
+        path: P,
+        oflags: OpenFlags,
+        expected_result: Result<&str, ErrorKind>,
+    ) -> Result<(), Error> {
+        let path = path.as_ref();
+
+        // Update the expected path to have the rootdir as a prefix.
+        let root_dir = root.as_fd().as_unsafe_path_unchecked()?;
+        let expected_result = expected_result.map(|path| root_dir.join(path));
+
+        match root.open_subpath(path, oflags) {
+            Err(err) => assert_eq!(Err(err.kind()), expected_result, "unexpected err {err:?}"),
+            Ok(file) => {
+                let actual_path = file.as_fd().as_unsafe_path_unchecked()?;
+                assert_eq!(
+                    Ok(actual_path.clone()),
+                    expected_result,
+                    "create file had unexpected path {actual_path:?}",
+                );
+
+                let root = root_roundtrip(root)?;
+                let new_lookup = if oflags.contains(OpenFlags::O_NOFOLLOW) {
+                    root.resolve_nofollow(path)
+                } else {
+                    root.resolve(path)
+                }
+                .wrap("re-open created file using original path")?;
+
+                assert_eq!(
+                    new_lookup.as_fd().as_unsafe_path_unchecked()?,
+                    file.as_fd().as_unsafe_path_unchecked()?,
+                    "expected real path of {path:?} handles to be the same",
+                );
+
+                tests_common::check_oflags(&file, oflags, R::Handle::FORCED_CLOEXEC)?;
             }
         }
         Ok(())

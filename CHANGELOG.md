@@ -10,10 +10,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - python bindings: `Root.creat` has had its `filemode` and `flags` arguments
   swapped to match the argument order of `openat2` (and `Root.creat_raw`). This
   also now makes `filemode` have a default value of `0o644` if unspecified.
+- Most of the C FFI functions have been renamed:
+  - Operations on a `Root` have been renamed to have a `pathrs_inroot_` prefix.
+  - `pathrs_open_root` has been renamed to `pathrs_open_root`, to avoid
+    confusion with `pathrs_inroot_*` functions and clarify what it is opening.
+- python bindings: `Root.open` has been changed to be a wrapper of
+  `pathrs_inroot_open` instead of being a wrapper around the `Root`
+  constructor.
 
 ### Added ###
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a
   raw `WrappedFd` (os opposed to `Root.creat` which returns an `os.fdopen`).
+- Root: it is now possible to open a file in one shot without having to do an
+  intermediate `resolve` step with `Root::open_subpath`. This can be more
+  efficient in some scenarios (especially with the openat2-based resolver or
+  for C FFI users where function calls are expensive) as it saves one file
+  descriptor allocation and extra function calls.
 
 ### Fixes ###
 - multiarch: we now build correctly on 32-bit architectures as well as

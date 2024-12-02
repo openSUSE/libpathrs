@@ -35,13 +35,13 @@ int get_my_fd(void)
 		handle = -EBADF,
 		fd = -EBADF;
 
-	root = pathrs_root_open(root_path);
+	root = pathrs_open_root(root_path);
 	if (root < 0) {
 		liberr = root;
 		goto err;
 	}
 
-	handle = pathrs_resolve(root, unsafe_path);
+	handle = pathrs_inroot_resolve(root, unsafe_path);
 	if (handle < 0) {
 		liberr = handle;
 		goto err;
@@ -86,7 +86,7 @@ resolved lexically, they are in-kernel objects that warp you to other files
 without doing a regular path lookup) which much harder to do safely (even with
 `openat2`). For (2) and (3) we have the requirement that we need to open a
 specific file, not just any file within `/proc` (if there are overmounts or
-symlinks) which is not the case `pathrs_resolve()`. As a result, it is
+symlinks) which is not the case `pathrs_inroot_resolve()`. As a result, it is
 necessary to take far more care when doing operations of `/proc` and
 `libpathrs` provides very useful helper to do this. Failure to do so can lead
 to security issues such as those in [CVE-2019-16884][cve-2019-16884] and

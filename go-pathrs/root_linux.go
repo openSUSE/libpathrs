@@ -40,7 +40,7 @@ type Root struct {
 
 // OpenRoot creates a new Root handle to the directory at the given path.
 func OpenRoot(path string) (*Root, error) {
-	fd, err := pathrsOpen(path)
+	fd, err := pathrsOpenRoot(path)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func RootFromFile(file *os.File) (*Root, error) {
 // itself, use ResolveNoFollow.
 func (r *Root) Resolve(path string) (*Handle, error) {
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
-		handleFd, err := pathrsResolve(rootFd, path)
+		handleFd, err := pathrsInRootResolve(rootFd, path)
 		if err != nil {
 			return nil, err
 		}
@@ -91,7 +91,7 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 // handle to the symlink itself is returned.
 func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
-		handleFd, err := pathrsResolveNoFollow(rootFd, path)
+		handleFd, err := pathrsInRootResolveNoFollow(rootFd, path)
 		if err != nil {
 			return nil, err
 		}
@@ -100,6 +100,33 @@ func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
 			return nil, err
 		}
 		return &Handle{inner: handleFile}, nil
+	})
+}
+
+// Open is effectively shorthand for Resolve followed by Handle.Open, but can
+// be slightly more efficient (it reduces CGo overhead and the number of
+// syscalls used when using the openat2-based resolver) and is arguably more
+// ergonomic to use.
+func (r *Root) Open(path string) (*os.File, error) {
+	return r.OpenFile(path, os.O_RDONLY)
+}
+
+// OpenFile is effectively shorthand for Resolve followed by Handle.OpenFile,
+// but can be slightly more efficient (it reduces CGo overhead and the number
+// of syscalls used when using the openat2-based resolver) and is arguably more
+// ergonomic to use.
+//
+// However, if flags contains os.O_NOFOLLOW and the path is a symlink, then
+// OpenFile's behaviour will match that of openat2. In most cases an error will
+// be returned, but if os.O_PATH is provided along with os.O_NOFOLLOW then a
+// file equivalent to ResolveNoFollow will be returned instead.
+func (r *Root) OpenFile(path string, flags int) (*os.File, error) {
+	return withFileFd(r.inner, func(rootFd uintptr) (*os.File, error) {
+		fd, err := pathrsInRootOpen(rootFd, path, flags)
+		if err != nil {
+			return nil, err
+		}
+		return mkFile(fd)
 	})
 }
 
@@ -112,7 +139,7 @@ func (r *Root) Create(path string, flags int, mode os.FileMode) (*os.File, error
 		return nil, err
 	}
 	return withFileFd(r.inner, func(rootFd uintptr) (*os.File, error) {
-		handleFd, err := pathrsCreat(rootFd, path, flags, unixMode)
+		handleFd, err := pathrsInRootCreat(rootFd, path, flags, unixMode)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +151,7 @@ func (r *Root) Create(path string, flags int, mode os.FileMode) (*os.File, error
 // identical to the RENAME_* flags to the renameat2(2) system call.
 func (r *Root) Rename(src, dst string, flags uint) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsRename(rootFd, src, dst, flags)
+		err := pathrsInRootRename(rootFd, src, dst, flags)
 		return struct{}{}, err
 	})
 	return err
@@ -133,7 +160,7 @@ func (r *Root) Rename(src, dst string, flags uint) error {
 // RemoveDir removes the named empty directory within a Root's directory tree.
 func (r *Root) RemoveDir(path string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsRmdir(rootFd, path)
+		err := pathrsInRootRmdir(rootFd, path)
 		return struct{}{}, err
 	})
 	return err
@@ -142,7 +169,7 @@ func (r *Root) RemoveDir(path string) error {
 // RemoveFile removes the named file within a Root's directory tree.
 func (r *Root) RemoveFile(path string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsUnlink(rootFd, path)
+		err := pathrsInRootUnlink(rootFd, path)
 		return struct{}{}, err
 	})
 	return err
@@ -153,7 +180,7 @@ func (r *Root) RemoveFile(path string) error {
 func (r *Root) Remove(path string) error {
 	// In order to match os.Remove's implementation we need to also do both
 	// syscalls unconditionally and adjust the error based on whether
-	// pathrs_rmdir() returned ENOTDIR.
+	// pathrs_inroot_rmdir() returned ENOTDIR.
 	unlinkErr := r.RemoveFile(path)
 	if unlinkErr == nil {
 		return nil
@@ -174,7 +201,7 @@ func (r *Root) Remove(path string) error {
 // designed to match the semantics of os.RemoveAll.
 func (r *Root) RemoveAll(path string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsRemoveAll(rootFd, path)
+		err := pathrsInRootRemoveAll(rootFd, path)
 		return struct{}{}, err
 	})
 	return err
@@ -189,7 +216,7 @@ func (r *Root) Mkdir(path string, mode os.FileMode) error {
 	}
 
 	_, err = withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsMkdir(rootFd, path, unixMode)
+		err := pathrsInRootMkdir(rootFd, path, unixMode)
 		return struct{}{}, err
 	})
 	return err
@@ -207,7 +234,7 @@ func (r *Root) MkdirAll(path string, mode os.FileMode) (*Handle, error) {
 	}
 
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
-		handleFd, err := pathrsMkdirAll(rootFd, path, unixMode)
+		handleFd, err := pathrsInRootMkdirAll(rootFd, path, unixMode)
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +256,7 @@ func (r *Root) Mknod(path string, mode os.FileMode, dev uint64) error {
 	}
 
 	_, err = withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsMknod(rootFd, path, unixMode, dev)
+		err := pathrsInRootMknod(rootFd, path, unixMode, dev)
 		return struct{}{}, err
 	})
 	return err
@@ -239,7 +266,7 @@ func (r *Root) Mknod(path string, mode os.FileMode, dev uint64) error {
 // created at @path and is a link to @target.
 func (r *Root) Symlink(path, target string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsSymlink(rootFd, path, target)
+		err := pathrsInRootSymlink(rootFd, path, target)
 		return struct{}{}, err
 	})
 	return err
@@ -250,7 +277,7 @@ func (r *Root) Symlink(path, target string) error {
 // directory tree (you cannot hardlink to a different Root or the host).
 func (r *Root) Hardlink(path, target string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
-		err := pathrsHardlink(rootFd, path, target)
+		err := pathrsInRootHardlink(rootFd, path, target)
 		return struct{}{}, err
 	})
 	return err

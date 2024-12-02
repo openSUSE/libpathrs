@@ -508,7 +508,7 @@ class Root(WrappedFd):
         """
         if isinstance(file_or_path, str):
             path = _cstr(file_or_path)
-            fd = libpathrs_so.pathrs_root_open(path)
+            fd = libpathrs_so.pathrs_open_root(path)
             if fd < 0:
                 raise Error._fetch(fd) or INTERNAL_ERROR
             file: FileLike = fd
@@ -517,11 +517,6 @@ class Root(WrappedFd):
 
         # XXX: Is this necessary?
         super().__init__(file)
-
-    @classmethod
-    def open(cls, path: str, /) -> Self:
-        "Identical to Root(path)."
-        return cls(path)
 
     def resolve(self, path: str, /, *, follow_trailing: bool = True) -> Handle:
         """
@@ -535,12 +530,60 @@ class Root(WrappedFd):
         A pathrs.Error is raised if the path doesn't exist.
         """
         if follow_trailing:
-            fd = libpathrs_so.pathrs_resolve(self.fileno(), _cstr(path))
+            fd = libpathrs_so.pathrs_inroot_resolve(self.fileno(), _cstr(path))
         else:
-            fd = libpathrs_so.pathrs_resolve_nofollow(self.fileno(), _cstr(path))
+            fd = libpathrs_so.pathrs_inroot_resolve_nofollow(self.fileno(), _cstr(path))
         if fd < 0:
             raise Error._fetch(fd) or INTERNAL_ERROR
         return Handle(fd)
+
+    def open(
+        self,
+        path: str,
+        mode: str = "r",
+        /,
+        *,
+        follow_trailing: bool = True,
+        extra_flags: int = 0,
+    ) -> IO[Any]:
+        """
+        Resolve and open a path inside the Root and return an os.fdopen() file
+        handle.
+
+        This is effectively shorthand for Root.resolve(path).reopen(...), but
+        for the openat2-based resolver this is slightly more efficient if you
+        just want to open a file and don't need to do multiple reopens of the
+        Handle.
+
+        mode is a Python mode string, and extra_flags can be used to indicate
+        extra O_* flags you wish to pass to the open operation.
+
+        follow_trailing has the same behaviour as Root.resolve(), and is
+        equivalent to passing os.O_NOFOLLOW to extra_flags.
+        """
+        flags = _convert_mode(mode) | extra_flags
+        if not follow_trailing:
+            flags |= os.O_NOFOLLOW
+        with self.open_raw(path, flags) as file:
+            return file.fdopen(mode)
+
+    def open_raw(self, path: str, flags: int, /) -> WrappedFd:
+        """
+        Resolve and open a path inside the Root and return a WrappedFd file
+        handle.
+
+        This is effectively shorthand for Root.resolve(path).reopen_raw(flags),
+        but for the openat2-based resolver this is slightly more efficient if
+        you just want to open a file and don't need to do multiple reopens of
+        the Handle.
+
+        If flags contains os.O_NOFOLLOW, then the resolution is done as if you
+        passed follow_trailing=False to Root.resolve().
+        """
+        fd = libpathrs_so.pathrs_inroot_open(self.fileno(), _cstr(path), flags)
+        if fd < 0:
+            raise Error._fetch(fd) or INTERNAL_ERROR
+        return WrappedFd(fd)
 
     def readlink(self, path: str, /) -> str:
         """
@@ -552,7 +595,7 @@ class Root(WrappedFd):
         linkbuf_size = 128
         while True:
             linkbuf = _cbuffer(linkbuf_size)
-            n = libpathrs_so.pathrs_readlink(
+            n = libpathrs_so.pathrs_inroot_readlink(
                 self.fileno(), cpath, linkbuf, linkbuf_size
             )
             if n < 0:
@@ -587,7 +630,9 @@ class Root(WrappedFd):
         O_EXCL to extra_flags.
         """
         flags = _convert_mode(mode) | extra_flags
-        fd = libpathrs_so.pathrs_creat(self.fileno(), _cstr(path), flags, filemode)
+        fd = libpathrs_so.pathrs_inroot_creat(
+            self.fileno(), _cstr(path), flags, filemode
+        )
         if fd < 0:
             raise Error._fetch(fd) or INTERNAL_ERROR
         return os.fdopen(fd, mode)
@@ -607,7 +652,9 @@ class Root(WrappedFd):
         you do not intend to open a symlink, you should pass O_NOFOLLOW to flags to
         let libpathrs know that it can be more strict when opening the path.
         """
-        fd = libpathrs_so.pathrs_creat(self.fileno(), _cstr(path), flags, filemode)
+        fd = libpathrs_so.pathrs_inroot_creat(
+            self.fileno(), _cstr(path), flags, filemode
+        )
         if fd < 0:
             raise Error._fetch(fd) or INTERNAL_ERROR
         return WrappedFd(fd)
@@ -621,7 +668,9 @@ class Root(WrappedFd):
         RENAME_EXCHANGE will turn this into an atomic swap operation.
         """
         # TODO: Should we have a separate Root.swap() operation?
-        err = libpathrs_so.pathrs_rename(self.fileno(), _cstr(src), _cstr(dst), flags)
+        err = libpathrs_so.pathrs_inroot_rename(
+            self.fileno(), _cstr(src), _cstr(dst), flags
+        )
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
@@ -632,7 +681,7 @@ class Root(WrappedFd):
         To remove non-empty directories recursively, you can use
         Root.remove_all().
         """
-        err = libpathrs_so.pathrs_rmdir(self.fileno(), _cstr(path))
+        err = libpathrs_so.pathrs_inroot_rmdir(self.fileno(), _cstr(path))
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
@@ -644,7 +693,7 @@ class Root(WrappedFd):
         files and non-empty directories recursively, you can use
         Root.remove_all().
         """
-        err = libpathrs_so.pathrs_unlink(self.fileno(), _cstr(path))
+        err = libpathrs_so.pathrs_inroot_unlink(self.fileno(), _cstr(path))
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
@@ -653,7 +702,7 @@ class Root(WrappedFd):
         Remove the file or directory (empty or non-empty) at the given path
         within the Root.
         """
-        err = libpathrs_so.pathrs_remove_all(self.fileno(), _cstr(path))
+        err = libpathrs_so.pathrs_inroot_remove_all(self.fileno(), _cstr(path))
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
@@ -670,7 +719,7 @@ class Root(WrappedFd):
         directories (or just reuse an existing directory) you can use
         Root.mkdir_all().
         """
-        err = libpathrs_so.pathrs_mkdir(self.fileno(), _cstr(path), mode)
+        err = libpathrs_so.pathrs_inroot_mkdir(self.fileno(), _cstr(path), mode)
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
@@ -688,7 +737,7 @@ class Root(WrappedFd):
         full path already exists, this mode is ignored and the existing
         directory mode is kept.
         """
-        fd = libpathrs_so.pathrs_mkdir_all(self.fileno(), _cstr(path), mode)
+        fd = libpathrs_so.pathrs_inroot_mkdir_all(self.fileno(), _cstr(path), mode)
         if fd < 0:
             raise Error._fetch(fd) or INTERNAL_ERROR
         return Handle(fd)
@@ -709,7 +758,7 @@ class Root(WrappedFd):
 
         A pathrs.Error is raised if the path already exists.
         """
-        err = libpathrs_so.pathrs_mknod(self.fileno(), _cstr(path), mode, device)
+        err = libpathrs_so.pathrs_inroot_mknod(self.fileno(), _cstr(path), mode, device)
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
@@ -723,7 +772,9 @@ class Root(WrappedFd):
         A pathrs.Error is raised if the path for the new hardlink already
         exists.
         """
-        err = libpathrs_so.pathrs_hardlink(self.fileno(), _cstr(path), _cstr(target))
+        err = libpathrs_so.pathrs_inroot_hardlink(
+            self.fileno(), _cstr(path), _cstr(target)
+        )
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR
 
@@ -738,6 +789,8 @@ class Root(WrappedFd):
         A pathrs.Error is raised if the path for the new symlink already
         exists.
         """
-        err = libpathrs_so.pathrs_symlink(self.fileno(), _cstr(path), _cstr(target))
+        err = libpathrs_so.pathrs_inroot_symlink(
+            self.fileno(), _cstr(path), _cstr(target)
+        )
         if err < 0:
             raise Error._fetch(err) or INTERNAL_ERROR

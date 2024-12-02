@@ -63,7 +63,7 @@ void *worker(void *_arg) {
 
 	pthread_barrier_wait(arg->barrier);
 
-	handlefd = pathrs_resolve(arg->rootfd, arg->path);
+	handlefd = pathrs_inroot_resolve(arg->rootfd, arg->path);
 	if (handlefd < 0) {
 		liberr = handlefd;
 		goto err;
@@ -127,7 +127,7 @@ int main(int argc, char **argv)
 	root_path = argv[1];
 	path = argv[2];
 
-	rootfd = pathrs_root_open(root_path);
+	rootfd = pathrs_open_root(root_path);
 	if (rootfd < 0) {
 		liberr = rootfd;
 		goto err;

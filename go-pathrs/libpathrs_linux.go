@@ -53,11 +53,11 @@ func fetchError(errID C.int) error {
 	return err
 }
 
-func pathrsOpen(path string) (uintptr, error) {
+func pathrsOpenRoot(path string) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	fd := C.pathrs_root_open(cPath)
+	fd := C.pathrs_open_root(cPath)
 	return uintptr(fd), fetchError(fd)
 }
 
@@ -66,30 +66,38 @@ func pathrsReopen(fd uintptr, flags int) (uintptr, error) {
 	return uintptr(newFd), fetchError(newFd)
 }
 
-func pathrsResolve(rootFd uintptr, path string) (uintptr, error) {
+func pathrsInRootResolve(rootFd uintptr, path string) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	fd := C.pathrs_resolve(C.int(rootFd), cPath)
+	fd := C.pathrs_inroot_resolve(C.int(rootFd), cPath)
 	return uintptr(fd), fetchError(fd)
 }
 
-func pathrsResolveNoFollow(rootFd uintptr, path string) (uintptr, error) {
+func pathrsInRootResolveNoFollow(rootFd uintptr, path string) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	fd := C.pathrs_resolve_nofollow(C.int(rootFd), cPath)
+	fd := C.pathrs_inroot_resolve_nofollow(C.int(rootFd), cPath)
 	return uintptr(fd), fetchError(fd)
 }
 
-func pathrsReadlink(rootFd uintptr, path string) (string, error) {
+func pathrsInRootOpen(rootFd uintptr, path string, flags int) (uintptr, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	fd := C.pathrs_inroot_open(C.int(rootFd), cPath, C.int(flags))
+	return uintptr(fd), fetchError(fd)
+}
+
+func pathrsInRootReadlink(rootFd uintptr, path string) (string, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
 	size := 128
 	for {
 		linkBuf := make([]byte, size)
-		n := C.pathrs_readlink(C.int(rootFd), cPath, C.cast_ptr(unsafe.Pointer(&linkBuf[0])), C.ulong(len(linkBuf)))
+		n := C.pathrs_inroot_readlink(C.int(rootFd), cPath, C.cast_ptr(unsafe.Pointer(&linkBuf[0])), C.ulong(len(linkBuf)))
 		switch {
 		case int(n) < 0:
 			return "", fetchError(n)
@@ -106,92 +114,92 @@ func pathrsReadlink(rootFd uintptr, path string) (string, error) {
 	}
 }
 
-func pathrsRmdir(rootFd uintptr, path string) error {
+func pathrsInRootRmdir(rootFd uintptr, path string) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	err := C.pathrs_rmdir(C.int(rootFd), cPath)
+	err := C.pathrs_inroot_rmdir(C.int(rootFd), cPath)
 	return fetchError(err)
 }
 
-func pathrsUnlink(rootFd uintptr, path string) error {
+func pathrsInRootUnlink(rootFd uintptr, path string) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	err := C.pathrs_unlink(C.int(rootFd), cPath)
+	err := C.pathrs_inroot_unlink(C.int(rootFd), cPath)
 	return fetchError(err)
 }
 
-func pathrsRemoveAll(rootFd uintptr, path string) error {
+func pathrsInRootRemoveAll(rootFd uintptr, path string) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	err := C.pathrs_remove_all(C.int(rootFd), cPath)
+	err := C.pathrs_inroot_remove_all(C.int(rootFd), cPath)
 	return fetchError(err)
 }
 
-func pathrsCreat(rootFd uintptr, path string, flags int, mode uint32) (uintptr, error) {
+func pathrsInRootCreat(rootFd uintptr, path string, flags int, mode uint32) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	fd := C.pathrs_creat(C.int(rootFd), cPath, C.int(flags), C.uint(mode))
+	fd := C.pathrs_inroot_creat(C.int(rootFd), cPath, C.int(flags), C.uint(mode))
 	return uintptr(fd), fetchError(fd)
 }
 
-func pathrsRename(rootFd uintptr, src, dst string, flags uint) error {
+func pathrsInRootRename(rootFd uintptr, src, dst string, flags uint) error {
 	cSrc := C.CString(src)
 	defer C.free(unsafe.Pointer(cSrc))
 
 	cDst := C.CString(dst)
 	defer C.free(unsafe.Pointer(cDst))
 
-	err := C.pathrs_rename(C.int(rootFd), cSrc, cDst, C.uint(flags))
+	err := C.pathrs_inroot_rename(C.int(rootFd), cSrc, cDst, C.uint(flags))
 	return fetchError(err)
 }
 
-func pathrsMkdir(rootFd uintptr, path string, mode uint32) error {
+func pathrsInRootMkdir(rootFd uintptr, path string, mode uint32) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	err := C.pathrs_mkdir(C.int(rootFd), cPath, C.uint(mode))
+	err := C.pathrs_inroot_mkdir(C.int(rootFd), cPath, C.uint(mode))
 	return fetchError(err)
 }
 
-func pathrsMkdirAll(rootFd uintptr, path string, mode uint32) (uintptr, error) {
+func pathrsInRootMkdirAll(rootFd uintptr, path string, mode uint32) (uintptr, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	fd := C.pathrs_mkdir_all(C.int(rootFd), cPath, C.uint(mode))
+	fd := C.pathrs_inroot_mkdir_all(C.int(rootFd), cPath, C.uint(mode))
 	return uintptr(fd), fetchError(fd)
 }
 
-func pathrsMknod(rootFd uintptr, path string, mode uint32, dev uint64) error {
+func pathrsInRootMknod(rootFd uintptr, path string, mode uint32, dev uint64) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
-	err := C.pathrs_mknod(C.int(rootFd), cPath, C.uint(mode), C.dev_t(dev))
+	err := C.pathrs_inroot_mknod(C.int(rootFd), cPath, C.uint(mode), C.dev_t(dev))
 	return fetchError(err)
 }
 
-func pathrsSymlink(rootFd uintptr, path, target string) error {
+func pathrsInRootSymlink(rootFd uintptr, path, target string) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
 	cTarget := C.CString(target)
 	defer C.free(unsafe.Pointer(cTarget))
 
-	err := C.pathrs_symlink(C.int(rootFd), cPath, cTarget)
+	err := C.pathrs_inroot_symlink(C.int(rootFd), cPath, cTarget)
 	return fetchError(err)
 }
 
-func pathrsHardlink(rootFd uintptr, path, target string) error {
+func pathrsInRootHardlink(rootFd uintptr, path, target string) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
 	cTarget := C.CString(target)
 	defer C.free(unsafe.Pointer(cTarget))
 
-	err := C.pathrs_hardlink(C.int(rootFd), cPath, cTarget)
+	err := C.pathrs_inroot_hardlink(C.int(rootFd), cPath, cTarget)
 	return fetchError(err)
 }
 
@@ -214,7 +222,7 @@ func pathrsProcOpen(base pathrsProcBase, path string, flags int) (uintptr, error
 }
 
 func pathrsProcReadlink(base pathrsProcBase, path string) (string, error) {
-	// TODO: See if we can unify this code with pathrsReadlink.
+	// TODO: See if we can unify this code with pathrsInRootReadlink.
 
 	cBase := C.pathrs_proc_base_t(base)
 

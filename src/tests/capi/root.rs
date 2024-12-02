@@ -49,7 +49,7 @@ impl CapiRoot {
     pub(in crate::tests) fn open<P: AsRef<Path>>(path: P) -> Result<Self, CapiError> {
         let path = capi_utils::path_to_cstring(path);
 
-        capi_utils::call_capi_fd(|| unsafe { capi::core::pathrs_root_open(path.as_ptr()) })
+        capi_utils::call_capi_fd(|| unsafe { capi::core::pathrs_open_root(path.as_ptr()) })
             .map(Self::from_fd)
     }
 
@@ -66,7 +66,7 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_fd(|| unsafe {
-            capi::core::pathrs_resolve(root_fd.into(), path.as_ptr())
+            capi::core::pathrs_inroot_resolve(root_fd.into(), path.as_ptr())
         })
         .map(CapiHandle::from_fd)
     }
@@ -76,9 +76,24 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_fd(|| unsafe {
-            capi::core::pathrs_resolve_nofollow(root_fd.into(), path.as_ptr())
+            capi::core::pathrs_inroot_resolve_nofollow(root_fd.into(), path.as_ptr())
         })
         .map(CapiHandle::from_fd)
+    }
+
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, CapiError> {
+        let root_fd = self.inner.as_fd();
+        let path = capi_utils::path_to_cstring(path);
+        let flags = flags.into();
+
+        capi_utils::call_capi_fd(|| unsafe {
+            capi::core::pathrs_inroot_open(root_fd.into(), path.as_ptr(), flags.bits())
+        })
+        .map(From::from)
     }
 
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, CapiError> {
@@ -86,7 +101,7 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_readlink(|linkbuf, linkbuf_size| unsafe {
-            capi::core::pathrs_readlink(root_fd.into(), path.as_ptr(), linkbuf, linkbuf_size)
+            capi::core::pathrs_inroot_readlink(root_fd.into(), path.as_ptr(), linkbuf, linkbuf_size)
         })
     }
 
@@ -96,36 +111,44 @@ impl CapiRoot {
 
         capi_utils::call_capi_zst(|| unsafe {
             match inode_type {
-                InodeType::File(perm) => capi::core::pathrs_mknod(
+                InodeType::File(perm) => capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFREG | perm.mode(),
                     0,
                 ),
                 InodeType::Directory(perm) => {
-                    capi::core::pathrs_mkdir(root_fd.into(), path.as_ptr(), perm.mode())
+                    capi::core::pathrs_inroot_mkdir(root_fd.into(), path.as_ptr(), perm.mode())
                 }
                 InodeType::Symlink(target) => {
                     let target = capi_utils::path_to_cstring(target);
-                    capi::core::pathrs_symlink(root_fd.into(), path.as_ptr(), target.as_ptr())
+                    capi::core::pathrs_inroot_symlink(
+                        root_fd.into(),
+                        path.as_ptr(),
+                        target.as_ptr(),
+                    )
                 }
                 InodeType::Hardlink(target) => {
                     let target = capi_utils::path_to_cstring(target);
-                    capi::core::pathrs_hardlink(root_fd.into(), path.as_ptr(), target.as_ptr())
+                    capi::core::pathrs_inroot_hardlink(
+                        root_fd.into(),
+                        path.as_ptr(),
+                        target.as_ptr(),
+                    )
                 }
-                InodeType::Fifo(perm) => capi::core::pathrs_mknod(
+                InodeType::Fifo(perm) => capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFIFO | perm.mode(),
                     0,
                 ),
-                InodeType::CharacterDevice(perm, dev) => capi::core::pathrs_mknod(
+                InodeType::CharacterDevice(perm, dev) => capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFCHR | perm.mode(),
                     *dev,
                 ),
-                InodeType::BlockDevice(perm, dev) => capi::core::pathrs_mknod(
+                InodeType::BlockDevice(perm, dev) => capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFBLK | perm.mode(),
@@ -145,7 +168,12 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_fd(|| unsafe {
-            capi::core::pathrs_creat(root_fd.into(), path.as_ptr(), flags.bits(), perm.mode())
+            capi::core::pathrs_inroot_creat(
+                root_fd.into(),
+                path.as_ptr(),
+                flags.bits(),
+                perm.mode(),
+            )
         })
         .map(File::from)
     }
@@ -159,7 +187,7 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_fd(|| unsafe {
-            capi::core::pathrs_mkdir_all(root_fd.into(), path.as_ptr(), perm.mode())
+            capi::core::pathrs_inroot_mkdir_all(root_fd.into(), path.as_ptr(), perm.mode())
         })
         .map(CapiHandle::from_fd)
     }
@@ -169,7 +197,7 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_zst(|| unsafe {
-            capi::core::pathrs_rmdir(root_fd.into(), path.as_ptr())
+            capi::core::pathrs_inroot_rmdir(root_fd.into(), path.as_ptr())
         })
     }
 
@@ -178,7 +206,7 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_zst(|| unsafe {
-            capi::core::pathrs_unlink(root_fd.into(), path.as_ptr())
+            capi::core::pathrs_inroot_unlink(root_fd.into(), path.as_ptr())
         })
     }
 
@@ -187,7 +215,7 @@ impl CapiRoot {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_zst(|| unsafe {
-            capi::core::pathrs_remove_all(root_fd.into(), path.as_ptr())
+            capi::core::pathrs_inroot_remove_all(root_fd.into(), path.as_ptr())
         })
     }
 
@@ -202,7 +230,7 @@ impl CapiRoot {
         let destination = capi_utils::path_to_cstring(destination);
 
         capi_utils::call_capi_zst(|| unsafe {
-            capi::core::pathrs_rename(
+            capi::core::pathrs_inroot_rename(
                 root_fd.into(),
                 source.as_ptr(),
                 destination.as_ptr(),
@@ -254,6 +282,14 @@ impl RootImpl for CapiRoot {
 
     fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
         self.resolve_nofollow(path)
+    }
+
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        self.open_subpath(path, flags)
     }
 
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {
@@ -333,6 +369,14 @@ impl RootImpl for &CapiRoot {
 
     fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
         CapiRoot::resolve_nofollow(self, path)
+    }
+
+    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+        &self,
+        path: P,
+        flags: F,
+    ) -> Result<File, Self::Error> {
+        CapiRoot::open_subpath(self, path, flags)
     }
 
     fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {

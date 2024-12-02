@@ -47,15 +47,9 @@ func Main(args []string) error {
 	}
 	defer root.Close()
 
-	handle, err := root.Resolve(unsafePath)
+	file, err := root.Open(unsafePath)
 	if err != nil {
-		return fmt.Errorf("resolve %q: %w", unsafePath, err)
-	}
-	defer handle.Close()
-
-	file, err := handle.Open()
-	if err != nil {
-		return fmt.Errorf("reopen handle: %w", err)
+		return fmt.Errorf("open %q: %w", unsafePath, err)
 	}
 	defer file.Close()
 

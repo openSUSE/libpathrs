@@ -49,13 +49,9 @@ fn main() -> Result<(), Error> {
         .context("required unsafe-path argument not provided")?;
 
     let root = Root::open(root_path).context("open root failed")?;
-    let handle = root
-        .resolve(unsafe_path)
-        .context("resolve unsafe path in root")?;
-
-    let file = handle
-        .reopen(OpenFlags::O_RDONLY)
-        .context("reopen path with O_RDONLY")?;
+    let file = root
+        .open_subpath(unsafe_path, OpenFlags::O_RDONLY)
+        .context("open unsafe path in root")?;
 
     let reader = BufReader::new(file);
     for line in reader.lines() {

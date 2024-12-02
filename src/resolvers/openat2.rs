@@ -27,9 +27,43 @@ use crate::{
 };
 
 use std::{
+    fs::File,
     os::unix::io::AsFd,
     path::{Path, PathBuf},
 };
+
+/// Open `path` within `root` through `openat(2)`.
+///
+/// This is an optimised version of `resolve(root, path, ...)?.reopen(flags)`.
+pub(crate) fn open<Fd: AsFd, P: AsRef<Path>>(
+    root: Fd,
+    path: P,
+    rflags: ResolverFlags,
+    oflags: OpenFlags,
+) -> Result<File, Error> {
+    if !*syscalls::OPENAT2_IS_SUPPORTED {
+        Err(ErrorImpl::NotSupported {
+            feature: "openat2".into(),
+        })?
+    }
+
+    let rflags = libc::RESOLVE_IN_ROOT | libc::RESOLVE_NO_MAGICLINKS | rflags.bits();
+    let how = OpenHow {
+        flags: oflags.bits() as u64,
+        resolve: rflags,
+        ..Default::default()
+    };
+
+    syscalls::openat2(&root, path.as_ref(), &how)
+        .map(File::from)
+        .map_err(|err| {
+            ErrorImpl::RawOsError {
+                operation: "openat2 one-shot open".into(),
+                source: err,
+            }
+            .into()
+        })
+}
 
 /// Resolve `path` within `root` through `openat2(2)`.
 pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(

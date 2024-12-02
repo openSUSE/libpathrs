@@ -50,14 +50,14 @@ use libc::{c_char, c_int, c_uint, dev_t, size_t};
 /// # Return Value
 ///
 /// On success, this function returns a file descriptor that can be used as a
-/// root handle in subsequent pathrs_* operations.
+/// root handle in subsequent pathrs_inroot_* operations.
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
+pub unsafe extern "C" fn pathrs_open_root(path: *const c_char) -> RawFd {
     unsafe { utils::parse_path(path) } // SAFETY: C caller says path is safe.
         .and_then(Root::open)
         .into_c_return()
@@ -69,7 +69,7 @@ pub unsafe extern "C" fn pathrs_root_open(path: *const c_char) -> RawFd {
 ///
 /// It should be noted that the use of O_CREAT *is not* supported (and will
 /// result in an error). Handles only refer to *existing* files. Instead you
-/// need to use pathrs_creat().
+/// need to use pathrs_inroot_creat().
 ///
 /// In addition, O_NOCTTY is automatically set when opening the path. If you
 /// want to use the path as a controlling terminal, you will have to do
@@ -107,7 +107,7 @@ pub extern "C" fn pathrs_reopen(fd: CBorrowedFd<'_>, flags: c_int) -> RawFd {
 ///
 /// All symlinks (including trailing symlinks) are followed, but they are
 /// resolved within the rootfs. If you wish to open a handle to the symlink
-/// itself, use pathrs_resolve_nofollow().
+/// itself, use pathrs_inroot_resolve_nofollow().
 ///
 /// # Return Value
 ///
@@ -119,7 +119,10 @@ pub extern "C" fn pathrs_reopen(fd: CBorrowedFd<'_>, flags: c_int) -> RawFd {
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_resolve(root_fd: CBorrowedFd<'_>, path: *const c_char) -> RawFd {
+pub unsafe extern "C" fn pathrs_inroot_resolve(
+    root_fd: CBorrowedFd<'_>,
+    path: *const c_char,
+) -> RawFd {
     || -> Result<_, Error> {
         let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd(root_fd);
@@ -129,10 +132,11 @@ pub unsafe extern "C" fn pathrs_resolve(root_fd: CBorrowedFd<'_>, path: *const c
     .into_c_return()
 }
 
-/// pathrs_resolve_nofollow() is effectively an O_NOFOLLOW version of
-/// pathrs_resolve(). Their behaviour is identical, except that *trailing*
-/// symlinks will not be followed. If the final component is a trailing symlink,
-/// an O_PATH|O_NOFOLLOW handle to the symlink itself is returned.
+/// pathrs_inroot_resolve_nofollow() is effectively an O_NOFOLLOW version of
+/// pathrs_inroot_resolve(). Their behaviour is identical, except that
+/// *trailing* symlinks will not be followed. If the final component is a
+/// trailing symlink, an O_PATH|O_NOFOLLOW handle to the symlink itself is
+/// returned.
 ///
 /// # Return Value
 ///
@@ -144,7 +148,7 @@ pub unsafe extern "C" fn pathrs_resolve(root_fd: CBorrowedFd<'_>, path: *const c
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_resolve_nofollow(
+pub unsafe extern "C" fn pathrs_inroot_resolve_nofollow(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
 ) -> RawFd {
@@ -157,16 +161,61 @@ pub unsafe extern "C" fn pathrs_resolve_nofollow(
     .into_c_return()
 }
 
+/// pathrs_inroot_open() is effectively shorthand for pathrs_inroot_resolve()
+/// followed by pathrs_reopen(). If you only need to open a path and don't care
+/// about re-opening it later, this can be slightly more efficient than the
+/// alternative for the openat2-based resolver as it doesn't require allocating
+/// an extra file descriptor. For languages where C FFI is expensive (such as
+/// Go), using this also saves a function call.
+///
+/// If flags contains O_NOFOLLOW, the behaviour is like that of
+/// pathrs_inroot_resolve_nofollow() followed by pathrs_reopen().
+///
+/// In addition, O_NOCTTY is automatically set when opening the path. If you
+/// want to use the path as a controlling terminal, you will have to do
+/// ioctl(fd, TIOCSCTTY, 0) yourself.
+///
+/// # Return Value
+///
+/// On success, this function returns a file descriptor.
+///
+/// If an error occurs, this function will return a negative error code. To
+/// retrieve information about the error (such as a string describing the error,
+/// the system errno(7) value associated with the error, etc), use
+/// pathrs_errorinfo().
+#[no_mangle]
+pub unsafe extern "C" fn pathrs_inroot_open(
+    root_fd: CBorrowedFd<'_>,
+    path: *const c_char,
+    flags: c_int,
+) -> RawFd {
+    || -> Result<_, Error> {
+        let root_fd = root_fd.try_as_borrowed_fd()?;
+        let root = RootRef::from_fd(root_fd);
+        let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
+        let flags = OpenFlags::from_bits_retain(flags);
+        root.open_subpath(path, flags).and_then(|file| {
+            // Rust sets O_CLOEXEC by default, without an opt-out. We need
+            // to disable it if we weren't asked to do O_CLOEXEC.
+            if !flags.contains(OpenFlags::O_CLOEXEC) {
+                utils::fcntl_unset_cloexec(&file).wrap("clear O_CLOEXEC on reopened fd")?;
+            }
+            Ok(file)
+        })
+    }()
+    .into_c_return()
+}
+
 /// Get the target of a symlink within the rootfs referenced by root_fd.
 ///
 /// NOTE: The returned path is not modified to be "safe" outside of the
 /// root. You should not use this path for doing further path lookups -- use
-/// pathrs_resolve() instead.
+/// pathrs_inroot_resolve() instead.
 ///
 /// This method is just shorthand for:
 ///
 /// ```c
-/// int linkfd = pathrs_resolve_nofollow(rootfd, path);
+/// int linkfd = pathrs_inroot_resolve_nofollow(rootfd, path);
 /// if (linkfd < 0) {
 ///     liberr = fd; // for use with pathrs_errorinfo()
 ///     goto err;
@@ -184,16 +233,16 @@ pub unsafe extern "C" fn pathrs_resolve_nofollow(
 /// treated as zero-size buffers.
 ///
 /// NOTE: Unlike readlinkat(2), in the case where linkbuf is too small to
-/// contain the symlink contents, pathrs_readlink() will return *the number of
-/// bytes it would have copied if the buffer was large enough*. This matches the
-/// behaviour of pathrs_proc_readlink().
+/// contain the symlink contents, pathrs_inroot_readlink() will return *the
+/// number of bytes it would have copied if the buffer was large enough*. This
+/// matches the behaviour of pathrs_proc_readlink().
 ///
 /// If an error occurs, this function will return a negative error code. To
 /// retrieve information about the error (such as a string describing the error,
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_readlink(
+pub unsafe extern "C" fn pathrs_inroot_readlink(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     linkbuf: *mut c_char,
@@ -223,7 +272,7 @@ pub unsafe extern "C" fn pathrs_readlink(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_rename(
+pub unsafe extern "C" fn pathrs_inroot_rename(
     root_fd: CBorrowedFd<'_>,
     src: *const c_char,
     dst: *const c_char,
@@ -256,7 +305,10 @@ pub unsafe extern "C" fn pathrs_rename(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_rmdir(root_fd: CBorrowedFd<'_>, path: *const c_char) -> c_int {
+pub unsafe extern "C" fn pathrs_inroot_rmdir(
+    root_fd: CBorrowedFd<'_>,
+    path: *const c_char,
+) -> c_int {
     || -> Result<_, Error> {
         let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd(root_fd);
@@ -281,7 +333,10 @@ pub unsafe extern "C" fn pathrs_rmdir(root_fd: CBorrowedFd<'_>, path: *const c_c
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_unlink(root_fd: CBorrowedFd<'_>, path: *const c_char) -> c_int {
+pub unsafe extern "C" fn pathrs_inroot_unlink(
+    root_fd: CBorrowedFd<'_>,
+    path: *const c_char,
+) -> c_int {
     || -> Result<_, Error> {
         let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd(root_fd);
@@ -303,7 +358,10 @@ pub unsafe extern "C" fn pathrs_unlink(root_fd: CBorrowedFd<'_>, path: *const c_
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_remove_all(root_fd: CBorrowedFd<'_>, path: *const c_char) -> c_int {
+pub unsafe extern "C" fn pathrs_inroot_remove_all(
+    root_fd: CBorrowedFd<'_>,
+    path: *const c_char,
+) -> c_int {
     || -> Result<_, Error> {
         let root_fd = root_fd.try_as_borrowed_fd()?;
         let root = RootRef::from_fd(root_fd);
@@ -315,27 +373,28 @@ pub unsafe extern "C" fn pathrs_remove_all(root_fd: CBorrowedFd<'_>, path: *cons
 
 // Within the root, create an inode at the path with the given mode. If the
 // path already exists, an error is returned (effectively acting as though
-// O_EXCL is always set). Each pathrs_* corresponds to the matching syscall.
+// O_EXCL is always set). Each pathrs_inroot_* corresponds to the matching
+// syscall.
 
 // TODO: Replace all these wrappers with macros. It's quite repetitive.
 
 /// Create a new regular file within the rootfs referenced by root_fd. This is
-/// effectively an O_CREAT operation, and so (unlike pathrs_resolve()), this
-/// function can be used on non-existent paths.
+/// effectively an O_CREAT operation, and so (unlike pathrs_inroot_resolve()),
+/// this function can be used on non-existent paths.
 ///
 /// If you want to ensure the creation is a new file, use O_EXCL.
 ///
 /// If you want to create a file without opening a handle to it, you can do
-/// pathrs_mknod(root_fd, path, S_IFREG|mode, 0) instead.
+/// pathrs_inroot_mknod(root_fd, path, S_IFREG|mode, 0) instead.
 ///
 /// As with pathrs_reopen(), O_NOCTTY is automatically set when opening the
 /// path. If you want to use the path as a controlling terminal, you will have
 /// to do ioctl(fd, TIOCSCTTY, 0) yourself.
 ///
-/// NOTE: Unlike O_CREAT, pathrs_creat() will return an error if the final
-/// component is a dangling symlink. O_CREAT will create such files, and while
-/// openat2 does support this it would be difficult to implement this in the
-/// emulated resolver.
+/// NOTE: Unlike O_CREAT, pathrs_inroot_creat() will return an error if the
+/// final component is a dangling symlink. O_CREAT will create such files, and
+/// while openat2 does support this it would be difficult to implement this in
+/// the emulated resolver.
 ///
 /// # Return Value
 ///
@@ -347,7 +406,7 @@ pub unsafe extern "C" fn pathrs_remove_all(root_fd: CBorrowedFd<'_>, path: *cons
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_creat(
+pub unsafe extern "C" fn pathrs_inroot_creat(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     flags: c_int,
@@ -374,7 +433,7 @@ pub unsafe extern "C" fn pathrs_creat(
 
 /// Create a new directory within the rootfs referenced by root_fd.
 ///
-/// This is shorthand for pathrs_mknod(root_fd, path, S_IFDIR|mode, 0).
+/// This is shorthand for pathrs_inroot_mknod(root_fd, path, S_IFDIR|mode, 0).
 ///
 /// # Return Value
 ///
@@ -385,13 +444,13 @@ pub unsafe extern "C" fn pathrs_creat(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_mkdir(
+pub unsafe extern "C" fn pathrs_inroot_mkdir(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     mode: c_uint,
 ) -> c_int {
     let mode = mode & !libc::S_IFMT;
-    pathrs_mknod(root_fd, path, libc::S_IFDIR | mode, 0)
+    pathrs_inroot_mknod(root_fd, path, libc::S_IFDIR | mode, 0)
 }
 
 /// Create a new directory (and any of its path components if they don't exist)
@@ -407,7 +466,7 @@ pub unsafe extern "C" fn pathrs_mkdir(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_mkdir_all(
+pub unsafe extern "C" fn pathrs_inroot_mkdir_all(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     mode: c_uint,
@@ -434,7 +493,7 @@ pub unsafe extern "C" fn pathrs_mkdir_all(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_mknod(
+pub unsafe extern "C" fn pathrs_inroot_mknod(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     mode: c_uint,
@@ -478,7 +537,7 @@ pub unsafe extern "C" fn pathrs_mknod(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_symlink(
+pub unsafe extern "C" fn pathrs_inroot_symlink(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     target: *const c_char,
@@ -505,7 +564,7 @@ pub unsafe extern "C" fn pathrs_symlink(
 /// the system errno(7) value associated with the error, etc), use
 /// pathrs_errorinfo().
 #[no_mangle]
-pub unsafe extern "C" fn pathrs_hardlink(
+pub unsafe extern "C" fn pathrs_inroot_hardlink(
     root_fd: CBorrowedFd<'_>,
     path: *const c_char,
     target: *const c_char,
