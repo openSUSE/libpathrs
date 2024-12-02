@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - python bindings: `Root.open` has been changed to be a wrapper of
   `pathrs_inroot_open` instead of being a wrapper around the `Root`
   constructor.
+- All C FFI functions that return a file descriptor now set `O_CLOEXEC` by
+  default. Previously some functions that took `O_*` flags would only set
+  `O_CLOEXEC` if the user explicitly requested it, but `O_CLOEXEC` is easy to
+  unset on file descriptors and having it enabled is a more sane default.
 
 ### Added ###
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a
