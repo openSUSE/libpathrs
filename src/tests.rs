@@ -26,6 +26,9 @@ pub(crate) mod common {
 
     mod handle;
     pub(in crate::tests) use handle::*;
+
+    mod error;
+    pub(in crate::tests) use error::*;
 }
 
 #[cfg(feature = "capi")]

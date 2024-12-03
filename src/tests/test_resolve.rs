@@ -496,14 +496,14 @@ mod utils {
         syscalls,
         tests::{
             common::{self as tests_common, LookupResult},
-            traits::{ErrorImpl, HandleImpl, RootImpl},
+            traits::{HandleImpl, RootImpl},
         },
         utils::FdExt,
     };
 
     use std::{os::unix::fs::MetadataExt, path::Path};
 
-    use anyhow::Error;
+    use anyhow::{Context, Error};
     use pretty_assertions::assert_eq;
 
     pub(super) fn check_root_resolve<R, H, P: AsRef<Path>>(
@@ -532,23 +532,18 @@ mod utils {
                 expected_path.replace("{{/proc/self}}", &format!("{}", syscalls::getpid())),
                 file_type,
             ),
+            (result, expected) => {
+                let result = match result {
+                    Ok(handle) => Ok(handle.as_unsafe_path_unchecked()?),
+                    Err(err) => Err(err),
+                };
 
-            (Err(err), Ok((expected_path, _))) => {
-                anyhow::bail!("unexpected error '{err:?}', expected file {expected_path:?}",)
-            }
+                tests_common::check_err(&result, &expected)
+                    .with_context(|| format!("root resolve {unsafe_path:?}"))?;
 
-            (Ok(handle), Err(want_err)) => anyhow::bail!(
-                "expected to get io::Error {} but instead got file {}",
-                tests_common::errno_description(want_err),
-                handle.as_unsafe_path_unchecked()?.display(),
-            ),
-
-            (Err(err), Err(want_err)) => {
-                assert_eq!(
-                    err.kind(),
-                    want_err,
-                    "expected io::Error {}, got '{err:?}'",
-                    tests_common::errno_description(want_err),
+                assert!(
+                    result.is_err(),
+                    "we should never see an Ok(file) after check_err if we expected {expected:?}"
                 );
                 return Ok(());
             }
@@ -627,27 +622,16 @@ mod utils {
                     "we must only get a symlink handle if no_follow_trailing is set"
                 );
 
-                assert_eq!(
-                    H::reopen(&handle, OpenFlags::O_RDONLY)
-                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
-                        .map_err(|err| err.kind()),
-                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
-                    "reopen(O_RDONLY) of a symlink handle should fail with ELOOP"
-                );
-                assert_eq!(
-                    H::reopen(&handle, OpenFlags::O_PATH)
-                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
-                        .map_err(|err| err.kind()),
-                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
-                    "reopen(O_PATH) of a symlink handle should fail with ELOOP"
-                );
-                assert_eq!(
-                    H::reopen(&handle, OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW)
-                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
-                        .map_err(|err| err.kind()),
-                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
-                    "reopen(O_PATH|O_NOFOLLOW) of a symlink handle should fail with ELOOP"
-                );
+                tests_common::check_reopen(&handle, OpenFlags::O_RDONLY, Some(libc::ELOOP))
+                    .context("reopen(O_RDONLY) of a symlink handle should fail with ELOOP")?;
+                tests_common::check_reopen(&handle, OpenFlags::O_PATH, Some(libc::ELOOP))
+                    .context("reopen(O_PATH) of a symlink handle should fail with ELOOP")?;
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW,
+                    Some(libc::ELOOP),
+                )
+                .context("reopen(O_PATH|O_NOFOLLOW) of a symlink handle should fail with ELOOP")?;
             }
             _ => {
                 tests_common::check_reopen(&handle, OpenFlags::O_PATH, None)?;

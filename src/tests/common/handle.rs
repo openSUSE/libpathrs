@@ -20,17 +20,13 @@
 use crate::{
     error::ErrorKind,
     flags::OpenFlags,
-    tests::{
-        common as tests_common,
-        traits::{ErrorImpl, HandleImpl},
-    },
+    tests::{common as tests_common, traits::HandleImpl},
     utils::FdExt,
 };
 
 use std::os::unix::io::AsFd;
 
 use anyhow::{Context, Error};
-use errno::Errno;
 use pretty_assertions::assert_eq;
 use rustix::{
     fs::{self as rustix_fs, OFlags},
@@ -38,13 +34,6 @@ use rustix::{
 };
 
 pub type LookupResult<'a> = (&'a str, libc::mode_t);
-
-pub(in crate::tests) fn errno_description(err: ErrorKind) -> String {
-    match err {
-        ErrorKind::OsError(Some(errno)) => format!("{err:?} ({})", Errno(errno)),
-        _ => format!("{err:?}"),
-    }
-}
 
 pub(in crate::tests) fn check_oflags<Fd: AsFd>(fd: Fd, flags: OpenFlags) -> Result<(), Error> {
     let fd = fd.as_fd();
@@ -89,22 +78,25 @@ pub(in crate::tests) fn check_reopen<H: HandleImpl>(
     flags: OpenFlags,
     expected_error: Option<i32>,
 ) -> Result<(), Error> {
-    let expected_error = expected_error.map(|errno| ErrorKind::OsError(Some(errno)));
+    let expected_error = match expected_error {
+        None => Ok(()),
+        Some(errno) => Err(ErrorKind::OsError(Some(errno))),
+    };
+
     let file = match (handle.reopen(flags), expected_error) {
-        (Ok(f), None) => f,
-        (Err(e), None) => anyhow::bail!("unexpected error '{}'", e),
-        (Ok(f), Some(want_err)) => anyhow::bail!(
-            "expected to get io::Error {} but instead got file {}",
-            tests_common::errno_description(want_err),
-            f.as_unsafe_path_unchecked()?.display(),
-        ),
-        (Err(err), Some(want_err)) => {
-            assert_eq!(
-                err.kind(),
-                want_err,
-                "expected io::Error {}, got '{}'",
-                errno_description(want_err),
-                err,
+        (Ok(f), Ok(_)) => f,
+        (result, expected) => {
+            let result = match result {
+                Ok(file) => Ok(file.as_unsafe_path_unchecked()?),
+                Err(err) => Err(err),
+            };
+
+            tests_common::check_err(&result, &expected)
+                .with_context(|| format!("reopen handle {flags:?}"))?;
+
+            assert!(
+                result.is_err(),
+                "we should never see an Ok(file) after check_err if we expected {expected:?}"
             );
             return Ok(());
         }
