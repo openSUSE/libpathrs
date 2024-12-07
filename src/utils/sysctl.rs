@@ -114,7 +114,7 @@ mod tests {
             super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "kernel.printk")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::ParseError),
+            Err(ErrorKind::InternalError),
             "parsing line from multi-number sysctl",
         );
     }
@@ -126,7 +126,7 @@ mod tests {
             super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "kernel.random.uuid")
                 .as_ref()
                 .map_err(Error::kind),
-            Err(ErrorKind::ParseError),
+            Err(ErrorKind::InternalError),
             "parsing line from non-number sysctl",
         );
     }

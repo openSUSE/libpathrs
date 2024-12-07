@@ -108,8 +108,7 @@ pub(crate) enum ErrorKind {
     NotSupported,
     InvalidArgument,
     SafetyViolation,
-    BadSymlinkStack,
-    ParseError,
+    InternalError,
     // TODO: We might want to use Option<std::io::ErrorKind>?
     OsError(Option<i32>),
 }
@@ -121,12 +120,16 @@ impl ErrorImpl {
             Self::NotSupported { .. } => ErrorKind::NotSupported,
             Self::InvalidArgument { .. } => ErrorKind::InvalidArgument,
             Self::SafetyViolation { .. } => ErrorKind::SafetyViolation,
-            Self::BadSymlinkStackError { .. } => ErrorKind::BadSymlinkStack,
-            Self::ParseIntError(_) => ErrorKind::ParseError,
+            // Any syscall-related errors get mapped to an OsError, since the
+            // distinction doesn't matter to users checking error values.
             Self::OsError { source, .. } => ErrorKind::OsError(source.raw_os_error()),
             Self::RawOsError { source, .. } => {
                 ErrorKind::OsError(source.root_cause().raw_os_error())
             }
+            // These errors are internal error types that we don't want to
+            // expose outside of the crate. All that matters to users is that
+            // there was some internal error.
+            Self::BadSymlinkStackError { .. } | Self::ParseIntError(_) => ErrorKind::InternalError,
             Self::Wrapped { source, .. } => source.kind(),
         }
     }

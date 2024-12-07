@@ -72,7 +72,7 @@ impl ErrorImpl for CapiError {
             // TODO: We should probably have an actual "no-op" error here that
             //       is unused except for these tests so we can properly detect
             //       a bad ErrorKind.
-            ErrorKind::ParseError
+            ErrorKind::InternalError
         }
     }
 }
