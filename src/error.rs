@@ -36,6 +36,10 @@ use std::{borrow::Cow, io::Error as IOError};
 //       export the crate types here without std::backtrace::Backtrace.
 // MSRV(1.65): Use std::backtrace::Backtrace.
 
+/// Opaque error type for libpathrs.
+///
+/// If you wish to do non-trivial error handling with libpathrs errors, use
+/// [`Error::kind`] to get an [`ErrorKind`] you can handle programmatically.
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
 pub struct Error(#[from] Box<ErrorImpl>);
@@ -49,7 +53,7 @@ impl<E: Into<ErrorImpl>> From<E> for Error {
 }
 
 impl Error {
-    pub(crate) fn kind(&self) -> ErrorKind {
+    pub fn kind(&self) -> ErrorKind {
         self.0.kind()
     }
 }
@@ -100,16 +104,28 @@ pub(crate) enum ErrorImpl {
     },
 }
 
-// TODO: Export this?
+/// Underlying error class for libpathrs errors.
+///
+/// This is similar in concept to [`std::io::ErrorKind`]. Note that the
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[non_exhaustive]
-pub(crate) enum ErrorKind {
+pub enum ErrorKind {
+    /// The requested feature is not implemented in libpathrs.
     NotImplemented,
+    /// The requested feature is not supported by the system.
     NotSupported,
+    /// The provided arguments to libpathrs were invalid.
     InvalidArgument,
+    /// libpaths encountered a state where the safety of the operation could not
+    /// be guaranteeed. This is usually the result of an attack by a malicious
+    /// program.
     SafetyViolation,
-    BadSymlinkStack,
-    ParseError,
+    /// Some internal error occurred. For more information, see the string
+    /// description of the original [`Error`].
+    InternalError,
+    /// The underlying error came from a system call. The provided
+    /// [`std::io::RawOsError`] is the numerical value of the `errno` number, if
+    /// available.
     // TODO: We might want to use Option<std::io::ErrorKind>?
     OsError(Option<i32>),
 }
@@ -121,13 +137,35 @@ impl ErrorImpl {
             Self::NotSupported { .. } => ErrorKind::NotSupported,
             Self::InvalidArgument { .. } => ErrorKind::InvalidArgument,
             Self::SafetyViolation { .. } => ErrorKind::SafetyViolation,
-            Self::BadSymlinkStackError { .. } => ErrorKind::BadSymlinkStack,
-            Self::ParseIntError(_) => ErrorKind::ParseError,
+            // Any syscall-related errors get mapped to an OsError, since the
+            // distinction doesn't matter to users checking error values.
             Self::OsError { source, .. } => ErrorKind::OsError(source.raw_os_error()),
             Self::RawOsError { source, .. } => {
                 ErrorKind::OsError(source.root_cause().raw_os_error())
             }
+            // These errors are internal error types that we don't want to
+            // expose outside of the crate. All that matters to users is that
+            // there was some internal error.
+            Self::BadSymlinkStackError { .. } | Self::ParseIntError(_) => ErrorKind::InternalError,
             Self::Wrapped { source, .. } => source.kind(),
+        }
+    }
+}
+
+impl ErrorKind {
+    /// Return a C-like errno for the [`ErrorKind`].
+    ///
+    /// Aside from fetching the errno represented by standard
+    /// [`ErrorKind::OsError`] errors, pure-Rust errors are also mapped to C
+    /// errno values where appropriate.
+    #[cfg(any(feature = "capi", test))]
+    pub(crate) fn errno(&self) -> Option<i32> {
+        match self {
+            ErrorKind::NotImplemented => Some(libc::ENOSYS),
+            ErrorKind::InvalidArgument => Some(libc::EINVAL),
+            ErrorKind::OsError(errno) => *errno,
+            // TODO: Should we remap SafetyViolation?
+            _ => None,
         }
     }
 }
@@ -173,5 +211,31 @@ impl<T, E: ErrorExt> ErrorExt for Result<T, E> {
         F: FnOnce() -> String,
     {
         self.map_err(|err| err.with_wrap(context_fn))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn error_kind_errno() {
+        assert_eq!(
+            ErrorKind::InvalidArgument.errno(),
+            Some(libc::EINVAL),
+            "ErrorKind::InvalidArgument is equivalent to EINVAL"
+        );
+        assert_eq!(
+            ErrorKind::NotImplemented.errno(),
+            Some(libc::ENOSYS),
+            "ErrorKind::NotImplemented is equivalent to ENOSYS"
+        );
+        assert_eq!(
+            ErrorKind::OsError(Some(libc::ENOANO)).errno(),
+            Some(libc::ENOANO),
+            "ErrorKind::OsError(...)::errno() returns the inner errno"
+        );
     }
 }

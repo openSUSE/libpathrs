@@ -676,7 +676,7 @@ mod utils {
 
     use std::{os::unix::fs::MetadataExt, path::Path};
 
-    use anyhow::Error;
+    use anyhow::{Context, Error};
     use pretty_assertions::assert_eq;
 
     impl<H, E> PartialEq for PartialLookup<H, E>
@@ -782,22 +782,12 @@ mod utils {
 
                 ((handle, lookup_result), expected_lookup_result)
             }
-
-            (Err(err), Ok(expected)) => {
-                anyhow::bail!("unexpected error '{err:?}', expected successful {expected:?}",)
-            }
-
-            (Ok((_, lookup_result)), Err(want_err)) => anyhow::bail!(
-                "expected to get io::Error {} but instead got result {lookup_result:?}",
-                tests_common::errno_description(want_err),
-            ),
-
-            (Err(err), Err(want_err)) => {
-                assert_eq!(
-                    err.kind(),
-                    want_err,
-                    "expected io::Error {}, got '{err:?}'",
-                    tests_common::errno_description(want_err),
+            (result, expected) => {
+                tests_common::check_err(&result, &expected)
+                    .with_context(|| format!("resolve partial {unsafe_path:?}"))?;
+                assert!(
+                    result.is_err(),
+                    "we should never see an Ok(handle) after check_err if we expected {expected:?}"
                 );
                 return Ok(());
             }
@@ -824,30 +814,16 @@ mod utils {
                     "we must only get a symlink handle if no_follow_trailing is set"
                 );
 
-                assert_eq!(
-                    handle
-                        .reopen(OpenFlags::O_RDONLY)
-                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
-                        .map_err(|err| err.kind()),
-                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
-                    "reopen(O_RDONLY) of a symlink handle should fail with ELOOP"
-                );
-                assert_eq!(
-                    handle
-                        .reopen(OpenFlags::O_PATH)
-                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
-                        .map_err(|err| err.kind()),
-                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
-                    "reopen(O_PATH) of a symlink handle should fail with ELOOP"
-                );
-                assert_eq!(
-                    handle
-                        .reopen(OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW)
-                        .map(|f| f.as_unsafe_path_unchecked().unwrap())
-                        .map_err(|err| err.kind()),
-                    Err(ErrorKind::OsError(Some(libc::ELOOP))),
-                    "reopen(O_PATH|O_NOFOLLOW) of a symlink handle should fail with ELOOP"
-                );
+                tests_common::check_reopen(&handle, OpenFlags::O_RDONLY, Some(libc::ELOOP))
+                    .context("reopen(O_RDONLY) of a symlink handle should fail with ELOOP")?;
+                tests_common::check_reopen(&handle, OpenFlags::O_PATH, Some(libc::ELOOP))
+                    .context("reopen(O_PATH) of a symlink handle should fail with ELOOP")?;
+                tests_common::check_reopen(
+                    &handle,
+                    OpenFlags::O_PATH | OpenFlags::O_NOFOLLOW,
+                    Some(libc::ELOOP),
+                )
+                .context("reopen(O_PATH|O_NOFOLLOW) of a symlink handle should fail with ELOOP")?;
             }
             _ => {
                 tests_common::check_reopen(&handle, OpenFlags::O_PATH, None)?;

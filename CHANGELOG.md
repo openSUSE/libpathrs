@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   efficient in some scenarios (especially with the openat2-based resolver or
   for C FFI users where function calls are expensive) as it saves one file
   descriptor allocation and extra function calls.
+- Error: `ErrorKind` is now exported, allowing you to programmatically handle
+  errors returned by libpathrs. This interface may change in the future (in
+  particular, `ErrorKind::OsError` might change its representation of `errno`
+  values).
+- capi: errors that are returned by libpathrs itself (such as invalid arguments
+  being passed by users) will now contain a `saved_errno` value that makes
+  sense for the error type (so `ErrorKind::InvalidArgument` will result in an
+  `EINVAL` value for `saved_errno`). This will allow C users to have a nicer
+  time handling errors programmatically.
 
 ### Fixes ###
 - multiarch: we now build correctly on 32-bit architectures as well as

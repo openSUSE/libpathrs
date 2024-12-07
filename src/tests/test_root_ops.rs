@@ -462,7 +462,7 @@ mod utils {
         path::{Path, PathBuf},
     };
 
-    use anyhow::Error;
+    use anyhow::{Context, Error};
     use pretty_assertions::{assert_eq, assert_ne};
     use rustix::{
         fs::{Mode, RawMode},
@@ -497,7 +497,10 @@ mod utils {
         let expected_result = expected_result.map(|(path, mode)| (root_dir.join(path), mode));
 
         match root.create(path, &inode_type) {
-            Err(err) => assert_eq!(Err(err.kind()), expected_result, "unexpected error {err:?}",),
+            Err(err) => {
+                tests_common::check_err(&Err::<(), _>(err), &expected_result)
+                    .with_context(|| format!("root create {path:?}"))?;
+            }
             Ok(_) => {
                 let root = root_roundtrip(root)?;
                 let created = root.resolve_nofollow(path)?;
@@ -568,7 +571,10 @@ mod utils {
         let expected_result = expected_result.map(|path| root_dir.join(path));
 
         match root.create_file(path, oflags, perm) {
-            Err(err) => assert_eq!(Err(err.kind()), expected_result, "unexpected err {err:?}"),
+            Err(err) => {
+                tests_common::check_err(&Err::<(), _>(err), &expected_result)
+                    .with_context(|| format!("root create file {path:?}"))?;
+            }
             Ok(file) => {
                 let actual_path = file.as_fd().as_unsafe_path_unchecked()?;
                 assert_eq!(
@@ -631,7 +637,10 @@ mod utils {
         let expected_result = expected_result.map(|path| root_dir.join(path));
 
         match root.open_subpath(path, oflags) {
-            Err(err) => assert_eq!(Err(err.kind()), expected_result, "unexpected err {err:?}"),
+            Err(err) => {
+                tests_common::check_err(&Err::<(), _>(err), &expected_result)
+                    .with_context(|| format!("root open subpath {path:?}"))?;
+            }
             Ok(file) => {
                 let actual_path = file.as_fd().as_unsafe_path_unchecked()?;
                 assert_eq!(
@@ -674,11 +683,8 @@ mod utils {
         let handle = root.resolve_nofollow(path); // do not unwrap
 
         let res = remove_fn(&root, path);
-        assert_eq!(
-            res.as_ref().err().map(R::Error::kind),
-            expected_result.err(),
-            "unexpected result {res:?}"
-        );
+        tests_common::check_err(&res, &expected_result)
+            .with_context(|| format!("root remove {path:?}"))?;
 
         if res.is_ok() {
             let handle = handle.wrap("open handle before remoev")?;
@@ -760,11 +766,8 @@ mod utils {
         };
 
         let res = root.rename(src_path, dst_path, rflags);
-        assert_eq!(
-            res.as_ref().err().map(R::Error::kind),
-            expected_result.err(),
-            "unexpected result {res:?}"
-        );
+        tests_common::check_err(&res, &expected_result)
+            .with_context(|| format!("root rename {src_path:?} -> {dst_path:?} {rflags:?}"))?;
 
         if res.is_ok() {
             // Confirm that the handle was moved.
@@ -863,12 +866,7 @@ mod utils {
         let res = root
             .mkdir_all(unsafe_path, &perm)
             .with_wrap(|| format!("mkdir_all {unsafe_path:?}"));
-        assert_eq!(
-            res.as_ref().err().map(R::Error::kind),
-            expected_result.err(),
-            "unexpected result {:?}",
-            res.map_err(|err| err.to_string())
-        );
+        tests_common::check_err(&res, &expected_result)?;
 
         if let PartialLookup::Partial {
             handle,

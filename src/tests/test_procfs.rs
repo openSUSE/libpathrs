@@ -289,7 +289,7 @@ mod utils {
         utils,
     };
 
-    use anyhow::Error;
+    use anyhow::{Context, Error};
 
     #[derive(Debug, PartialEq, Eq, Clone, Copy)]
     pub(super) enum ExpectedResult {
@@ -302,26 +302,21 @@ mod utils {
         res: Result<T, E>,
         over_mounts: bool,
         expected: ExpectedResult,
-    ) {
+    ) -> Result<(), Error> {
         let want_error = match expected {
-            ExpectedResult::Ok => None,
-            ExpectedResult::Err(kind) => Some(kind),
+            ExpectedResult::Ok => Ok(()),
+            ExpectedResult::Err(kind) => Err(kind),
             ExpectedResult::ErrOvermount(kind) => {
                 if over_mounts {
-                    Some(kind)
+                    Err(kind)
                 } else {
-                    None
+                    Ok(())
                 }
             }
         };
-        assert_eq!(
-            res.as_ref().err().map(E::kind),
-            want_error,
-            "unexpected result for overmounts={} got {:?} (expected error {:?})",
-            over_mounts,
-            res,
-            expected
-        );
+        tests_common::check_err(&res, &want_error)
+            .with_context(|| format!("unexpected result for overmounts={over_mounts}"))?;
+        Ok(())
     }
 
     fn in_host_mnt_ns<T, E, F>(expected: ExpectedResult, func: F) -> Result<(), Error>
@@ -334,7 +329,7 @@ mod utils {
         let are_over_mounts_visible = false;
 
         let res = func();
-        check_proc_error(res, are_over_mounts_visible, expected);
+        check_proc_error(res, are_over_mounts_visible, expected)?;
         Ok(())
     }
 
@@ -411,7 +406,7 @@ mod utils {
             }
 
             let res = func();
-            check_proc_error(res, are_over_mounts_visible, expected);
+            check_proc_error(res, are_over_mounts_visible, expected)?;
             Ok(())
         })
     }

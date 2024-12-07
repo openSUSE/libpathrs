@@ -19,7 +19,7 @@
 
 use crate::{
     capi::{ret::CReturn, utils::Leakable},
-    error::{Error, ErrorKind},
+    error::Error,
 };
 
 use std::{
@@ -100,16 +100,13 @@ impl From<&Error> for CError {
             CString::new(desc).expect("CString::new(description) failed in CError generation")
         };
 
-        // TODO: We should probably convert some of our internal errors into
-        //       equivalent POSIX-style errors (InvalidArgument => -EINVAL, for
-        //       instance).
-        let errno = match err.kind() {
-            ErrorKind::OsError(Some(err)) => err.abs(),
-            _ => 0,
-        };
+        // Map the error to a C errno if possible.
+        // TODO: We might want to use ESERVERFAULT (An untranslatable error
+        // occurred) for untranslatable errors?
+        let saved_errno = err.kind().errno().unwrap_or(0).unsigned_abs();
 
         CError {
-            saved_errno: errno.try_into().unwrap_or(0),
+            saved_errno: saved_errno.into(),
             description: desc.into_raw(),
         }
     }
@@ -185,4 +182,95 @@ pub unsafe extern "C" fn pathrs_errorinfo_free(ptr: *mut CError) {
     // SAFETY: The C caller guarantees that the pointer is of the correct type
     // and that this isn't a double-free.
     unsafe { (*ptr).free() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::{Error, ErrorImpl};
+
+    use std::io::Error as IOError;
+
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn cerror_ioerror_errno() {
+        let err = Error::from(ErrorImpl::OsError {
+            operation: "fake operation".into(),
+            source: IOError::from_raw_os_error(libc::ENOANO),
+        });
+
+        assert_eq!(
+            err.kind().errno(),
+            Some(libc::ENOANO),
+            "basic kind().errno() should return the right error"
+        );
+
+        let cerr = CError::from(&err);
+        assert_eq!(
+            cerr.saved_errno,
+            libc::ENOANO as u64,
+            "cerror should contain errno for OsError"
+        );
+    }
+
+    #[test]
+    fn cerror_einval_errno() {
+        let err = Error::from(ErrorImpl::InvalidArgument {
+            name: "fake argument".into(),
+            description: "fake description".into(),
+        });
+
+        assert_eq!(
+            err.kind().errno(),
+            Some(libc::EINVAL),
+            "InvalidArgument kind().errno() should return the right error"
+        );
+
+        let cerr = CError::from(&err);
+        assert_eq!(
+            cerr.saved_errno,
+            libc::EINVAL as u64,
+            "cerror should contain EINVAL errno for InvalidArgument"
+        );
+    }
+
+    #[test]
+    fn cerror_enosys_errno() {
+        let err = Error::from(ErrorImpl::NotImplemented {
+            feature: "fake feature".into(),
+        });
+
+        assert_eq!(
+            err.kind().errno(),
+            Some(libc::ENOSYS),
+            "NotImplemented kind().errno() should return the right error"
+        );
+
+        let cerr = CError::from(&err);
+        assert_eq!(
+            cerr.saved_errno,
+            libc::ENOSYS as u64,
+            "cerror should contain ENOSYS errno for NotImplemented"
+        );
+    }
+
+    #[test]
+    fn cerror_no_errno() {
+        let err = Error::from(ErrorImpl::SafetyViolation {
+            description: "fake safety violation".into(),
+        });
+
+        assert_eq!(
+            err.kind().errno(),
+            None,
+            "SafetyViolation kind().errno() should return the no errno"
+        );
+
+        let cerr = CError::from(&err);
+        assert_eq!(
+            cerr.saved_errno, 0,
+            "cerror should contain zero errno for SafetyViolation"
+        );
+    }
 }
