@@ -401,14 +401,14 @@ root_op_tests! {
     nondir_symlink_dotdot: mkdir_all("b-file/../d", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     nondir_symlink_subdir: mkdir_all("b-file/subdir", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     // Dangling symlinks are not followed.
-    dangling1_trailing: mkdir_all("a-fake1", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
-    dangling1_basic: mkdir_all("a-fake1/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling1_trailing: mkdir_all("a-fake1", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dangling1_basic: mkdir_all("a-fake1/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     dangling1_dotdot: mkdir_all("a-fake1/../bar/baz", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
-    dangling2_trailing: mkdir_all("a-fake2", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
-    dangling2_basic: mkdir_all("a-fake2/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling2_trailing: mkdir_all("a-fake2", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dangling2_basic: mkdir_all("a-fake2/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     dangling2_dotdot: mkdir_all("a-fake2/../bar/baz", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
-    dangling3_trailing: mkdir_all("a-fake3", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
-    dangling3_basic: mkdir_all("a-fake3/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling3_trailing: mkdir_all("a-fake3", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dangling3_basic: mkdir_all("a-fake3/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     dangling3_dotdot: mkdir_all("a-fake3/../bar/baz", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     // Non-lexical symlinks should work.
     nonlexical_basic: mkdir_all("target/foo", 0o711) => Ok(());
@@ -423,11 +423,11 @@ root_op_tests! {
     nonlexical_level3_abs: mkdir_all("link3/target_abs/foo", 0o711) => Ok(());
     nonlexical_level3_rel: mkdir_all("link3/target_rel/foo", 0o711) => Ok(());
     // But really tricky dangling symlinks should fail.
-    dangling_tricky1_trailing: mkdir_all("link3/deep_dangling1", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
-    dangling_tricky1_basic: mkdir_all("link3/deep_dangling1/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling_tricky1_trailing: mkdir_all("link3/deep_dangling1", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dangling_tricky1_basic: mkdir_all("link3/deep_dangling1/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     dangling_tricky1_dotdot: mkdir_all("link3/deep_dangling1/../bar", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
-    dangling_tricky2_trailing: mkdir_all("link3/deep_dangling2", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
-    dangling_tricky2_basic: mkdir_all("link3/deep_dangling2/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
+    dangling_tricky2_trailing: mkdir_all("link3/deep_dangling2", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dangling_tricky2_basic: mkdir_all("link3/deep_dangling2/foo", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     dangling_tricky2_dotdot: mkdir_all("link3/deep_dangling2/../bar", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     // And trying to mkdir inside a loop should fail.
     loop_trailing: mkdir_all("loop/link", 0o711) => Err(ErrorKind::OsError(Some(libc::ELOOP)));

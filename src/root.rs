@@ -39,7 +39,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rustix::fs::{self as rustix_fs, AtFlags};
+use rustix::{
+    fs::{self as rustix_fs, AtFlags},
+    io::Errno,
+};
 
 /// An inode type to be created with [`Root::create`].
 #[derive(Clone, Debug)]
@@ -1005,12 +1008,17 @@ impl RootRef<'_> {
             // a dangling symlink with only a trailing component missing), so we
             // can safely create the final component without worrying about
             // symlink-exchange attacks.
-            syscalls::mkdirat(&current, &part, perm.mode()).map_err(|err| {
-                ErrorImpl::RawOsError {
-                    operation: "create next directory component".into(),
-                    source: err,
+            if let Err(err) = syscalls::mkdirat(&current, &part, perm.mode()) {
+                // If we got EEXIST then it's possible a racing Root::mkdir_all
+                // created the directory before us. We can safely continue
+                // because the following openat() will
+                if err.errno() != Errno::EXIST {
+                    Err(ErrorImpl::RawOsError {
+                        operation: "create next directory component".into(),
+                        source: err,
+                    })?;
                 }
-            })?;
+            }
 
             // Get a handle to the directory we just created. Unfortunately we
             // can't do an atomic create+open (a-la O_CREAT) with mkdirat(), so

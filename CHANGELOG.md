@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   it would return `-ELOOP` in most cases and in other cases it would return
   unexpected results because the `O_NOFOLLOW` would have an effect on the
   magic-link used internally by `Handle::reopen`.
+- `Root::mkdir_all` will no longer return `-EEXIST` if another process tried to
+  do `Root::mkdir_all` at the same time, instead the race winner's directory
+  will be used by both processes. See [opencontainers/runc#4543][] for more
+  details.
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how
@@ -68,6 +72,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 [rustix#1186]: https://github.com/bytecodealliance/rustix/issues/1186
 [rustix#1187]: https://github.com/bytecodealliance/rustix/issues/1187
+[opencontainers/runc#4543]: https://github.com/opencontainers/runc/issues/4543
 
 ## [0.1.3] - 2024-10-10 ##
 

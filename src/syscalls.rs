@@ -254,9 +254,9 @@ pub(crate) enum Error {
 }
 
 impl Error {
-    fn errno(&self) -> &Errno {
+    pub(crate) fn errno(&self) -> Errno {
         // XXX: This should probably be a macro...
-        match self {
+        *match self {
             Error::InvalidFd { source, .. } => source,
             Error::Openat { source, .. } => source,
             Error::Openat2 { source, .. } => source,
