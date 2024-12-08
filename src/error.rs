@@ -163,8 +163,8 @@ impl ErrorKind {
         match self {
             ErrorKind::NotImplemented => Some(libc::ENOSYS),
             ErrorKind::InvalidArgument => Some(libc::EINVAL),
+            ErrorKind::SafetyViolation => Some(libc::EXDEV),
             ErrorKind::OsError(errno) => *errno,
-            // TODO: Should we remap SafetyViolation?
             _ => None,
         }
     }
@@ -231,6 +231,11 @@ mod tests {
             ErrorKind::NotImplemented.errno(),
             Some(libc::ENOSYS),
             "ErrorKind::NotImplemented is equivalent to ENOSYS"
+        );
+        assert_eq!(
+            ErrorKind::SafetyViolation.errno(),
+            Some(libc::EXDEV),
+            "ErrorKind::SafetyViolation is equivalent to EXDEV"
         );
         assert_eq!(
             ErrorKind::OsError(Some(libc::ENOANO)).errno(),

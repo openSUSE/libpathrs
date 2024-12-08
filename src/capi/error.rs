@@ -256,21 +256,40 @@ mod tests {
     }
 
     #[test]
-    fn cerror_no_errno() {
+    fn cerror_exdev_errno() {
         let err = Error::from(ErrorImpl::SafetyViolation {
             description: "fake safety violation".into(),
         });
 
         assert_eq!(
             err.kind().errno(),
+            Some(libc::EXDEV),
+            "SafetyViolation kind().errno() should return the right error"
+        );
+
+        let cerr = CError::from(&err);
+        assert_eq!(
+            cerr.saved_errno,
+            libc::EXDEV as u64,
+            "cerror should contain EXDEV errno for SafetyViolation"
+        );
+    }
+
+    #[test]
+    fn cerror_no_errno() {
+        let parse_err = "a123".parse::<i32>().unwrap_err();
+        let err = Error::from(parse_err);
+
+        assert_eq!(
+            err.kind().errno(),
             None,
-            "SafetyViolation kind().errno() should return the no errno"
+            "ParseIntError kind().errno() should return no errno"
         );
 
         let cerr = CError::from(&err);
         assert_eq!(
             cerr.saved_errno, 0,
-            "cerror should contain zero errno for SafetyViolation"
+            "cerror should contain zero errno for ParseIntError"
         );
     }
 }
