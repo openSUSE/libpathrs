@@ -39,7 +39,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rustix::fs::{self as rustix_fs, AtFlags};
+use rustix::{
+    fs::{self as rustix_fs, AtFlags},
+    io::Errno,
+};
 
 /// An inode type to be created with [`Root::create`].
 #[derive(Clone, Debug)]
@@ -995,25 +998,41 @@ impl RootRef<'_> {
 
         // For the remaining components, create a each component one-by-one.
         for part in remaining_parts {
+            if part.as_bytes().contains(&b'/') {
+                Err(ErrorImpl::SafetyViolation {
+                    description: "remaining component for mkdir contains '/'".into(),
+                })?;
+            }
+
             // NOTE: mkdirat(2) does not follow trailing symlinks (even if it is
             // a dangling symlink with only a trailing component missing), so we
             // can safely create the final component without worrying about
             // symlink-exchange attacks.
-            syscalls::mkdirat(&current, &part, perm.mode()).map_err(|err| {
-                ErrorImpl::RawOsError {
-                    operation: "create next directory component".into(),
-                    source: err,
+            if let Err(err) = syscalls::mkdirat(&current, &part, perm.mode()) {
+                // If we got EEXIST then it's possible a racing Root::mkdir_all
+                // created the directory before us. We can safely continue
+                // because the following openat() will
+                if err.errno() != Errno::EXIST {
+                    Err(ErrorImpl::RawOsError {
+                        operation: "create next directory component".into(),
+                        source: err,
+                    })?;
                 }
-            })?;
+            }
 
             // Get a handle to the directory we just created. Unfortunately we
             // can't do an atomic create+open (a-la O_CREAT) with mkdirat(), so
             // a separate O_NOFOLLOW is the best we can do.
-            let next = self
-                .resolver
-                .resolve(&current, &part, true)
-                .and_then(|handle| handle.reopen(OpenFlags::O_DIRECTORY))
-                .wrap("failed to open newly-created directory with O_DIRECTORY")?;
+            let next = syscalls::openat(
+                &current,
+                &part,
+                OpenFlags::O_NOFOLLOW | OpenFlags::O_DIRECTORY,
+                0,
+            )
+            .map_err(|err| ErrorImpl::RawOsError {
+                operation: "open newly created directory".into(),
+                source: err,
+            })?;
 
             // Unfortunately, we cannot create a directory and open it
             // atomically (a-la O_CREAT). This means an attacker could swap our
@@ -1035,7 +1054,7 @@ impl RootRef<'_> {
             // doesn't seem to provide any practical benefit.
 
             // Keep walking.
-            current = next;
+            current = next.into();
         }
 
         Ok(Handle::from_fd(current))
