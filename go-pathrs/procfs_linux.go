@@ -1,20 +1,22 @@
 //go:build linux
 
-// libpathrs: safe path resolution on Linux
-// Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
-// Copyright (C) 2019-2024 SUSE LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * libpathrs: safe path resolution on Linux
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package pathrs
 
@@ -66,7 +68,9 @@ func (b ProcBase) namePrefix() string {
 }
 
 // ProcHandleCloser is a callback that needs to be called when you are done
-// operating on an *os.File fetched using [ProcThreadSelfOpen].
+// operating on an [os.File] fetched using [ProcThreadSelfOpen].
+//
+// [os.File]: https://pkg.go.dev/os#File
 type ProcHandleCloser func()
 
 // TODO: Should we expose procOpen?
@@ -115,7 +119,7 @@ func ProcRootOpen(path string, flags int) (*os.File, error) {
 //
 // This method is recommend for getting process information about the current
 // process for almost all Go processes *except* for cases where there are
-// runtime.LockOSThread threads that have changed some aspect of their state
+// [runtime.LockOSThread] threads that have changed some aspect of their state
 // (such as through unshare(CLONE_FS) or changing namespaces).
 //
 // For such non-heterogeneous processes, /proc/self may reference to a task
@@ -128,6 +132,8 @@ func ProcRootOpen(path string, flags int) (*os.File, error) {
 // Unlike [ProcThreadSelfOpen], this method does not involve locking the
 // goroutine to the current OS thread and so is simpler to use and
 // theoretically has slightly less overhead.
+//
+// [runtime.LockOSThread]: https://pkg.go.dev/runtime#LockOSThread
 func ProcSelfOpen(path string, flags int) (*os.File, error) {
 	file, closer, err := procOpen(ProcBaseSelf, path, flags)
 	if closer != nil {
@@ -149,12 +155,16 @@ func ProcSelfOpen(path string, flags int) (*os.File, error) {
 //
 // Because Go can change the running OS thread of your goroutine without notice
 // (and then subsequently kill the old thread), this method will lock the
-// current goroutine to the OS thread (with runtime.LockOSThread) and the
+// current goroutine to the OS thread (with [runtime.LockOSThread]) and the
 // caller is responsible for unlocking the the OS thread with the
 // ProcHandleCloser callback once they are done using the returned file. This
-// callback MUST be called AFTER you have finished using the returned *os.File.
-// This callback is completely separate to (*os.File).Close, so it must be
-// called regardless of how you close the handle.
+// callback MUST be called AFTER you have finished using the returned
+// [os.File]. This callback is completely separate to [os.File.Close], so it
+// must be called regardless of how you close the handle.
+//
+// [runtime.LockOSThread]: https://pkg.go.dev/runtime#LockOSThread
+// [os.File]: https://pkg.go.dev/os#File
+// [os.File.Close]: https://pkg.go.dev/os#File.Close
 func ProcThreadSelfOpen(path string, flags int) (*os.File, ProcHandleCloser, error) {
 	return procOpen(ProcBaseThreadSelf, path, flags)
 }

@@ -1,20 +1,22 @@
 //go:build linux
 
-// libpathrs: safe path resolution on Linux
-// Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
-// Copyright (C) 2019-2024 SUSE LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * libpathrs: safe path resolution on Linux
+ * Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
+ * Copyright (C) 2019-2024 SUSE LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package pathrs
 
@@ -27,18 +29,18 @@ import (
 
 // Root is a handle to the root of a directory tree to resolve within. The only
 // purpose of this "root handle" is to perform operations within the directory
-// tree, or to get Handles to inodes within the directory tree.
+// tree, or to get a [Handle] to inodes within the directory tree.
 //
-// At the time of writing, it is considered a *VERY BAD IDEA* to open a Root
+// At time of writing, it is considered a *VERY BAD IDEA* to open a [Root]
 // inside a possibly-attacker-controlled directory tree. While we do have
-// protections that should defend against it (for both drivers), it's far more
-// dangerous than just opening a directory tree which is not inside a
-// potentially-untrusted directory.
+// protections that should defend against it, it's far more dangerous than just
+// opening a directory tree which is not inside a potentially-untrusted
+// directory.
 type Root struct {
 	inner *os.File
 }
 
-// OpenRoot creates a new Root handle to the directory at the given path.
+// OpenRoot creates a new [Root] handle to the directory at the given path.
 func OpenRoot(path string) (*Root, error) {
 	fd, err := pathrsOpenRoot(path)
 	if err != nil {
@@ -51,11 +53,13 @@ func OpenRoot(path string) (*Root, error) {
 	return &Root{inner: file}, nil
 }
 
-// RootFromFile creates a new Root handle from an *os.File referencing a
+// RootFromFile creates a new [Root] handle from an [os.File] referencing a
 // directory. The provided file will be duplicated, so the original file should
-// still be Close()d by the caller.
+// still be closed by the caller.
 //
-// This is effectively the inverse operation of Root.IntoFile.
+// This is effectively the inverse operation of [Root.IntoFile].
+//
+// [os.File]: https://pkg.go.dev/os#File
 func RootFromFile(file *os.File) (*Root, error) {
 	newFile, err := dupFile(file)
 	if err != nil {
@@ -64,13 +68,13 @@ func RootFromFile(file *os.File) (*Root, error) {
 	return &Root{inner: newFile}, nil
 }
 
-// Resolve resolves the given path within the Root's directory tree, and return
-// a Handle to the resolved path. The path must already exist, otherwise an
-// error will occur.
+// Resolve resolves the given path within the [Root]'s directory tree, and
+// returns a [Handle] to the resolved path. The path must already exist,
+// otherwise an error will occur.
 //
 // All symlinks (including trailing symlinks) are followed, but they are
 // resolved within the rootfs. If you wish to open a handle to the symlink
-// itself, use ResolveNoFollow.
+// itself, use [ResolveNoFollow].
 func (r *Root) Resolve(path string) (*Handle, error) {
 	return withFileFd(r.inner, func(rootFd uintptr) (*Handle, error) {
 		handleFd, err := pathrsInRootResolve(rootFd, path)
@@ -85,7 +89,7 @@ func (r *Root) Resolve(path string) (*Handle, error) {
 	})
 }
 
-// ResolveNoFollow is effectively an O_NOFOLLOW version of Resolve. Their
+// ResolveNoFollow is effectively an O_NOFOLLOW version of [Resolve]. Their
 // behaviour is identical, except that *trailing* symlinks will not be
 // followed. If the final component is a trailing symlink, an O_PATH|O_NOFOLLOW
 // handle to the symlink itself is returned.
@@ -103,23 +107,32 @@ func (r *Root) ResolveNoFollow(path string) (*Handle, error) {
 	})
 }
 
-// Open is effectively shorthand for Resolve followed by Handle.Open, but can
-// be slightly more efficient (it reduces CGo overhead and the number of
+// Open is effectively shorthand for [Resolve] followed by [Handle.Open], but
+// can be slightly more efficient (it reduces CGo overhead and the number of
 // syscalls used when using the openat2-based resolver) and is arguably more
 // ergonomic to use.
+//
+// This is effectively equivalent to [os.Open].
+//
+// [os.Open]: https://pkg.go.dev/os#Open
 func (r *Root) Open(path string) (*os.File, error) {
 	return r.OpenFile(path, os.O_RDONLY)
 }
 
-// OpenFile is effectively shorthand for Resolve followed by Handle.OpenFile,
-// but can be slightly more efficient (it reduces CGo overhead and the number
-// of syscalls used when using the openat2-based resolver) and is arguably more
-// ergonomic to use.
+// OpenFile is effectively shorthand for [Resolve] followed by
+// [Handle.OpenFile], but can be slightly more efficient (it reduces CGo
+// overhead and the number of syscalls used when using the openat2-based
+// resolver) and is arguably more ergonomic to use.
 //
 // However, if flags contains os.O_NOFOLLOW and the path is a symlink, then
 // OpenFile's behaviour will match that of openat2. In most cases an error will
 // be returned, but if os.O_PATH is provided along with os.O_NOFOLLOW then a
-// file equivalent to ResolveNoFollow will be returned instead.
+// file equivalent to [ResolveNoFollow] will be returned instead.
+//
+// This is effectively equivalent to [os.OpenFile], except that os.O_CREAT is
+// not supported.
+//
+// [os.OpenFile]: https://pkg.go.dev/os#OpenFile
 func (r *Root) OpenFile(path string, flags int) (*os.File, error) {
 	return withFileFd(r.inner, func(rootFd uintptr) (*os.File, error) {
 		fd, err := pathrsInRootOpen(rootFd, path, flags)
@@ -130,9 +143,14 @@ func (r *Root) OpenFile(path string, flags int) (*os.File, error) {
 	})
 }
 
-// Create creates a file within the Root's directory tree at the given path,
+// Create creates a file within the [Root]'s directory tree at the given path,
 // and returns a handle to the file. The provided mode is used for the new file
 // (the process's umask applies).
+//
+// Unlike [os.Create], if the file already exists an error is created rather
+// than the file being opened and truncated.
+//
+// [os.Create]: https://pkg.go.dev/os#Create
 func (r *Root) Create(path string, flags int, mode os.FileMode) (*os.File, error) {
 	unixMode, err := toUnixMode(mode)
 	if err != nil {
@@ -147,7 +165,7 @@ func (r *Root) Create(path string, flags int, mode os.FileMode) (*os.File, error
 	})
 }
 
-// Rename two paths within a Root's directory tree. The flags argument is
+// Rename two paths within a [Root]'s directory tree. The flags argument is
 // identical to the RENAME_* flags to the renameat2(2) system call.
 func (r *Root) Rename(src, dst string, flags uint) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
@@ -157,7 +175,8 @@ func (r *Root) Rename(src, dst string, flags uint) error {
 	return err
 }
 
-// RemoveDir removes the named empty directory within a Root's directory tree.
+// RemoveDir removes the named empty directory within a [Root]'s directory
+// tree.
 func (r *Root) RemoveDir(path string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
 		err := pathrsInRootRmdir(rootFd, path)
@@ -166,7 +185,7 @@ func (r *Root) RemoveDir(path string) error {
 	return err
 }
 
-// RemoveFile removes the named file within a Root's directory tree.
+// RemoveFile removes the named file within a [Root]'s directory tree.
 func (r *Root) RemoveFile(path string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
 		err := pathrsInRootUnlink(rootFd, path)
@@ -175,8 +194,12 @@ func (r *Root) RemoveFile(path string) error {
 	return err
 }
 
-// Remove removes the named file or (empty) directory within a Root's directory
-// tree. This is designed to match the semantics of os.Remove.
+// Remove removes the named file or (empty) directory within a [Root]'s
+// directory tree.
+//
+// This is effectively equivalent to [os.Remove].
+//
+// [os.Remove]: https://pkg.go.dev/os#Remove
 func (r *Root) Remove(path string) error {
 	// In order to match os.Remove's implementation we need to also do both
 	// syscalls unconditionally and adjust the error based on whether
@@ -197,8 +220,11 @@ func (r *Root) Remove(path string) error {
 	return err
 }
 
-// RemoveAll recursively deletes a path and all of its children. This is
-// designed to match the semantics of os.RemoveAll.
+// RemoveAll recursively deletes a path and all of its children.
+//
+// This is effectively equivalent to [os.RemoveAll].
+//
+// [os.RemoveAll]: https://pkg.go.dev/os#RemoveAll
 func (r *Root) RemoveAll(path string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
 		err := pathrsInRootRemoveAll(rootFd, path)
@@ -207,8 +233,12 @@ func (r *Root) RemoveAll(path string) error {
 	return err
 }
 
-// Mkdir creates a directory within a Root's directory tree. The provided mode
-// is used for the new directory (the process's umask applies).
+// Mkdir creates a directory within a [Root]'s directory tree. The provided
+// mode is used for the new directory (the process's umask applies).
+//
+// This is effectively equivalent to [os.Mkdir].
+//
+// [os.Mkdir]: https://pkg.go.dev/os#Mkdir
 func (r *Root) Mkdir(path string, mode os.FileMode) error {
 	unixMode, err := toUnixMode(mode)
 	if err != nil {
@@ -223,10 +253,12 @@ func (r *Root) Mkdir(path string, mode os.FileMode) error {
 }
 
 // MkdirAll creates a directory (and any parent path components if they don't
-// exist) within a Root's directory tree. The provided mode is used for any
+// exist) within a [Root]'s directory tree. The provided mode is used for any
 // directories created by this function (the process's umask applies).
 //
-// This is effectively equivalent to os.MkdirAll.
+// This is effectively equivalent to [os.MkdirAll].
+//
+// [os.MkdirAll]: https://pkg.go.dev/os#MkdirAll
 func (r *Root) MkdirAll(path string, mode os.FileMode) (*Handle, error) {
 	unixMode, err := toUnixMode(mode)
 	if err != nil {
@@ -246,9 +278,13 @@ func (r *Root) MkdirAll(path string, mode os.FileMode) (*Handle, error) {
 	})
 }
 
-// Mknod creates a new device inode of the given type within a Root's directory
-// tree. The provided mode is used for the new directory (the process's umask
-// applies).
+// Mknod creates a new device inode of the given type within a [Root]'s
+// directory tree. The provided mode is used for the new directory (the
+// process's umask applies).
+//
+// This is effectively equivalent to [unix.Mknod].
+//
+// [unix.Mknod]: https://pkg.go.dev/golang.org/x/sys/unix#Mknod
 func (r *Root) Mknod(path string, mode os.FileMode, dev uint64) error {
 	unixMode, err := toUnixMode(mode)
 	if err != nil {
@@ -262,8 +298,12 @@ func (r *Root) Mknod(path string, mode os.FileMode, dev uint64) error {
 	return err
 }
 
-// Symlink creates a symlink within a Root's directory tree. The symlink is
-// created at @path and is a link to @target.
+// Symlink creates a symlink within a [Root]'s directory tree. The symlink is
+// created at path and is a link to target.
+//
+// This is effectively equivalent to [os.Symlink].
+//
+// [os.Symlink]: https://pkg.go.dev/os#Symlink
 func (r *Root) Symlink(path, target string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
 		err := pathrsInRootSymlink(rootFd, path, target)
@@ -272,9 +312,14 @@ func (r *Root) Symlink(path, target string) error {
 	return err
 }
 
-// Hardlink creates a hardlink within a Root's directory tree. The hardlink is
-// created at @path and is a link to @target. Both paths are within the Root's
-// directory tree (you cannot hardlink to a different Root or the host).
+// Hardlink creates a hardlink within a [Root]'s directory tree. The hardlink
+// is created at path and is a link to target. Both paths are within the
+// [Root]'s directory tree (you cannot hardlink to a different [Root] or the
+// host).
+//
+// This is effectively equivalent to [os.Link].
+//
+// [os.Link]: https://pkg.go.dev/os#Link
 func (r *Root) Hardlink(path, target string) error {
 	_, err := withFileFd(r.inner, func(rootFd uintptr) (struct{}, error) {
 		err := pathrsInRootHardlink(rootFd, path, target)
@@ -283,15 +328,18 @@ func (r *Root) Hardlink(path, target string) error {
 	return err
 }
 
-// IntoFile unwraps the Root into its underlying *os.File.
+// IntoFile unwraps the [Root] into its underlying [os.File].
 //
 // It is critical that you do not operate on this file descriptor yourself,
 // because the security properties of libpathrs depend on users doing all
 // relevant filesystem operations through libpathrs.
 //
-// This operation returns the internal *os.File of the Root directly, so
-// Close()ing the Root will also close any copies of the returned *os.File. If
-// you want to get an independent copy, use Clone().IntoFile().
+// This operation returns the internal [os.File] of the [Root] directly, so
+// calling [Root.Close] will also close any copies of the returned [os.File].
+// If you want to get an independent copy, use [Root.Clone] followed by
+// [Root.IntoFile] on the cloned [Root].
+//
+// [os.File]: https://pkg.go.dev/os#File
 func (r *Root) IntoFile() *os.File {
 	// TODO: Figure out if we really don't want to make a copy.
 	// TODO: We almost certainly want to clear r.inner here, but we can't do
@@ -300,13 +348,13 @@ func (r *Root) IntoFile() *os.File {
 	return r.inner
 }
 
-// Clone creates a copy of a Root handle, such that it has a separate lifetime
-// to the original (while referring to the same underlying directory).
+// Clone creates a copy of a [Root] handle, such that it has a separate
+// lifetime to the original (while referring to the same underlying directory).
 func (r *Root) Clone() (*Root, error) {
 	return RootFromFile(r.inner)
 }
 
-// Close frees all of the resources used by the Root handle.
+// Close frees all of the resources used by the [Root] handle.
 func (r *Root) Close() error {
 	return r.inner.Close()
 }
