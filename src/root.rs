@@ -1004,14 +1004,21 @@ impl RootRef<'_> {
                 })?;
             }
 
-            // NOTE: mkdirat(2) does not follow trailing symlinks (even if it is
-            // a dangling symlink with only a trailing component missing), so we
+            // Try to create the component first, to reduce the risk of races
+            // where the inode gets created between the openat() check and then
+            // the fallback mkdirat(). An attacker could delete the inode, of
+            // course, but we can just error out in that case.
+            //
+            // mkdirat(2) does not follow trailing symlinks (even if it is a
+            // dangling symlink with only a trailing component missing), so we
             // can safely create the final component without worrying about
             // symlink-exchange attacks.
             if let Err(err) = syscalls::mkdirat(&current, &part, perm.mode()) {
-                // If we got EEXIST then it's possible a racing Root::mkdir_all
-                // created the directory before us. We can safely continue
-                // because the following openat() will
+                // If we got EEXIST then either the directory existed before or
+                // a racing Root::mkdir_all created the directory before us. We
+                // can safely continue because the following openat() will only
+                // succeed if it is a directory at open()-time (and not another
+                // inode type an attacker might've swapped in).
                 if err.errno() != Errno::EXIST {
                     Err(ErrorImpl::RawOsError {
                         operation: "create next directory component".into(),
@@ -1022,7 +1029,7 @@ impl RootRef<'_> {
 
             // Get a handle to the directory we just created. Unfortunately we
             // can't do an atomic create+open (a-la O_CREAT) with mkdirat(), so
-            // a separate O_NOFOLLOW is the best we can do.
+            // a separate O_DIRECTORY|O_NOFOLLOW is the best we can do.
             let next = syscalls::openat(
                 &current,
                 &part,
