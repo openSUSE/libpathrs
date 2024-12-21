@@ -30,8 +30,8 @@ use anyhow::Error;
 macro_rules! resolve_tests {
     // resolve_tests! {
     //      [create_root_path] {
-    //          test_ok: resolve_partial(...) => Ok(("path", Some("remaining", ErrorKind::...)), libc::S_IF...))
-    //          test_err: resolve_partial(...) => Err(ErrorKind::...)
+    //          test_ok: resolve_partial(...) => Ok(("path", Some("remaining", ErrorKind::...)), libc::S_IF...));
+    //          test_err: resolve_partial(...) => Err(ErrorKind::...);
     //      }
     // }
     ([$root_dir:expr] fn $test_name:ident (mut $root_var:ident : Root) $body:block) => {
@@ -155,8 +155,8 @@ macro_rules! resolve_tests {
 }
 
 resolve_tests! {
-    // Complete lookups.
     [tests_common::create_basic_tree()?] {
+        // Complete lookups.
         complete_root1: resolve_partial("/") => Ok(PartialLookup::Complete(("/", libc::S_IFDIR)));
         complete_root2: resolve_partial("/../../../../../..") => Ok(PartialLookup::Complete(("/", libc::S_IFDIR)));
         complete_root_link1: resolve_partial("root-link1") => Ok(PartialLookup::Complete(("/", libc::S_IFDIR)));
@@ -689,44 +689,6 @@ mod utils {
 
     use anyhow::{Context, Error};
     use pretty_assertions::assert_eq;
-
-    impl<H, E> PartialEq for PartialLookup<H, E>
-    where
-        H: PartialEq,
-        E: PartialEq,
-    {
-        fn eq(&self, other: &Self) -> bool {
-            match (self, other) {
-                (Self::Complete(left), Self::Complete(right)) => left == right,
-                (
-                    Self::Partial {
-                        handle: left_handle,
-                        remaining: left_remaining,
-                        last_error: left_last_error,
-                    },
-                    Self::Partial {
-                        handle: right_handle,
-                        remaining: right_remaining,
-                        last_error: right_last_error,
-                    },
-                ) => {
-                    left_handle == right_handle
-                        && left_remaining == right_remaining
-                        && left_last_error == right_last_error
-                }
-                _ => false,
-            }
-        }
-    }
-
-    impl<H, E> PartialLookup<H, E> {
-        fn as_inner_handle(&self) -> &H {
-            match self {
-                PartialLookup::Complete(handle) => handle,
-                PartialLookup::Partial { handle, .. } => handle,
-            }
-        }
-    }
 
     pub(super) fn check_root_resolve_partial<P: AsRef<Path>>(
         root: &Root,

@@ -25,6 +25,8 @@ use anyhow::{Context, Error};
 use rustix::fs::{self as rustix_fs, AtFlags, OFlags, CWD};
 use tempfile::TempDir;
 
+// TODO: Make these macros usable from outside this crate...
+
 macro_rules! create_inode {
     // "/foo/bar" @ chmod 0o755
     (@do $path:expr, chmod $mode:expr) => {
