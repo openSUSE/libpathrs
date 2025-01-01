@@ -47,7 +47,7 @@ lto = true
 
 [dependencies]
 bitflags = "^2"
-itertools = "^0.13"
+itertools = "^0.14"
 libc = "^0.2"
 memchr = "^2"
 # MSRV(1.80): Use LazyLock.
