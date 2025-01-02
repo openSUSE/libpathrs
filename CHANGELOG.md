@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   sense for the error type (so `ErrorKind::InvalidArgument` will result in an
   `EINVAL` value for `saved_errno`). This will allow C users to have a nicer
   time handling errors programmatically.
+- tests: we now have a large array of tests for verifying that the core lookup
+  logic of libpathrs is race-safe against various attacks. This is no big
+  surprise, given libpathrs's design, but we now have more extensive tests than
+  `github.com/cyphar/filepath-securejoin`.
 
 ### Fixes ###
 - multiarch: we now build correctly on 32-bit architectures as well as

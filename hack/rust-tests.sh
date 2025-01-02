@@ -71,4 +71,9 @@ function nextest_run() {
 
 set -x
 
-nextest_run --no-fail-fast
+# We need to run race and non-race tests separately because the racing tests
+# can cause the non-race tests to error out spuriously. Hopefully in the future
+# <https://github.com/nextest-rs/nextest/discussions/2054> will be resolved and
+# nextest will make it easier to do this.
+nextest_run --no-fail-fast -E "not test(#tests::test_race_*)"
+nextest_run --no-fail-fast -E "test(#tests::test_race_*)"
