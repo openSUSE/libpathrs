@@ -64,6 +64,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   (i.e. for partial lookups caused by `Root::mkdir_all`) we would not correctly
   handle leading `..` components, leading to safety errors when libpathrs
   thought that the symlink stack had been corrupted.
+- openat2 resolver: always return a hard `SafetyViolation` if we encounter one
+  during partial lookups to match the opath resolver behaviour and to avoid
+  confusion by users (it is theoretically safe to fall back from a
+  `SafetyViolation` during a partial lookup, but it's better to be safe here).
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how
