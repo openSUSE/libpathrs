@@ -658,6 +658,17 @@ resolve_tests! {
             remaining: "link".into(),
             last_error: ErrorKind::OsError(Some(libc::ELOOP)),
         });
+        // Make sure that the symlink stack doesn't get corrupted by no-op '..' components.
+        noop_dotdot_link1: resolve_partial("escape-link1/foo") => Ok(PartialLookup::Partial {
+            handle: ("target", libc::S_IFDIR),
+            remaining: "foo".into(),
+            last_error: ErrorKind::OsError(Some(libc::ENOENT)),
+        });
+        noop_dotdot_link2: resolve_partial("escape-link2/foo") => Ok(PartialLookup::Partial {
+            handle: ("target", libc::S_IFDIR),
+            remaining: "foo".into(),
+            last_error: ErrorKind::OsError(Some(libc::ENOENT)),
+        });
     }
 }
 
