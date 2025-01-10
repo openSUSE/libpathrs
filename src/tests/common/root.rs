@@ -140,13 +140,13 @@ macro_rules! create_tree {
                     create_inode!(&path => $($inner)*);
                 }
             )*
-            Ok(root)
+            root
         }
     }
 }
 
-pub fn create_basic_tree() -> Result<TempDir, Error> {
-    create_tree! {
+pub(crate) fn create_basic_tree() -> Result<TempDir, Error> {
+    Ok(create_tree! {
         // Basic inodes.
         "a" => (dir);
         "b/c/d/e/f" => (dir);
@@ -226,5 +226,5 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         // setgid has unique behaviour when interacting with mkdir_all.
         "setgid-self" => (dir, {chmod 0o7777});
         "setgid-other" => #[cfg(feature = "_test_as_root")] (dir, {chown 12345:12345}, {chmod 0o7777});
-    }
+    })
 }
