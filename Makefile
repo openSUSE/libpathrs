@@ -66,17 +66,11 @@ test-rust-doctest:
 
 .PHONY: test-rust-unpriv
 test-rust-unpriv:
-	$(CARGO_NIGHTLY) llvm-cov --no-report --branch --features capi nextest --no-fail-fast
+	./hack/rust-tests.sh --cargo="$(CARGO_NIGHTLY)"
 
 .PHONY: test-rust-root
 test-rust-root:
-# Run Rust tests as root.
-# NOTE: Ideally this would be configured in .cargo/config.toml so it
-#       would also work locally, but unfortunately it seems cargo doesn't
-#       support cfg(feature=...) for target runner configs.
-#       See <https://github.com/rust-lang/cargo/issues/14306>.
-	CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -E' \
-		$(CARGO_NIGHTLY) llvm-cov --no-report --branch --features capi,_test_as_root nextest --no-fail-fast
+	./hack/rust-tests.sh --cargo="$(CARGO_NIGHTLY)" --sudo
 
 .PHONY: test-rust
 test-rust:
