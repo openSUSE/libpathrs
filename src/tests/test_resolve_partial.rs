@@ -34,7 +34,7 @@ macro_rules! resolve_tests {
     //          test_err: resolve_partial(...) => Err(ErrorKind::...)
     //      }
     // }
-    ([$root_dir:expr] fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
+    ([$root_dir:expr] fn $test_name:ident (mut $root_var:ident : Root) $body:block) => {
         paste::paste! {
             #[test]
             fn [<root_ $test_name _default>]() -> Result<(), Error> {
@@ -118,7 +118,7 @@ macro_rules! resolve_tests {
                         $no_follow_trailing,
                         expected,
                     )?;
-                } => $expected
+                }
             }
         }
     };
