@@ -137,9 +137,16 @@ pub(crate) fn resolve_partial<Fd: AsFd>(
 
     // TODO: We probably want to do a git-bisect-like binary-search here. For
     //       paths with a large number of components this could make a
-    //       significant difference, though in practice you'll only see.
-    //       really large paths this could make a significant difference.
+    //       significant difference, though in practice you'll only see fairly
+    //       short paths so the implementation complexity might not be worth it.
     for (path, remaining) in path.partial_ancestors() {
+        if last_error.is_safety_violation() {
+            // If we hit a safety violation, we return an error instead of a
+            // partial resolution to match the behaviour of the O_PATH
+            // resolver (and to avoid some possible weird bug in libpathrs
+            // being exploited to return some result to Root::mkdir_all).
+            return Err(last_error);
+        }
         match resolve(root, path, rflags, no_follow_trailing) {
             Ok(handle) => {
                 return Ok(PartialLookup::Partial {
@@ -152,20 +159,5 @@ pub(crate) fn resolve_partial<Fd: AsFd>(
         }
     }
 
-    // Fall back to returning (root, path) if there was no path found.
-    //
-    // TODO: In theory you should never hit this case because
-    //       partial_ancestors() always returns a "root" value. This should
-    //       probably be unreachable!()...
-    Ok(PartialLookup::Partial {
-        handle: root
-            .try_clone_to_owned()
-            .map(Handle::from_fd)
-            .map_err(|err| ErrorImpl::OsError {
-                operation: "clone root".into(),
-                source: err,
-            })?,
-        remaining: path.into(),
-        last_error,
-    })
+    unreachable!("partial_ancestors should include root path which must be resolvable");
 }

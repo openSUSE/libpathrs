@@ -237,6 +237,18 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
                 // lexically. If pop() fails, then we are at the root.
                 // should .
                 if !expected_path.pop() {
+                    // If we hit ".." due to the symlink we need to drop it from
+                    // the stack like we would if we walked into a real
+                    // component. Otherwise walking into ".." will result in a
+                    // broken symlink stack error.
+                    if let Some(ref mut stack) = symlink_stack {
+                        stack
+                            .pop_part(&part)
+                            .map_err(|err| ErrorImpl::BadSymlinkStackError {
+                                description: "walking into component".into(),
+                                source: err,
+                            })?;
+                    }
                     current = Rc::clone(&root);
                     continue;
                 }

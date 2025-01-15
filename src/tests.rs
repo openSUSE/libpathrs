@@ -67,3 +67,5 @@ mod test_procfs;
 mod test_resolve;
 mod test_resolve_partial;
 mod test_root_ops;
+
+mod test_race_resolve_partial;

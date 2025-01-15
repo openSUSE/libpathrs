@@ -20,6 +20,7 @@
 use crate::{
     error::ErrorKind,
     flags::OpenFlags,
+    resolvers::PartialLookup,
     tests::{common as tests_common, traits::HandleImpl},
     utils::FdExt,
 };
@@ -34,6 +35,44 @@ use rustix::{
 };
 
 pub type LookupResult<'a> = (&'a str, libc::mode_t);
+
+impl<H, E> PartialLookup<H, E> {
+    pub(in crate::tests) fn as_inner_handle(&self) -> &H {
+        match self {
+            PartialLookup::Complete(handle) => handle,
+            PartialLookup::Partial { handle, .. } => handle,
+        }
+    }
+}
+
+impl<H, E> PartialEq for PartialLookup<H, E>
+where
+    H: PartialEq,
+    E: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Complete(left), Self::Complete(right)) => left == right,
+            (
+                Self::Partial {
+                    handle: left_handle,
+                    remaining: left_remaining,
+                    last_error: left_last_error,
+                },
+                Self::Partial {
+                    handle: right_handle,
+                    remaining: right_remaining,
+                    last_error: right_last_error,
+                },
+            ) => {
+                left_handle == right_handle
+                    && left_remaining == right_remaining
+                    && left_last_error == right_last_error
+            }
+            _ => false,
+        }
+    }
+}
 
 pub(in crate::tests) fn check_oflags<Fd: AsFd>(fd: Fd, flags: OpenFlags) -> Result<(), Error> {
     let fd = fd.as_fd();

@@ -17,13 +17,19 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{fs, os::unix::fs as unixfs, path::Path};
+use std::{
+    fs,
+    os::unix::fs as unixfs,
+    path::{Path, PathBuf},
+};
 
 use crate::syscalls;
 
 use anyhow::{Context, Error};
 use rustix::fs::{self as rustix_fs, AtFlags, OFlags, CWD};
 use tempfile::TempDir;
+
+// TODO: Make these macros usable from outside this crate...
 
 macro_rules! create_inode {
     // "/foo/bar" @ chmod 0o755
@@ -140,13 +146,13 @@ macro_rules! create_tree {
                     create_inode!(&path => $($inner)*);
                 }
             )*
-            Ok(root)
+            root
         }
     }
 }
 
-pub fn create_basic_tree() -> Result<TempDir, Error> {
-    create_tree! {
+pub(crate) fn create_basic_tree() -> Result<TempDir, Error> {
+    Ok(create_tree! {
         // Basic inodes.
         "a" => (dir);
         "b/c/d/e/f" => (dir);
@@ -156,6 +162,8 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         "root-link1" => (symlink -> "/");
         "root-link2" => (symlink -> "/..");
         "root-link3" => (symlink -> "/../../../../..");
+        "escape-link1" => (symlink -> "../../../../../../../../../../target");
+        "escape-link2" => (symlink -> "/../../../../../../../../../../target");
         // Some "bad" inodes that non-privileged users can create.
         "b/fifo" => (fifo);
         "b/sock" => (sock);
@@ -224,5 +232,36 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         // setgid has unique behaviour when interacting with mkdir_all.
         "setgid-self" => (dir, {chmod 0o7777});
         "setgid-other" => #[cfg(feature = "_test_as_root")] (dir, {chown 12345:12345}, {chmod 0o7777});
-    }
+    })
+}
+
+pub(crate) fn create_race_tree() -> Result<(TempDir, PathBuf), Error> {
+    let tmpdir = create_tree! {
+        // Our root.
+        "root" => (dir);
+        // The path that the race tests will try to operate on.
+        "root/a/b/c/d" => (dir);
+        // Symlinks to swap that are semantically equivalent but should also
+        // trigger breakout errors.
+        "root/b-link" => (symlink -> "../b/../b/../b/../b/../b/../b/../b/../b/../b/../b/../b/../b/../b");
+        "root/c-link" => (symlink -> "../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c");
+        // Bad paths that should result in an error.
+        "root/bad-link1" => (symlink -> "/non/exist");
+        "root/bad-link2" => (symlink -> "/file/non/exist");
+        // Try to attack the root to get access to /etc/passwd.
+        "root/etc/passwd" => (file);
+        "root/etc-target/passwd" => (file);
+        "root/etc-attack-rel-link" => (symlink -> "../../../../../../../../../../../../../../../../../../etc");
+        "root/etc-attack-abs-link" => (symlink -> "/../../../../../../../../../../../../../../../../../../etc");
+        "root/passwd-attack-rel-link" => (symlink -> "../../../../../../../../../../../../../../../../../../etc/passwd");
+        "root/passwd-attack-abs-link" => (symlink -> "/../../../../../../../../../../../../../../../../../../etc/passwd");
+        // File to swap a directory with.
+        "root/file" => (file);
+        // Directory outside the root we can swap with.
+        "outsideroot" => (dir);
+    };
+
+    let root: PathBuf = [tmpdir.as_ref(), Path::new("root")].iter().collect();
+
+    Ok((tmpdir, root))
 }

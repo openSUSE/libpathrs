@@ -64,6 +64,7 @@ clap = { version = "^3", features = ["cargo"] }
 errno = "^0.3"
 tempfile = "^3"
 paste = "^1"
+path-clean = "^1"
 pretty_assertions = "^1"
 
 [lints.rust]
