@@ -213,8 +213,8 @@ macro_rules! procfs_tests {
 
 procfs_tests! {
     // Non-procfs overmount.
-    tmpfs_dir: open(self, "fdinfo", O_DIRECTORY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    tmpfs_dir: open_follow(self, "fdinfo", O_DIRECTORY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
+    tmpfs_dir: open(self, "fdinfo", O_DIRECTORY) => (error: ErrOvermount("/proc/self/fdinfo", ErrorKind::OsError(Some(libc::EXDEV))));
+    tmpfs_dir: open_follow(self, "fdinfo", O_DIRECTORY) => (error: ErrOvermount("/proc/self/fdinfo", ErrorKind::OsError(Some(libc::EXDEV))));
     // No overmounts.
     nomount: open(self, "attr/current", O_RDONLY) => (error: Ok);
     nomount: open_follow(self, "attr/current", O_RDONLY) => (error: Ok);
@@ -227,13 +227,13 @@ procfs_tests! {
     global_nomount: open(ProcfsBase::ProcRoot, "filesystems", O_RDONLY) => (error: Ok);
     global_nomount: readlink(ProcfsBase::ProcRoot, "mounts") => (error: Ok);
     // Procfs regular file overmount.
-    proc_file_wr: open(self, "attr/exec", O_WRONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    proc_file_wr: open_follow(self, "attr/exec", O_WRONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    proc_file_rd: open(self, "mountinfo", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    proc_file_rd: open_follow(self, "mountinfo", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    global_cpuinfo_rd: open(ProcfsBase::ProcRoot, "cpuinfo", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    global_meminfo_rd: open(ProcfsBase::ProcRoot, "meminfo", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    global_fs_dir: open(ProcfsBase::ProcRoot, "fs", O_RDONLY|O_DIRECTORY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
+    proc_file_wr: open(self, "attr/exec", O_WRONLY) => (error: ErrOvermount("/proc/self/attr/exec", ErrorKind::OsError(Some(libc::EXDEV))));
+    proc_file_wr: open_follow(self, "attr/exec", O_WRONLY) => (error: ErrOvermount("/proc/self/attr/exec", ErrorKind::OsError(Some(libc::EXDEV))));
+    proc_file_rd: open(self, "mountinfo", O_RDONLY) => (error: ErrOvermount("/proc/self/mountinfo", ErrorKind::OsError(Some(libc::EXDEV))));
+    proc_file_rd: open_follow(self, "mountinfo", O_RDONLY) => (error: ErrOvermount("/proc/self/mountinfo", ErrorKind::OsError(Some(libc::EXDEV))));
+    global_cpuinfo_rd: open(ProcfsBase::ProcRoot, "cpuinfo", O_RDONLY) => (error: ErrOvermount("/proc/cpuinfo", ErrorKind::OsError(Some(libc::EXDEV))));
+    global_meminfo_rd: open(ProcfsBase::ProcRoot, "meminfo", O_RDONLY) => (error: ErrOvermount("/proc/meminfo", ErrorKind::OsError(Some(libc::EXDEV))));
+    global_fs_dir: open(ProcfsBase::ProcRoot, "fs", O_RDONLY|O_DIRECTORY) => (error: ErrOvermount("/proc/fs", ErrorKind::OsError(Some(libc::EXDEV))));
     // Magic-links with no overmount.
     magiclink_nomount: open(self, "cwd", O_PATH) => (error: Ok);
     magiclink_nomount: open_follow(self, "cwd", O_RDONLY) => (error: Ok);
@@ -241,12 +241,12 @@ procfs_tests! {
     magiclink_nomount_fd1: readlink(self, "fd/1") => (error: Ok);
     magiclink_nomount_fd2: readlink(self, "fd/2") => (error: Ok);
     // Magic-links with overmount.
-    magiclink_exe: open(self, "exe", O_PATH) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    magiclink_exe: open_follow(self, "exe", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    magiclink_exe: readlink(self, "exe") => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    magiclink_fd0: open(self, "fd/0", O_PATH) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    magiclink_fd0: open_follow(self, "fd/0", O_RDONLY) => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
-    magiclink_fd0: readlink(self, "fd/0") => (error: ErrOvermount(ErrorKind::OsError(Some(libc::EXDEV))));
+    magiclink_exe: open(self, "exe", O_PATH) => (error: ErrOvermount("/proc/self/exe", ErrorKind::OsError(Some(libc::EXDEV))));
+    magiclink_exe: open_follow(self, "exe", O_RDONLY) => (error: ErrOvermount("/proc/self/exe", ErrorKind::OsError(Some(libc::EXDEV))));
+    magiclink_exe: readlink(self, "exe") => (error: ErrOvermount("/proc/self/exe", ErrorKind::OsError(Some(libc::EXDEV))));
+    magiclink_fd0: open(self, "fd/0", O_PATH) => (error: ErrOvermount("/proc/self/fd/0", ErrorKind::OsError(Some(libc::EXDEV))));
+    magiclink_fd0: open_follow(self, "fd/0", O_RDONLY) => (error: ErrOvermount("/proc/self/fd/0", ErrorKind::OsError(Some(libc::EXDEV))));
+    magiclink_fd0: readlink(self, "fd/0") => (error: ErrOvermount("/proc/self/fd/0", ErrorKind::OsError(Some(libc::EXDEV))));
     // Behaviour-related testing.
     nondir_odir: open_follow(self, "environ", O_DIRECTORY|O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
     nondir_trailing_slash: open_follow(self, "environ/", O_RDONLY) => (error: Err(ErrorKind::OsError(Some(libc::ENOTDIR))));
@@ -273,6 +273,7 @@ procfs_tests! {
 
 mod utils {
     use std::{
+        collections::HashSet,
         fmt::Debug,
         path::{Path, PathBuf},
     };
@@ -295,19 +296,19 @@ mod utils {
     pub(super) enum ExpectedResult {
         Ok,
         Err(ErrorKind),
-        ErrOvermount(ErrorKind),
+        ErrOvermount(&'static str, ErrorKind),
     }
 
     fn check_proc_error<T: Debug, E: ErrorImpl>(
         res: Result<T, E>,
-        over_mounts: bool,
+        over_mounts: &HashSet<PathBuf>,
         expected: ExpectedResult,
     ) -> Result<(), Error> {
         let want_error = match expected {
             ExpectedResult::Ok => Ok(()),
             ExpectedResult::Err(kind) => Err(kind),
-            ExpectedResult::ErrOvermount(kind) => {
-                if over_mounts {
+            ExpectedResult::ErrOvermount(path, kind) => {
+                if over_mounts.contains(Path::new(path)) {
                     Err(kind)
                 } else {
                     Ok(())
@@ -315,7 +316,7 @@ mod utils {
             }
         };
         tests_common::check_err(&res, &want_error)
-            .with_context(|| format!("unexpected result for overmounts={over_mounts}"))?;
+            .with_context(|| format!("unexpected result for overmounts={over_mounts:?}"))?;
         Ok(())
     }
 
@@ -326,10 +327,56 @@ mod utils {
         F: FnOnce() -> Result<T, E>,
     {
         // Non-mnt-ns tests don't have overmounts configured.
-        let are_over_mounts_visible = false;
+        let over_mounts = HashSet::new();
 
         let res = func();
-        check_proc_error(res, are_over_mounts_visible, expected)?;
+        check_proc_error(res, &over_mounts, expected)?;
+        Ok(())
+    }
+
+    // Since Linux 6.12, the kernel no longer allows us to mount on top of
+    // certain procfs paths. This is a net good for us, because it makes certain
+    // attacks libpathrs needs to defend against no longer possible, but we
+    // still want to test for these attacks in CI.
+    //
+    // For more information, see d80b065bb172 ('Merge patch series "proc:
+    // restrict overmounting of ephemeral entities"'). In future kernel versions
+    // these restrictions will be even more restrictive (hopefully one day
+    // including all of /proc/<tid>/*).
+    const PROCFS_MAYBE_UNMOUNTABLE: &[&str] = &[
+        // 3836b31c3e71 ("proc: block mounting on top of /proc/<pid>/map_files/*")
+        "/proc/self/map_files/",
+        "/proc/thread-self/map_files/",
+        // 74ce208089f4 ("proc: block mounting on top of /proc/<pid>/fd/*")
+        "/proc/self/fd/",
+        "/proc/thread-self/fd/",
+        // cf71eaa1ad18 ("proc: block mounting on top of /proc/<pid>/fdinfo/*")
+        "/proc/self/fdinfo/",
+        "/proc/thread-self/fdinfo/",
+    ];
+
+    fn try_mount<P: AsRef<Path>>(
+        over_mounts: &mut HashSet<PathBuf>,
+        dst: P,
+        ty: MountType,
+    ) -> Result<(), Error> {
+        let dst = dst.as_ref();
+
+        let might_fail = {
+            let dst = dst.to_str().expect("our path strings are valid utf8");
+            PROCFS_MAYBE_UNMOUNTABLE
+                .iter()
+                .any(|prefix| dst.starts_with(prefix))
+        };
+
+        match (tests_common::mount(dst, ty), might_fail) {
+            (Ok(_), _) => {
+                over_mounts.insert(dst.to_path_buf());
+            }
+            (Err(_), true) => (),
+            (Err(err), false) => Err(err)?,
+        };
+
         Ok(())
     }
 
@@ -344,20 +391,25 @@ mod utils {
         F: FnOnce() -> Result<T, E>,
     {
         tests_common::in_mnt_ns(|| {
+            let mut over_mounts = HashSet::new();
+
             // Add some overmounts to /proc.
-            tests_common::mount(
+            try_mount(
+                &mut over_mounts,
                 "/proc/fs",
                 // Non-procfs file.
                 MountType::Tmpfs,
             )?;
-            tests_common::mount(
+            try_mount(
+                &mut over_mounts,
                 "/proc/meminfo",
                 // Non-procfs file.
                 MountType::Bind {
                     src: "/dev/null".into(),
                 },
             )?;
-            tests_common::mount(
+            try_mount(
+                &mut over_mounts,
                 "/proc/cpuinfo",
                 // A bind-mount of a real procfs file than can have custom data.
                 MountType::Bind {
@@ -368,12 +420,14 @@ mod utils {
             for prefix in ["/proc/self", "/proc/thread-self"] {
                 let prefix = PathBuf::from(prefix);
 
-                tests_common::mount(
+                try_mount(
+                    &mut over_mounts,
                     prefix.join("fdinfo"),
                     // Non-procfs mount.
                     MountType::Tmpfs,
                 )?;
-                tests_common::mount(
+                try_mount(
+                    &mut over_mounts,
                     prefix.join("attr/exec"),
                     // A bind-mount of a real procfs file that ignores all
                     // writes.
@@ -381,7 +435,8 @@ mod utils {
                         src: "/proc/1/sched".into(),
                     },
                 )?;
-                tests_common::mount(
+                try_mount(
+                    &mut over_mounts,
                     prefix.join("mountinfo"),
                     // A bind-mount of a real procfs file that can have custom
                     // data.
@@ -390,13 +445,15 @@ mod utils {
                     },
                 )?;
                 // Magic-link overmounts.
-                tests_common::mount(
+                try_mount(
+                    &mut over_mounts,
                     prefix.join("exe"),
                     MountType::Bind {
                         src: "/proc/1/fd/0".into(),
                     },
                 )?;
-                tests_common::mount(
+                try_mount(
+                    &mut over_mounts,
                     prefix.join("fd/0"),
                     MountType::Bind {
                         src: "/proc/1/exe".into(),
@@ -405,8 +462,13 @@ mod utils {
                 // TODO: Add some tests for mounts on top of /proc/self.
             }
 
+            // If overmounts are not visible, clear the hashset.
+            if !are_over_mounts_visible {
+                over_mounts.clear();
+            }
+
             let res = func();
-            check_proc_error(res, are_over_mounts_visible, expected)?;
+            check_proc_error(res, &over_mounts, expected)?;
             Ok(())
         })
     }
