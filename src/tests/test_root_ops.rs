@@ -403,7 +403,7 @@ root_op_tests! {
     sock: remove_all("b/sock") => Ok(());
     enoent: remove_dir("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     enoent: remove_file("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
-    enoent: remove_all("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    enoent: remove_all("abc") => Ok(());
     symlink: remove_dir("b-file") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     symlink: remove_file("b-file") => Ok(());
     symlink: remove_all("b-file") => Ok(());
@@ -736,10 +736,12 @@ mod utils {
             .with_context(|| format!("root remove {path:?}"))?;
 
         if res.is_ok() {
-            let handle = handle.wrap("open handle before remoev")?;
-
-            let meta = handle.as_fd().metadata()?;
-            assert_eq!(meta.nlink(), 0, "deleted file should have a 0 nlink");
+            // It's possible that the path didn't exist for remove_all, but if
+            // it did check that it was unlinked.
+            if let Ok(handle) = handle {
+                let meta = handle.as_fd().metadata()?;
+                assert_eq!(meta.nlink(), 0, "deleted file should have a 0 nlink");
+            }
 
             let root = root_roundtrip(root)?;
             let new_lookup = root.resolve_nofollow(path);

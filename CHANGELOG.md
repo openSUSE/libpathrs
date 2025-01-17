@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   do `Root::mkdir_all` at the same time, instead the race winner's directory
   will be used by both processes. See [opencontainers/runc#4543][] for more
   details.
+- `Root::remove_all` will now handle missing paths that disappear from
+  underneath it more gracefully, ensuring that multiple `Root::remove_all`
+  operations run on the same directory tree will all succeed without errors.
+  The need for this is similar to the need for `Root::mkdir_all` to handle such
+  cases.
 - opath resolver: in some cases with trailing symlinks in the symlink stack
   (i.e. for partial lookups caused by `Root::mkdir_all`) we would not correctly
   handle leading `..` components, leading to safety errors when libpathrs

@@ -31,6 +31,20 @@ use std::{
 
 use rustix::fs::{AtFlags, Dir};
 
+trait RmdirResultExt {
+    // ENOENT from a removal function should be treated the same as an Ok(()).
+    fn ignore_enoent(self) -> Self;
+}
+
+impl RmdirResultExt for Result<(), Error> {
+    fn ignore_enoent(self) -> Self {
+        match self.map_err(|err| (err.kind().errno(), err)) {
+            Ok(()) | Err((Some(libc::ENOENT), _)) => Ok(()),
+            Err((_, err)) => Err(err),
+        }
+    }
+}
+
 fn remove_inode<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> {
     let dirfd = dirfd.as_fd();
 
@@ -65,7 +79,7 @@ pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> 
     }
 
     // Fast path -- try to remove it with unlink/rmdir.
-    if remove_inode(dirfd, name).is_ok() {
+    if remove_inode(dirfd, name).ignore_enoent().is_ok() {
         return Ok(());
     }
 
@@ -75,33 +89,53 @@ pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> 
     // try to make this loop forever by consistently creating inodes, but
     // there's not much we can do about it and I suspect they would eventually
     // lose the race.
-    let subdir = syscalls::openat(dirfd, name, OpenFlags::O_DIRECTORY, 0).map_err(|err| {
+    let subdir = match syscalls::openat(dirfd, name, OpenFlags::O_DIRECTORY, 0).map_err(|err| {
         ErrorImpl::RawOsError {
             operation: "open directory to scan entries".into(),
             source: err,
         }
-    })?;
+    }) {
+        Ok(fd) => fd,
+        Err(err) => match err.kind().errno() {
+            // The path was deleted between us trying to with remove_inode() and
+            // now -- just return as if we were the ones that deleted it.
+            Some(libc::ENOENT) => return Ok(()),
+            _ => Err(err)?,
+        },
+    };
     loop {
         // TODO: Dir creates a new file descriptor rather than reusing the one
         //       we have, and RawDir can't be used as an Iterator yet (rustix
         //       needs GAT to make that work). But this is okay for now...
-        let mut iter = Dir::read_from(&subdir)
-            // TODO: We probably want to just break out of the loop here, rather
-            //       than return an error? We can at least try to do
-            //       remove_inode() again in case the directory got swapped with
-            //       a non-directory.
+        let mut iter = match Dir::read_from(&subdir)
             .map_err(|err| ErrorImpl::OsError {
                 operation: "create directory iterator".into(),
                 source: err.into(),
             })
-            .with_wrap(|| format!("scan directory {name:?} for deletion"))?
-            .filter(|res| {
-                !matches!(
-                    res.as_ref().map(|dentry| dentry.file_name().to_bytes()),
-                    Ok(b".") | Ok(b"..")
-                )
-            })
-            .peekable();
+            .with_wrap(|| format!("scan directory {name:?} for deletion"))
+        {
+            Ok(iter) => iter,
+            Err(err) => match err.kind().errno() {
+                // If we got ENOENT that means the directory got deleted after
+                // we opened it, so stop iterating (maybe another thread did "rm
+                // -rf"). An attacker might've also replaced the directory but
+                // we're not going retry opening it because that could lead to a
+                // DoS. remove_inode will error out in that case, and that's
+                // fine.
+                Some(libc::ENOENT) => break,
+                // TODO: Maybe we want to just break out of the loop here as
+                //       well, rather than return an error? If remove_inode()
+                //       again succeeds we're golden.
+                _ => Err(err)?,
+            },
+        }
+        .filter(|res| {
+            !matches!(
+                res.as_ref().map(|dentry| dentry.file_name().to_bytes()),
+                Ok(b".") | Ok(b"..")
+            )
+        })
+        .peekable();
 
         // We can stop iterating when a fresh directory iterator is empty.
         if iter.peek().is_none() {
@@ -117,7 +151,7 @@ pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> 
                 source: err.into(),
             })?;
             let name: &Path = OsStr::from_bytes(child.file_name().to_bytes()).as_ref();
-            remove_all(&subdir, name)?
+            remove_all(&subdir, name).ignore_enoent()?
         }
     }
 
@@ -125,7 +159,9 @@ pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> 
     // the inode again (it should be empty now -- an attacker could add things
     // but we can just error out in that case, and if they swapped it to a file
     // then remove_inode will take care of that).
-    remove_inode(dirfd, name).with_wrap(|| format!("deleting emptied directory {name:?}"))
+    remove_inode(dirfd, name)
+        .ignore_enoent()
+        .with_wrap(|| format!("deleting emptied directory {name:?}"))
 }
 
 #[cfg(test)]
