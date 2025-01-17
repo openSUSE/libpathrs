@@ -259,8 +259,7 @@ macro_rules! root_op_tests {
         }
     };
 
-
-    ($(#[cfg($ignore_meta:meta)])* @impl mkdir_all_racing [#$num_threads:expr] $test_name:ident ($path:expr, $mode:expr) => $expected_result:expr) => {
+    ($(#[cfg($ignore_meta:meta)])* @impl-race mkdir_all_racing [#$num_threads:expr] $test_name:ident ($path:expr, $mode:expr) => $expected_result:expr) => {
         paste::paste! {
             root_op_tests! {
                 $(#[cfg_attr(not($ignore_meta), ignore)])*
@@ -271,46 +270,71 @@ macro_rules! root_op_tests {
         }
     };
 
+    ($(#[cfg($ignore_meta:meta)])* @impl-race remove_all_racing [#$num_threads:expr] $test_name:ident ($path:expr) => $expected_result:expr) => {
+        paste::paste! {
+            root_op_tests! {
+                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                fn [<$test_name _ $num_threads threads>](root) {
+                    utils::check_root_remove_all_racing($num_threads, &root, $path, $expected_result)
+                }
+            }
+        }
+    };
+
+    ($(#[cfg($ignore_meta:meta)])* @impl-race $op_name:ident $test_name:ident ( $($args:tt)* ) => $expected_result:expr) => {
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            @impl-race $op_name [#2] $test_name( $($args)* ) => $expected_result
+        }
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            @impl-race $op_name [#4] $test_name( $($args)* ) => $expected_result
+        }
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            @impl-race $op_name [#8] $test_name( $($args)* ) => $expected_result
+        }
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            @impl-race $op_name [#16] $test_name( $($args)* ) => $expected_result
+        }
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            @impl-race $op_name [#32] $test_name( $($args)* ) => $expected_result
+        }
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            @impl-race $op_name [#64] $test_name( $($args)* ) => $expected_result
+        }
+        root_op_tests! {
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
+            @impl-race $op_name [#128] $test_name( $($args)* ) => $expected_result
+        }
+    };
+
     ($(#[cfg($ignore_meta:meta)])* @impl mkdir_all_racing $test_name:ident ( $($args:tt)* ) => $expected_result:expr) => {
         root_op_tests! {
             $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl mkdir_all_racing [#2] $test_name( $($args)* ) => $expected_result
+            @impl-race mkdir_all_racing $test_name( $($args)* ) => $expected_result
         }
+    };
+
+    ($(#[cfg($ignore_meta:meta)])* @impl remove_all_racing $test_name:ident ( $($args:tt)* ) => $expected_result:expr) => {
         root_op_tests! {
             $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl mkdir_all_racing [#4] $test_name( $($args)* ) => $expected_result
-        }
-        root_op_tests! {
-            $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl mkdir_all_racing [#8] $test_name( $($args)* ) => $expected_result
-        }
-        root_op_tests! {
-            $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl mkdir_all_racing [#16] $test_name( $($args)* ) => $expected_result
-        }
-        root_op_tests! {
-            $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl mkdir_all_racing [#32] $test_name( $($args)* ) => $expected_result
-        }
-        root_op_tests! {
-            $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl mkdir_all_racing [#64] $test_name( $($args)* ) => $expected_result
-        }
-        root_op_tests! {
-            $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl mkdir_all_racing [#128] $test_name( $($args)* ) => $expected_result
+            @impl-race remove_all_racing $test_name( $($args)* ) => $expected_result
         }
     };
 
     // root_tests!{
     //      ...
     // }
-    ($($(#[cfg($ignore_meta:meta)])* $test_name:ident: $file_type:ident ( $($args:tt)* ) => $expected_result:expr );+ $(;)?) => {
+    ($($(#[cfg($ignore_meta:meta)])* $test_name:ident: $op_name:ident ( $($args:tt)* ) => $expected_result:expr );+ $(;)?) => {
         paste::paste! {
             $(
                 root_op_tests!{
                     $(#[cfg($ignore_meta)])*
-                    @impl $file_type [<$file_type _ $test_name>]( $($args)* ) => $expected_result
+                    @impl $op_name [<$op_name _ $test_name>]( $($args)* ) => $expected_result
                 }
             )*
         }
@@ -392,6 +416,9 @@ root_op_tests! {
     nonempty_dir: remove_dir("b") => Err(ErrorKind::OsError(Some(libc::ENOTEMPTY)));
     nonempty_dir: remove_file("b") => Err(ErrorKind::OsError(Some(libc::EISDIR)));
     nonempty_dir: remove_all("b") => Ok(());
+    deep_dir: remove_dir("deep-rmdir") => Err(ErrorKind::OsError(Some(libc::ENOTEMPTY)));
+    deep_dir: remove_file("deep-rmdir") => Err(ErrorKind::OsError(Some(libc::EISDIR)));
+    deep_dir: remove_all("deep-rmdir") => Ok(());
     file: remove_dir("b/c/file") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     file: remove_file("b/c/file") => Ok(());
     file: remove_all("b/c/file") => Ok(());
@@ -484,6 +511,10 @@ root_op_tests! {
     // Check that multiple mkdir_alls racing against each other will not result
     // in a spurious error. <https://github.com/opencontainers/runc/issues/4543>
     plain: mkdir_all_racing("a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z", 0o711) => Ok(());
+
+    // Check that multiple rmdir_alls racing against each other will not result
+    // in a spurious error.
+    plain: remove_all_racing("deep-rmdir") => Ok(());
 }
 
 mod utils {
@@ -1000,7 +1031,35 @@ mod utils {
                 }
             });
         }
+        Ok(())
+    }
 
+    pub(super) fn check_root_remove_all_racing<R: RootImpl + Sync, P: AsRef<Path>>(
+        num_threads: usize,
+        root: R,
+        unsafe_path: P,
+        expected_result: Result<(), ErrorKind>,
+    ) -> Result<(), Error> {
+        let root = &root;
+        let unsafe_path = unsafe_path.as_ref();
+
+        // Do lots of runs to try to catch any possible races.
+        let num_retries = 100 + 1_000 / (1 + (num_threads >> 5));
+        for _ in 0..num_retries {
+            thread::scope(|s| {
+                let start_barrier = Arc::new(Barrier::new(num_threads));
+                for _ in 0..num_threads {
+                    let barrier = Arc::clone(&start_barrier);
+                    s.spawn(move || {
+                        barrier.wait();
+                        let res = root
+                            .remove_all(unsafe_path)
+                            .with_wrap(|| format!("remove_all {unsafe_path:?}"));
+                        tests_common::check_err(&res, &expected_result).expect("unexpected result");
+                    });
+                }
+            });
+        }
         Ok(())
     }
 }
