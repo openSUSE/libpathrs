@@ -362,8 +362,8 @@ root_op_tests! {
     parentdir_trailing_slash: mkdir("b/c//foobar", 0o755) => Ok(("b/c/foobar", libc::S_IFDIR | 0o755));
     parentdir_trailing_dot: mkdir("b/c/./foobar", 0o755) => Ok(("b/c/foobar", libc::S_IFDIR | 0o755));
     parentdir_trailing_dotdot: mkdir("b/c/../foobar", 0o755) => Ok(("b/foobar", libc::S_IFDIR | 0o755));
-    trailing_slash1: mkdir("b/c/abc/", 0o755) => Err(ErrorKind::InvalidArgument);
-    trailing_slash2: mkdir("b/c/abc///", 0o755) => Err(ErrorKind::InvalidArgument);
+    trailing_slash1: mkdir("b/c/abc/", 0o755) => Ok(("b/c/abc", libc::S_IFDIR | 0o755));
+    trailing_slash2: mkdir("b/c/abc///", 0o755) => Ok(("b/c/abc", libc::S_IFDIR | 0o755));
     trailing_dot: mkdir("b/c/abc/.", 0o755) => Err(ErrorKind::InvalidArgument);
     trailing_dotdot: mkdir("b/c/abc/..", 0o755) => Err(ErrorKind::InvalidArgument);
 
@@ -443,6 +443,9 @@ root_op_tests! {
     trailing_dotdot: mkchar("foobar/..", 0o755, 123, 456) => Err(ErrorKind::InvalidArgument);
 
     plain: create_file("abc", O_RDONLY, 0o100) => Ok("abc");
+    trailing_slash1: create_file("b/c/abc/", O_RDONLY, 0o222) => Err(ErrorKind::InvalidArgument);
+    trailing_slash2: create_file("b/c/abc///", O_RDONLY, 0o222) => Err(ErrorKind::InvalidArgument);
+    trailing_slash3: create_file("b/c/abc//./", O_RDONLY, 0o222) => Err(ErrorKind::InvalidArgument);
     oexcl_plain: create_file("abc", O_EXCL|O_RDONLY, 0o100) => Ok("abc");
     exist: create_file("b/c/file", O_RDONLY, 0o100) => Ok("b/c/file");
     oexcl_exist: create_file("a", O_EXCL|O_RDONLY, 0o100) => Err(ErrorKind::OsError(Some(libc::EEXIST)));
@@ -499,6 +502,9 @@ root_op_tests! {
     noexist: remove_dir("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     noexist: remove_file("abc") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     noexist: remove_all("abc") => Ok(());
+    noexist_trailing_slash: remove_dir("abc/") => Err(ErrorKind::OsError(Some(libc::ENOENT)));
+    noexist_trailing_slash: remove_file("abc/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    noexist_trailing_slash: remove_all("abc/") => Ok(());
     symlink: remove_dir("b-file") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     symlink: remove_file("b-file") => Ok(());
     symlink: remove_all("b-file") => Ok(());
@@ -517,21 +523,21 @@ root_op_tests! {
     parentdir_trailing_dotdot: remove_dir("b/c/d/e/f/../f") => Ok(());
     parentdir_trailing_dotdot: remove_file("b/c/d/../file") => Ok(());
     parentdir_trailing_dotdot: remove_all("b/c/../c") => Ok(());
-    dir_trailing_slash1: remove_dir("a/") => Err(ErrorKind::InvalidArgument); // TODO
-    dir_trailing_slash1: remove_file("a/") => Err(ErrorKind::InvalidArgument);
-    dir_trailing_slash1: remove_all("a/") => Err(ErrorKind::InvalidArgument); // TODO
-    dir_trailing_slash2: remove_dir("a///") => Err(ErrorKind::InvalidArgument); // TODO
-    dir_trailing_slash2: remove_file("a///") => Err(ErrorKind::InvalidArgument);
-    dir_trailing_slash2: remove_all("a///") => Err(ErrorKind::InvalidArgument); // TODO
+    dir_trailing_slash1: remove_dir("a/") => Ok(());
+    dir_trailing_slash1: remove_file("a/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dir_trailing_slash1: remove_all("a/") => Ok(());
+    dir_trailing_slash2: remove_dir("a///") => Ok(());
+    dir_trailing_slash2: remove_file("a///") =>  Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    dir_trailing_slash2: remove_all("a///") => Ok(());
     dir_trailing_dot: remove_dir("a/.") => Err(ErrorKind::InvalidArgument);
     dir_trailing_dot: remove_file("a/.") => Err(ErrorKind::InvalidArgument);
     dir_trailing_dot: remove_all("a/.") => Err(ErrorKind::InvalidArgument);
     dir_trailing_dotdot: remove_dir("b/c/..") => Err(ErrorKind::InvalidArgument);
     dir_trailing_dotdot: remove_file("b/c/..") => Err(ErrorKind::InvalidArgument);
     dir_trailing_dotdot: remove_all("b/c/..") => Err(ErrorKind::InvalidArgument);
-    file_trailing_slash: remove_dir("b/c/file/") => Err(ErrorKind::InvalidArgument); // TODO
-    file_trailing_slash: remove_file("b/c/file/") => Err(ErrorKind::InvalidArgument);
-    file_trailing_slash: remove_all("b/c/file/") => Err(ErrorKind::InvalidArgument); // TODO
+    file_trailing_slash: remove_dir("b/c/file/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    file_trailing_slash: remove_file("b/c/file/") => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    file_trailing_slash: remove_all("b/c/file/") => Ok(());
     file_trailing_dot: remove_dir("b/c/file/.") => Err(ErrorKind::InvalidArgument);
     file_trailing_dot: remove_file("b/c/file/.") => Err(ErrorKind::InvalidArgument);
     file_trailing_dot: remove_all("b/c/file/.") => Err(ErrorKind::InvalidArgument);
@@ -550,18 +556,18 @@ root_op_tests! {
     parentdir_trailing_dot_dst: rename("a", "b/./aa", RenameFlags::empty()) => Ok(());
     parentdir_trailing_dotdot_src: rename("b/c/d/../file", "aa", RenameFlags::empty()) => Ok(());
     parentdir_trailing_dotdot_dst: rename("a", "b/c/../aa", RenameFlags::empty()) => Ok(());
-    dir_trailing_slash_src1: rename("a/", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
-    dir_trailing_slash_dst1: rename("a", "aa/", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
-    dir_trailing_slash_src2: rename("a///", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
-    dir_trailing_slash_dst2: rename("a", "aa///", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
+    dir_trailing_slash_src1: rename("a/", "aa", RenameFlags::empty()) => Ok(());
+    dir_trailing_slash_dst1: rename("a", "aa/", RenameFlags::empty()) => Ok(());
+    dir_trailing_slash_src2: rename("a///", "aa", RenameFlags::empty()) => Ok(());
+    dir_trailing_slash_dst2: rename("a", "aa///", RenameFlags::empty()) => Ok(());
     dir_trailing_dot_src: rename("a/.", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument);
     dir_trailing_dot_dst: rename("a", "aa/.", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument);
     dir_trailing_dotdot_src: rename("b/c/..", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument);
     dir_trailing_dotdot_dst: rename("a", "aa/..", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument);
-    file_trailing_slash_src1: rename("b/c/file/", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
-    file_trailing_slash_dst1: rename("b/c/file", "aa/", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
-    file_trailing_slash_src2: rename("b/c/file///", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
-    file_trailing_slash_dst2: rename("b/c/file", "aa///", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument); // TODO
+    file_trailing_slash_src1: rename("b/c/file/", "aa", RenameFlags::empty()) => Ok(()); // TODO
+    file_trailing_slash_dst1: rename("b/c/file", "aa/", RenameFlags::empty()) => Ok(()); // TODO
+    file_trailing_slash_src2: rename("b/c/file///", "aa", RenameFlags::empty()) => Ok(()); // TODO
+    file_trailing_slash_dst2: rename("b/c/file", "aa///", RenameFlags::empty()) => Ok(()); // TODO
     file_trailing_dot_src: rename("b/c/file/.", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument);
     file_trailing_dot_dst: rename("b/c/file", "aa/.", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument);
     file_trailing_dotdot_src: rename("b/c/file/..", "aa", RenameFlags::empty()) => Err(ErrorKind::InvalidArgument);
@@ -657,7 +663,7 @@ mod utils {
             common as tests_common,
             traits::{ErrorImpl, RootImpl},
         },
-        utils::{FdExt, PathIterExt},
+        utils::{self, FdExt, PathIterExt},
         Handle, InodeType,
     };
 
@@ -964,12 +970,17 @@ mod utils {
         let src_path = src_path.as_ref();
         let dst_path = dst_path.as_ref();
 
+        // Strip any slashes since we have tests where the paths being operated
+        // on are not directories but have trailing slashes.
+        let (stripped_src_path, _) = utils::path_strip_trailing_slash(src_path);
+        let (stripped_dst_path, _) = utils::path_strip_trailing_slash(dst_path);
+
         // Get a handle before we move the paths, to make sure the right inodes
         // were moved. However, we *do not unwrap these here* since the paths
         // might not exist (it is valid for dst to not exist, but for some
         // failure tests we want src to not exist too).
-        let src_handle = root.resolve_nofollow(src_path); // do not unwrap this here!
-        let dst_handle = root.resolve_nofollow(dst_path); // do not unwrap this here!
+        let src_handle = root.resolve_nofollow(stripped_src_path); // do not unwrap this here!
+        let dst_handle = root.resolve_nofollow(stripped_dst_path); // do not unwrap this here!
 
         // Keep track of the original paths, pre-rename.
         let src_real_path = if let Ok(ref handle) = src_handle {

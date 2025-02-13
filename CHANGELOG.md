@@ -81,6 +81,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   a parent directory and single basename component (such as `Root::create`) has
   now been unified and cases like trailing `/.` and `/..` will now always
   result in `ErrorKind::InvalidArgument`.
+- Trailing slash behaviour (i.e. where a user specifies a trailing slash in a
+  path passed to libpathrs) throughout libpathrs has been improved to better
+  match the kernel APIs (where possible) or otherwise has been made consistent
+  and intentional:
+  - `Root::create` will always error out with an `InvalidArgument` for the
+    target path unless the inode being created is an `InodeType::Directory`, in
+    which case the trailing slash will be ignored (to match the behaviour of
+    `mkdir(2)` on Linux). Hard links with a trailing slash will also produce an
+    error, as hard-links to directories are also forbidden on Unix.
+  - `Root::create_file` will always error out with an `InvalidArgument`.
+  - `Root::remove_all` and `Root::remove_dir` will ignore trailing slashes,
+    while `Root::remove_file` will always fail with `ENOTDIR`. The reason for
+    `Root::remove_all` always succeeding is that it matches the behaviour of
+    Go's `os.RemoveAll` and `rm -rf`, as well as being impractical for us to
+    determine if the target to be deleted is a directory in a race-free way.
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how

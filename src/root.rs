@@ -750,18 +750,33 @@ impl RootRef<'_> {
         self.resolver.open(self, path, flags)
     }
 
-    // Used in operations where we need to get a handle to the parent directory.
-    fn resolve_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, &'p Path), Error> {
+    /// Resolve the parent of a given path. This is used internally when
+    /// implementing operations that operate on the parent directory, such as
+    /// operations that:
+    ///
+    ///  * Create new inodes (i.e. the target path doesn't already exist).
+    ///  * Are implemented with syscalls that do not allow us to use
+    ///    `AT_EMPTY_PATH` or an equivalent (such as [`rename`]) even though the
+    ///    path exists.
+    ///
+    /// The returned tuple is `(dir, name, trailing_slash)` (i.e. a handle to
+    /// *parent* directory, basename of the path, and a `bool` indicating
+    /// whether the original path had a trailing slash). It is up to the caller
+    /// to decide what the correct handling of `trailing_slash` is (but if it is
+    /// ignored by the caller then trailing slashes will be ignored wholesale).
+    ///
+    /// [`rename`]: Self::rename
+    fn resolve_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, &'p Path, bool), Error> {
+        let (path, trailing_slash) = utils::path_strip_trailing_slash(path);
         let (parent, name) = utils::path_split(path).wrap("split path into (parent, name)")?;
 
         // All users of resolve_parent require the basename to be an actual
         // pathname (as opposed to being empty or a special name like "." or
         // ".."), so return an error here if that is the path we got.
         let name = match name.map(|p| (p, p.as_os_str().as_bytes())) {
-            None => Err(ErrorImpl::InvalidArgument {
-                name: "path".into(),
-                description: format!("path {path:?} does not have a valid basename").into(),
-            })?,
+            // We stripped any trailing slashes, so there cannot be an empty
+            // basename.
+            None => unreachable!("already stripped path {path:?} must have a basename"),
             Some((_, b"." | b"..")) => Err(ErrorImpl::InvalidArgument {
                 name: "path".into(),
                 description: format!(
@@ -776,7 +791,7 @@ impl RootRef<'_> {
             .resolve(parent)
             .wrap("resolve parent directory")?
             .into();
-        Ok((dir, name))
+        Ok((dir, name, trailing_slash))
     }
 
     /// Get the target of a symlink within a [`RootRef`].
@@ -818,9 +833,19 @@ impl RootRef<'_> {
     pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
         // The path doesn't exist yet, so we need to get a safe reference to the
         // parent and just operate on the final (slashless) component.
-        let (dir, name) = self
+        let (dir, name, trailing_slash) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve file creation path")?;
+
+        // The trailing slash behaviour depends on what inode type we are making
+        // (to mirror Linux's behaviour). In particular, mkdir("non-exist/") is
+        // legal.
+        if trailing_slash && !matches!(inode_type, InodeType::Directory(_)) {
+            Err(ErrorImpl::InvalidArgument {
+                name: "path".into(),
+                description: "file creation path has trailing slash".into(),
+            })?;
+        }
 
         match inode_type {
             InodeType::File(perm) => {
@@ -836,9 +861,17 @@ impl RootRef<'_> {
                 syscalls::symlinkat(target, dir, name)
             }
             InodeType::Hardlink(target) => {
-                let (olddir, oldname) = self
+                let (olddir, oldname, trailing_slash) = self
                     .resolve_parent(target)
                     .wrap("resolve hardlink source path")?;
+                // Directories cannot be a hardlink target, so indiscriminately
+                // block trailing slashes for the target path.
+                if trailing_slash {
+                    Err(ErrorImpl::InvalidArgument {
+                        name: "target".into(),
+                        description: "hardlink target path has trailing slash".into(),
+                    })?;
+                }
                 syscalls::linkat(olddir, oldname, dir, name, AtFlags::empty())
             }
             InodeType::Fifo(perm) => {
@@ -897,9 +930,17 @@ impl RootRef<'_> {
     ) -> Result<File, Error> {
         // The path doesn't exist yet, so we need to get a safe reference to the
         // parent and just operate on the final (slashless) component.
-        let (dir, name) = self
+        let (dir, name, trailing_slash) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve O_CREAT file creation path")?;
+
+        // For obvious reasons, we cannot O_CREAT a directory.
+        if trailing_slash {
+            Err(ErrorImpl::InvalidArgument {
+                name: "path".into(),
+                description: "O_CREAT file creation path has trailing slash".into(),
+            })?;
+        }
 
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
         // O_NOFOLLOW. We might want to expose that here, though because it
@@ -1093,12 +1134,20 @@ impl RootRef<'_> {
         // unlinkat(2) doesn't let us remove an inode using just a handle (for
         // obvious reasons -- on Unix hardlinks mean that "unlink this file"
         // doesn't make sense without referring to a specific directory entry).
-        let (dir, name) = self
+        let (dir, name, trailing_slash) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve file removal path")?;
 
         let flags = match inode_type {
-            RemoveInodeType::Regular => AtFlags::empty(),
+            RemoveInodeType::Regular => {
+                if trailing_slash {
+                    Err(ErrorImpl::OsError {
+                        operation: "file removal path cannot have trailing slash".into(),
+                        source: IOError::from_raw_os_error(libc::ENOTDIR),
+                    })?;
+                }
+                AtFlags::empty()
+            }
             RemoveInodeType::Directory => AtFlags::REMOVEDIR,
         };
         syscalls::unlinkat(dir, name, flags).map_err(|err| {
@@ -1166,7 +1215,14 @@ impl RootRef<'_> {
     /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
     #[doc(alias = "pathrs_inroot_remove_all")]
     pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
-        let (dir, name) = self
+        // Ignore trailing slashes -- we want to support handling trailing
+        // slashes for directories, but adding resolve_exists_parent-like
+        // verification logic to remove_all() is a bit much. So we just ignore
+        // trailing slashes entirely.
+        //
+        // For what it's worth, this matches the behaviour of Go's os.RemoveAll
+        // and GNU's "rm -rf".
+        let (dir, name, _) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve remove-all path")?;
         utils::remove_all(&dir, name)
@@ -1191,10 +1247,11 @@ impl RootRef<'_> {
         // renameat2(2) doesn't let us rename paths using just handles. In
         // addition, the target path might not exist (except in the case of
         // RENAME_EXCHANGE and clobbering).
-        let (src_dir, src_name) = self
+        // TODO: Improve trailing slash handling.
+        let (src_dir, src_name, _) = self
             .resolve_parent(source.as_ref())
             .wrap("resolve rename source path")?;
-        let (dst_dir, dst_name) = self
+        let (dst_dir, dst_name, _) = self
             .resolve_parent(destination.as_ref())
             .wrap("resolve rename destination path")?;
 
