@@ -82,7 +82,7 @@ pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> 
         }
     })?;
     loop {
-        // TODO: Dir creates a new file descriptor rather than re-using the one
+        // TODO: Dir creates a new file descriptor rather than reusing the one
         //       we have, and RawDir can't be used as an Iterator yet (rustix
         //       needs GAT to make that work). But this is okay for now...
         let mut iter = Dir::read_from(&subdir)

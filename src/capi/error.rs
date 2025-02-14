@@ -147,7 +147,7 @@ impl Drop for CError {
 /// calls.
 ///
 /// Error ids are only unique from one another until pathrs_errorinfo() is
-/// called, at which point the id can be re-used for subsequent errors. The
+/// called, at which point the id can be reused for subsequent errors. The
 /// precise format of error ids is completely opaque and they should never be
 /// compared directly or used for anything other than with pathrs_errorinfo().
 ///
