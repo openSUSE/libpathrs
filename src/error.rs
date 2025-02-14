@@ -56,6 +56,10 @@ impl Error {
     pub fn kind(&self) -> ErrorKind {
         self.0.kind()
     }
+
+    pub(crate) fn is_safety_violation(&self) -> bool {
+        self.0.is_safety_violation()
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -150,6 +154,10 @@ impl ErrorImpl {
             Self::Wrapped { source, .. } => source.kind(),
         }
     }
+
+    pub(crate) fn is_safety_violation(&self) -> bool {
+        self.kind().is_safety_violation()
+    }
 }
 
 impl ErrorKind {
@@ -158,7 +166,6 @@ impl ErrorKind {
     /// Aside from fetching the errno represented by standard
     /// [`ErrorKind::OsError`] errors, pure-Rust errors are also mapped to C
     /// errno values where appropriate.
-    #[cfg(any(feature = "capi", test))]
     pub(crate) fn errno(&self) -> Option<i32> {
         match self {
             ErrorKind::NotImplemented => Some(libc::ENOSYS),
@@ -167,6 +174,10 @@ impl ErrorKind {
             ErrorKind::OsError(errno) => *errno,
             _ => None,
         }
+    }
+
+    pub(crate) fn is_safety_violation(&self) -> bool {
+        self.errno() == Self::SafetyViolation.errno()
     }
 }
 

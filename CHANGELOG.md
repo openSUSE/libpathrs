@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   sense for the error type (so `ErrorKind::InvalidArgument` will result in an
   `EINVAL` value for `saved_errno`). This will allow C users to have a nicer
   time handling errors programmatically.
+- tests: we now have a large array of tests for verifying that the core lookup
+  logic of libpathrs is race-safe against various attacks. This is no big
+  surprise, given libpathrs's design, but we now have more extensive tests than
+  `github.com/cyphar/filepath-securejoin`.
 
 ### Fixes ###
 - multiarch: we now build correctly on 32-bit architectures as well as
@@ -60,6 +64,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   do `Root::mkdir_all` at the same time, instead the race winner's directory
   will be used by both processes. See [opencontainers/runc#4543][] for more
   details.
+- `Root::remove_all` will now handle missing paths that disappear from
+  underneath it more gracefully, ensuring that multiple `Root::remove_all`
+  operations run on the same directory tree will all succeed without errors.
+  The need for this is similar to the need for `Root::mkdir_all` to handle such
+  cases.
+- opath resolver: in some cases with trailing symlinks in the symlink stack
+  (i.e. for partial lookups caused by `Root::mkdir_all`) we would not correctly
+  handle leading `..` components, leading to safety errors when libpathrs
+  thought that the symlink stack had been corrupted.
+- openat2 resolver: always return a hard `SafetyViolation` if we encounter one
+  during partial lookups to match the opath resolver behaviour and to avoid
+  confusion by users (it is theoretically safe to fall back from a
+  `SafetyViolation` during a partial lookup, but it's better to be safe here).
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how

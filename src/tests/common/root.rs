@@ -17,13 +17,19 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{fs, os::unix::fs as unixfs, path::Path};
+use std::{
+    fs,
+    os::unix::fs as unixfs,
+    path::{Path, PathBuf},
+};
 
 use crate::syscalls;
 
 use anyhow::{Context, Error};
 use rustix::fs::{self as rustix_fs, AtFlags, OFlags, CWD};
 use tempfile::TempDir;
+
+// TODO: Make these macros usable from outside this crate...
 
 macro_rules! create_inode {
     // "/foo/bar" @ chmod 0o755
@@ -140,13 +146,13 @@ macro_rules! create_tree {
                     create_inode!(&path => $($inner)*);
                 }
             )*
-            Ok(root)
+            root
         }
     }
 }
 
-pub fn create_basic_tree() -> Result<TempDir, Error> {
-    create_tree! {
+pub(crate) fn create_basic_tree() -> Result<TempDir, Error> {
+    Ok(create_tree! {
         // Basic inodes.
         "a" => (dir);
         "b/c/d/e/f" => (dir);
@@ -156,6 +162,8 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         "root-link1" => (symlink -> "/");
         "root-link2" => (symlink -> "/..");
         "root-link3" => (symlink -> "/../../../../..");
+        "escape-link1" => (symlink -> "../../../../../../../../../../target");
+        "escape-link2" => (symlink -> "/../../../../../../../../../../target");
         // Some "bad" inodes that non-privileged users can create.
         "b/fifo" => (fifo);
         "b/sock" => (sock);
@@ -224,5 +232,117 @@ pub fn create_basic_tree() -> Result<TempDir, Error> {
         // setgid has unique behaviour when interacting with mkdir_all.
         "setgid-self" => (dir, {chmod 0o7777});
         "setgid-other" => #[cfg(feature = "_test_as_root")] (dir, {chown 12345:12345}, {chmod 0o7777});
-    }
+        // Deep directory tree to be used for testing remove-all.
+        "deep-rmdir" => (dir);
+        "deep-rmdir/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z" => (file);
+        "deep-rmdir/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z" => (dir);
+        "deep-rmdir/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z" => (file);
+        "deep-rmdir/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z" => (symlink -> "/");
+        "deep-rmdir/aa/bb/foo/bar/baz" => (file);
+        "deep-rmdir/aa/cc/foo/bar/baz" => (file);
+        "deep-rmdir/aa/dd/foo/bar/baz" => (file);
+        "deep-rmdir/aa/ee/foo/bar/baz" => (file);
+        "deep-rmdir/aa/ff/foo/bar/baz" => (file);
+        "deep-rmdir/aa/gg/foo/bar/baz" => (file);
+        "deep-rmdir/aa/hh/foo/bar/baz" => (file);
+        "deep-rmdir/aa/ii/foo/bar/baz" => (file);
+        "deep-rmdir/aa/jj/foo/bar/baz" => (file);
+        "deep-rmdir/aa/kk/foo/bar/baz" => (file);
+        "deep-rmdir/aa/ll/foo/bar/baz" => (file);
+        "deep-rmdir/aa/mm/foo/bar/baz" => (file);
+        "deep-rmdir/aa/nn/foo/bar/baz" => (file);
+        "deep-rmdir/aa/oo/foo/bar/baz" => (file);
+        "deep-rmdir/aa/pp/foo/bar/baz" => (file);
+        "deep-rmdir/aa/qq/foo/bar/baz" => (file);
+        "deep-rmdir/aa/rr/foo/bar/baz" => (file);
+        "deep-rmdir/aa/ss/foo/bar/baz" => (file);
+        "deep-rmdir/aa/tt/foo/bar/baz" => (file);
+        "deep-rmdir/aa/uu/foo/bar/baz" => (file);
+        "deep-rmdir/aa/vv/foo/bar/baz" => (file);
+        "deep-rmdir/aa/ww/foo/bar/baz" => (file);
+        "deep-rmdir/aa/xx/foo/bar/baz" => (file);
+        "deep-rmdir/aa/yy/foo/bar/baz" => (file);
+        "deep-rmdir/aa/zz/foo/bar/baz" => (file);
+        "deep-rmdir/bb/bb/foo/bar/baz" => (file);
+        "deep-rmdir/bb/cc/foo/bar/baz" => (file);
+        "deep-rmdir/bb/dd/foo/bar/baz" => (file);
+        "deep-rmdir/bb/ee/foo/bar/baz" => (file);
+        "deep-rmdir/bb/ff/foo/bar/baz" => (file);
+        "deep-rmdir/bb/gg/foo/bar/baz" => (file);
+        "deep-rmdir/bb/hh/foo/bar/baz" => (file);
+        "deep-rmdir/bb/ii/foo/bar/baz" => (file);
+        "deep-rmdir/bb/jj/foo/bar/baz" => (file);
+        "deep-rmdir/bb/kk/foo/bar/baz" => (file);
+        "deep-rmdir/bb/ll/foo/bar/baz" => (file);
+        "deep-rmdir/bb/mm/foo/bar/baz" => (file);
+        "deep-rmdir/bb/nn/foo/bar/baz" => (file);
+        "deep-rmdir/bb/oo/foo/bar/baz" => (file);
+        "deep-rmdir/bb/pp/foo/bar/baz" => (file);
+        "deep-rmdir/bb/qq/foo/bar/baz" => (file);
+        "deep-rmdir/bb/rr/foo/bar/baz" => (file);
+        "deep-rmdir/bb/ss/foo/bar/baz" => (file);
+        "deep-rmdir/bb/tt/foo/bar/baz" => (file);
+        "deep-rmdir/bb/uu/foo/bar/baz" => (file);
+        "deep-rmdir/bb/vv/foo/bar/baz" => (file);
+        "deep-rmdir/bb/ww/foo/bar/baz" => (file);
+        "deep-rmdir/bb/xx/foo/bar/baz" => (file);
+        "deep-rmdir/bb/yy/foo/bar/baz" => (file);
+        "deep-rmdir/bb/zz/foo/bar/baz" => (file);
+        "deep-rmdir/cc/bb/foo/bar/baz" => (file);
+        "deep-rmdir/cc/cc/foo/bar/baz" => (file);
+        "deep-rmdir/cc/dd/foo/bar/baz" => (file);
+        "deep-rmdir/cc/ee/foo/bar/baz" => (file);
+        "deep-rmdir/cc/ff/foo/bar/baz" => (file);
+        "deep-rmdir/cc/gg/foo/bar/baz" => (file);
+        "deep-rmdir/cc/hh/foo/bar/baz" => (file);
+        "deep-rmdir/cc/ii/foo/bar/baz" => (file);
+        "deep-rmdir/cc/jj/foo/bar/baz" => (file);
+        "deep-rmdir/cc/kk/foo/bar/baz" => (file);
+        "deep-rmdir/cc/ll/foo/bar/baz" => (file);
+        "deep-rmdir/cc/mm/foo/bar/baz" => (file);
+        "deep-rmdir/cc/nn/foo/bar/baz" => (file);
+        "deep-rmdir/cc/oo/foo/bar/baz" => (file);
+        "deep-rmdir/cc/pp/foo/bar/baz" => (file);
+        "deep-rmdir/cc/qq/foo/bar/baz" => (file);
+        "deep-rmdir/cc/rr/foo/bar/baz" => (file);
+        "deep-rmdir/cc/ss/foo/bar/baz" => (file);
+        "deep-rmdir/cc/tt/foo/bar/baz" => (file);
+        "deep-rmdir/cc/uu/foo/bar/baz" => (file);
+        "deep-rmdir/cc/vv/foo/bar/baz" => (file);
+        "deep-rmdir/cc/ww/foo/bar/baz" => (file);
+        "deep-rmdir/cc/xx/foo/bar/baz" => (file);
+        "deep-rmdir/cc/yy/foo/bar/baz" => (file);
+        "deep-rmdir/cc/zz/foo/bar/baz" => (file);
+    })
+}
+
+pub(crate) fn create_race_tree() -> Result<(TempDir, PathBuf), Error> {
+    let tmpdir = create_tree! {
+        // Our root.
+        "root" => (dir);
+        // The path that the race tests will try to operate on.
+        "root/a/b/c/d" => (dir);
+        // Symlinks to swap that are semantically equivalent but should also
+        // trigger breakout errors.
+        "root/b-link" => (symlink -> "../b/../b/../b/../b/../b/../b/../b/../b/../b/../b/../b/../b/../b");
+        "root/c-link" => (symlink -> "../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c/../../b/c");
+        // Bad paths that should result in an error.
+        "root/bad-link1" => (symlink -> "/non/exist");
+        "root/bad-link2" => (symlink -> "/file/non/exist");
+        // Try to attack the root to get access to /etc/passwd.
+        "root/etc/passwd" => (file);
+        "root/etc-target/passwd" => (file);
+        "root/etc-attack-rel-link" => (symlink -> "../../../../../../../../../../../../../../../../../../etc");
+        "root/etc-attack-abs-link" => (symlink -> "/../../../../../../../../../../../../../../../../../../etc");
+        "root/passwd-attack-rel-link" => (symlink -> "../../../../../../../../../../../../../../../../../../etc/passwd");
+        "root/passwd-attack-abs-link" => (symlink -> "/../../../../../../../../../../../../../../../../../../etc/passwd");
+        // File to swap a directory with.
+        "root/file" => (file);
+        // Directory outside the root we can swap with.
+        "outsideroot" => (dir);
+    };
+
+    let root: PathBuf = [tmpdir.as_ref(), Path::new("root")].iter().collect();
+
+    Ok((tmpdir, root))
 }
