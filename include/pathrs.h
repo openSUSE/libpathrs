@@ -99,7 +99,8 @@ typedef struct __CBINDGEN_ALIGNED(8) {
  * # Return Value
  *
  * On success, this function returns a file descriptor that can be used as a
- * root handle in subsequent pathrs_inroot_* operations.
+ * root handle in subsequent pathrs_inroot_* operations. The file descriptor
+ * will have the `O_CLOEXEC` flag automatically applied.
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
@@ -123,7 +124,8 @@ int pathrs_open_root(const char *path);
  *
  * # Return Value
  *
- * On success, this function returns a file descriptor.
+ * On success, this function returns a file descriptor. The file descriptor
+ * will have the `O_CLOEXEC` flag automatically applied.
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
@@ -188,7 +190,8 @@ int pathrs_inroot_resolve_nofollow(int root_fd, const char *path);
  *
  * # Return Value
  *
- * On success, this function returns a file descriptor.
+ * On success, this function returns a file descriptor. The file descriptor
+ * will have the `O_CLOEXEC` flag automatically applied.
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
@@ -330,7 +333,8 @@ int pathrs_inroot_remove_all(int root_fd, const char *path);
  * # Return Value
  *
  * On success, this function returns a file descriptor to the requested file.
- * The open flags are based on the provided flags.
+ * The open flags are based on the provided flags. The file descriptor will
+ * have the `O_CLOEXEC` flag automatically applied.
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
@@ -453,7 +457,8 @@ int pathrs_inroot_hardlink(int root_fd, const char *path, const char *target);
  *
  * # Return Value
  *
- * On success, this function returns a file descriptor.
+ * On success, this function returns a file descriptor. The file descriptor
+ * will have the `O_CLOEXEC` flag automatically applied.
  *
  * If an error occurs, this function will return a negative error code. To
  * retrieve information about the error (such as a string describing the error,
@@ -549,7 +554,7 @@ pathrs_error_t *pathrs_errorinfo(int err_id);
  */
 void pathrs_errorinfo_free(pathrs_error_t *ptr);
 
-#endif /* LIBPATHRS_H */
+#endif  /* LIBPATHRS_H */
 
 #ifdef __CBINDGEN_ALIGNED
 #undef __CBINDGEN_ALIGNED
