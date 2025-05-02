@@ -75,7 +75,7 @@ impl HandleImpl for CapiHandle {
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
-        self.try_clone().map_err(From::from)
+        self.try_clone()
     }
 
     fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {
@@ -92,7 +92,7 @@ impl HandleImpl for &CapiHandle {
     }
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error> {
-        CapiHandle::try_clone(self).map_err(From::from)
+        CapiHandle::try_clone(self)
     }
 
     fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {

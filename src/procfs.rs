@@ -363,7 +363,7 @@ impl ProcfsHandle {
         //       being a magic-link and then another thing being mounted on top.
         //       This is the same race as below.
         if self.readlink(base, subpath).is_err() {
-            return self.open(base, subpath, oflags).map(File::from);
+            return self.open(base, subpath, oflags);
         }
 
         // Get a no-follow handle to the parent of the magic-link.
