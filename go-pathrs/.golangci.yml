@@ -14,28 +14,23 @@
 # You should have received a copy of the GNU Lesser General Public License along
 # with this program. If not, see <https://www.gnu.org/licenses/>.
 
+version: "2"
 linters:
   enable:
     - bidichk
-    - copyloopvar
     - cyclop
     - errname
     - errorlint
     - exhaustive
     - goconst
     - godot
-    - gofumpt
-    - goimports
     - gomoddirectives
     - gosec
-    - intrange
     - mirror
     - misspell
     - mnd
     - nilerr
     - nilnil
-    # This lint has issues with a nolint:exhaustive we have.
-    #- nolintlint
     - perfsprint
     - prealloc
     - reassign
@@ -44,3 +39,7 @@ linters:
     - unparam
     - usestdlibvars
     - wastedassign
+formatters:
+  enable:
+    - gofumpt
+    - goimports

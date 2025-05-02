@@ -26,18 +26,22 @@ import (
 	"runtime"
 )
 
+// ProcBase is used with [ProcReadlink] and related functions to indicate what
+// /proc subpath path operations should be done relative to.
 type ProcBase int
 
 const (
-	// Use /proc. Note that this mode may be more expensive because we have to
-	// take steps to try to avoid leaking unmasked procfs handles, so you
-	// should use [ProcBaseSelf] if you can.
+	// ProcBaseRoot indicates to use /proc. Note that this mode may be more
+	// expensive because we have to take steps to try to avoid leaking unmasked
+	// procfs handles, so you should use [ProcBaseSelf] if you can.
 	ProcBaseRoot ProcBase = iota
-	// Use /proc/self. For most programs, this is the standard choice.
+	// ProcBaseSelf indicates to use /proc/self. For most programs, this is the
+	// standard choice.
 	ProcBaseSelf
-	// Use /proc/thread-self. In multi-threaded programs where one thread has
-	// a different CLONE_FS, it is possible for /proc/self to point the wrong
-	// thread and so /proc/thread-self may be necessary.
+	// ProcBaseThreadSelf indicates to use /proc/thread-self. In multi-threaded
+	// programs where one thread has a different CLONE_FS, it is possible for
+	// /proc/self to point the wrong thread and so /proc/thread-self may be
+	// necessary.
 	ProcBaseThreadSelf
 )
 
