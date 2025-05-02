@@ -8,6 +8,14 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    # Transitive dependencies that violate our MSRV.
+    ignore:
+      # MSRV(1.65)
+      - dependency-name: "textwrap"
+        versions: [ ">=0.16.2" ]
+      # MSRV(1.65)
+      - dependency-name: "once_cell"
+        versions: [ ">=1.21.0" ]
   # Dependencies listed in .github/workflows/*.yml
   - package-ecosystem: "github-actions"
     directory: "/"
