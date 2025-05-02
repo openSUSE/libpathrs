@@ -34,7 +34,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rustix::fs::{self as rustix_fs, StatExt, StatxFlags};
+use rustix::fs::{self as rustix_fs, StatxFlags};
 
 pub(crate) struct Metadata(rustix_fs::Stat);
 
@@ -79,7 +79,7 @@ impl MetadataExt for Metadata {
     }
 
     fn atime(&self) -> i64 {
-        self.0.atime()
+        self.0.st_atime
     }
 
     fn atime_nsec(&self) -> i64 {
@@ -87,7 +87,7 @@ impl MetadataExt for Metadata {
     }
 
     fn mtime(&self) -> i64 {
-        self.0.mtime()
+        self.0.st_mtime
     }
 
     fn mtime_nsec(&self) -> i64 {
@@ -95,7 +95,7 @@ impl MetadataExt for Metadata {
     }
 
     fn ctime(&self) -> i64 {
-        self.0.ctime()
+        self.0.st_ctime
     }
 
     fn ctime_nsec(&self) -> i64 {

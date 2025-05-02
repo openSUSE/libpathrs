@@ -48,21 +48,15 @@ pub(in crate::tests) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(
     let dst_path = format!("/proc/self/fd/{}", dst_file.as_raw_fd());
 
     match ty {
-        MountType::Tmpfs => rustix_mount::mount2(
-            None::<&Path>,
-            &dst_path,
-            Some("tmpfs"),
-            MountFlags::empty(),
-            None,
-        )
-        .with_context(|| {
-            format!(
-                "mount tmpfs on {:?}",
-                dst_file
-                    .as_unsafe_path_unchecked()
-                    .unwrap_or(dst_path.into())
-            )
-        }),
+        MountType::Tmpfs => rustix_mount::mount("", &dst_path, "tmpfs", MountFlags::empty(), None)
+            .with_context(|| {
+                format!(
+                    "mount tmpfs on {:?}",
+                    dst_file
+                        .as_unsafe_path_unchecked()
+                        .unwrap_or(dst_path.into())
+                )
+            }),
         MountType::Bind { src } => {
             let src_file = syscalls::openat(
                 syscalls::AT_FDCWD,
@@ -97,10 +91,10 @@ where
     rustix_thread::unshare(UnshareFlags::FS | UnshareFlags::NEWNS)
         .expect("unable to create a mount namespace");
 
-    // Mark / as MS_SLAVE to avoid DoSing the host.
+    // Mark / as MS_SLAVE ("DOWNSTREAM" in rustix) to avoid DoSing the host.
     rustix_mount::mount_change(
         "/",
-        MountPropagationFlags::SLAVE | MountPropagationFlags::REC,
+        MountPropagationFlags::DOWNSTREAM | MountPropagationFlags::REC,
     )?;
 
     let ret = func();
