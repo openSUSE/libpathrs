@@ -52,13 +52,30 @@ clean:
 	-rm -rf target/
 
 .PHONY: lint
-lint: lint-rust
+lint: validate-cbindgen lint-rust
 
 .PHONY: lint-rust
 lint-rust:
 	$(CARGO_NIGHTLY) fmt --all -- --check
 	$(CARGO) clippy --all-features --all-targets
 	$(CARGO) check $(CARGO_FLAGS) --all-features --all-targets
+
+.PHONY: validate-cbindgen
+validate-cbindgen:
+	$(eval TMPDIR := $(shell mktemp --tmpdir -d libpathrs-cbindgen-check.XXXXXXXX))
+	@																		\
+		trap "rm -rf $(TMPDIR)" EXIT ;										\
+		cbindgen -c cbindgen.toml -o $(TMPDIR)/pathrs.h ;					\
+		if ! ( diff -u include/pathrs.h $(TMPDIR)/pathrs.h ); then			\
+			echo -e															\
+			  "\n"															\
+			  "ERROR: include/pathrs.h is out of date.\n\n"					\
+			  "Changes to the C API in src/capi/ usually need to be paired with\n" \
+			  "an update to include/pathrs.h using cbindgen. To fix this error,\n" \
+			  "just run:\n\n"												\
+			  "\tcbindgen -c cbindgen.toml -o include/pathrs.h\n" ;			\
+			exit 1 ;														\
+		 fi
 
 .PHONY: test-rust-doctest
 test-rust-doctest:
