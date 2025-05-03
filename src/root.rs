@@ -751,8 +751,27 @@ impl RootRef<'_> {
     }
 
     // Used in operations where we need to get a handle to the parent directory.
-    fn resolve_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, Option<&'p Path>), Error> {
+    fn resolve_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, &'p Path), Error> {
         let (parent, name) = utils::path_split(path).wrap("split path into (parent, name)")?;
+
+        // All users of resolve_parent require the basename to be an actual
+        // pathname (as opposed to being empty or a special name like "." or
+        // ".."), so return an error here if that is the path we got.
+        let name = match name.map(|p| (p, p.as_os_str().as_bytes())) {
+            None => Err(ErrorImpl::InvalidArgument {
+                name: "path".into(),
+                description: format!("path {path:?} does not have a valid basename").into(),
+            })?,
+            Some((_, b"." | b"..")) => Err(ErrorImpl::InvalidArgument {
+                name: "path".into(),
+                description: format!(
+                    "path {path:?} ends with {name:?} which is an invalid basename"
+                )
+                .into(),
+            })?,
+            Some((name, _)) => name,
+        };
+
         let dir = self
             .resolve(parent)
             .wrap("resolve parent directory")?
@@ -802,10 +821,6 @@ impl RootRef<'_> {
         let (dir, name) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve file creation path")?;
-        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "path".into(),
-            description: "file creation path has trailing slash".into(),
-        })?;
 
         match inode_type {
             InodeType::File(perm) => {
@@ -824,10 +839,6 @@ impl RootRef<'_> {
                 let (olddir, oldname) = self
                     .resolve_parent(target)
                     .wrap("resolve hardlink source path")?;
-                let oldname = oldname.ok_or_else(|| ErrorImpl::InvalidArgument {
-                    name: "target".into(),
-                    description: "hardlink target has trailing slash".into(),
-                })?;
                 syscalls::linkat(olddir, oldname, dir, name, AtFlags::empty())
             }
             InodeType::Fifo(perm) => {
@@ -888,11 +899,7 @@ impl RootRef<'_> {
         // parent and just operate on the final (slashless) component.
         let (dir, name) = self
             .resolve_parent(path.as_ref())
-            .wrap("resolve file creation path")?;
-        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "path".into(),
-            description: "file creation path has trailing slash".into(),
-        })?;
+            .wrap("resolve O_CREAT file creation path")?;
 
         // XXX: openat2(2) supports doing O_CREAT on trailing symlinks without
         // O_NOFOLLOW. We might want to expose that here, though because it
@@ -1089,12 +1096,6 @@ impl RootRef<'_> {
         let (dir, name) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve file removal path")?;
-        // TODO: rmdir() lets you use trailing slashes. We should probably allow
-        //       that too...
-        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "path".into(),
-            description: "file removal path has trailing slash".into(),
-        })?;
 
         let flags = match inode_type {
             RemoveInodeType::Regular => AtFlags::empty(),
@@ -1168,13 +1169,6 @@ impl RootRef<'_> {
         let (dir, name) = self
             .resolve_parent(path.as_ref())
             .wrap("resolve remove-all path")?;
-        // TODO: rmdir() lets you use trailing slashes. We should probably allow
-        //       that too...
-        let name = name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "path".into(),
-            description: "file removal path has trailing slash".into(),
-        })?;
-
         utils::remove_all(&dir, name)
     }
 
@@ -1200,17 +1194,9 @@ impl RootRef<'_> {
         let (src_dir, src_name) = self
             .resolve_parent(source.as_ref())
             .wrap("resolve rename source path")?;
-        let src_name = src_name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "source".into(),
-            description: "rename source path has trailing slash".into(),
-        })?;
         let (dst_dir, dst_name) = self
             .resolve_parent(destination.as_ref())
             .wrap("resolve rename destination path")?;
-        let dst_name = dst_name.ok_or_else(|| ErrorImpl::InvalidArgument {
-            name: "destination".into(),
-            description: "rename destination path has trailing slash".into(),
-        })?;
 
         syscalls::renameat2(src_dir, src_name, dst_dir, dst_name, rflags).map_err(|err| {
             ErrorImpl::RawOsError {

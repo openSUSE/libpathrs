@@ -77,6 +77,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   during partial lookups to match the opath resolver behaviour and to avoid
   confusion by users (it is theoretically safe to fall back from a
   `SafetyViolation` during a partial lookup, but it's better to be safe here).
+- The error handling for `Root::*` operations that require splitting paths into
+  a parent directory and single basename component (such as `Root::create`) has
+  now been unified and cases like trailing `/.` and `/..` will now always
+  result in `ErrorKind::InvalidArgument`.
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how
