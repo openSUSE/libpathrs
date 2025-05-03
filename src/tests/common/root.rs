@@ -44,9 +44,8 @@ macro_rules! create_inode {
         rustix_fs::chownat(
             CWD,
             $path,
-            // SAFETY: We pick valid uids and gids for this.
-            Some(unsafe { ::rustix::process::Uid::from_raw($uid) }),
-            Some(unsafe { ::rustix::process::Gid::from_raw($gid) }),
+            Some(::rustix::process::Uid::from_raw($uid)),
+            Some(::rustix::process::Gid::from_raw($gid)),
             AtFlags::SYMLINK_NOFOLLOW,
         )
         .with_context(|| format!("chown {}:{} {}", $uid, $gid, $path.display()))?;
@@ -57,8 +56,7 @@ macro_rules! create_inode {
         rustix_fs::chownat(
             CWD,
             $path,
-            // SAFETY: We pick valid uids and gids for this.
-            Some(unsafe { ::rustix::process::Uid::from_raw($uid) }),
+            Some(::rustix::process::Uid::from_raw($uid)),
             None,
             AtFlags::SYMLINK_NOFOLLOW,
         )
@@ -70,9 +68,8 @@ macro_rules! create_inode {
         rustix_fs::chownat(
             CWD,
             $path,
-            // SAFETY: We pick valid uids and gids for this.
             None,
-            Some(unsafe { ::rustix::process::Gid::from_raw($gid) }),
+            Some(::rustix::process::Gid::from_raw($gid)),
             AtFlags::SYMLINK_NOFOLLOW,
         )
         .with_context(|| format!("chown <none>:{} {}", $gid, $path.display()))?;
