@@ -400,7 +400,13 @@ root_op_tests! {
     ocreat_oexcl: open_subpath("abc", O_CREAT|O_EXCL|O_RDONLY) => Err(ErrorKind::InvalidArgument);
     enoent: open_subpath("abc", O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     exist_file: open_subpath("b/c/file", O_RDONLY) => Ok("b/c/file");
+    exist_file_trailing_slash1: open_subpath("b/c/file/", O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    exist_file_trailing_slash2: open_subpath("b/c/file///", O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
+    exist_file_trailing_slash3: open_subpath("b/c/file//./", O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ENOTDIR)));
     exist_dir: open_subpath("b/c/d", O_RDONLY) => Ok("b/c/d");
+    exist_dir_trailing_slash1: open_subpath("b/c/d/", O_RDONLY) => Ok("b/c/d");
+    exist_dir_trailing_slash2: open_subpath("b/c/d///", O_RDONLY) => Ok("b/c/d");
+    exist_dir_trailing_slash3: open_subpath("b/c/d//./", O_RDONLY) => Ok("b/c/d");
     symlink: open_subpath("b-file", O_RDONLY) => Ok("b/c/file");
     ocreat_symlink: open_subpath("b-file", O_CREAT|O_RDONLY) => Err(ErrorKind::InvalidArgument);
     nofollow_symlink: open_subpath("b-file", O_NOFOLLOW|O_RDONLY) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
@@ -459,6 +465,9 @@ root_op_tests! {
     invalid_mode_setgid: mkdir_all("foo", libc::S_ISGID | 0o777) => Err(ErrorKind::InvalidArgument);
     existing: mkdir_all("a", 0o711) => Ok(());
     basic: mkdir_all("a/b/c/d/e/f/g/h/i/j", 0o711) => Ok(());
+    trailing_slash_basic: mkdir_all("a/b/c/d/e/f/g/", 0o711) => Ok(());
+    trailing_slash_many: mkdir_all("a/b/c/d/e/f/g/////////", 0o711) => Ok(());
+    trailing_slash_complex: mkdir_all("a/b/c/d/e/f/g////./////", 0o711) => Ok(());
     sticky: mkdir_all("foo", libc::S_ISVTX | 0o711) => Ok(());
     dotdot_in_nonexisting: mkdir_all("a/b/c/d/e/f/g/h/i/j/k/../lmnop", 0o711) => Err(ErrorKind::OsError(Some(libc::ENOENT)));
     dotdot_in_existing: mkdir_all("b/c/../c/./d/e/f/g/h", 0o711) => Ok(());
