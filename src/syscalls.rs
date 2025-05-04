@@ -110,7 +110,7 @@ pub(crate) enum Error {
     #[error("invalid file descriptor {fd} (see <https://github.com/bytecodealliance/rustix/issues/1187> for more details)")]
     InvalidFd { fd: RawFd, source: Errno },
 
-    #[error("openat({dirfd}, {path}, {flags:?}, 0o{mode:o})")]
+    #[error("openat({dirfd}, {path:?}, {flags:?}, 0o{mode:o})")]
     Openat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -119,7 +119,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("openat2({dirfd}, {path}, {how}, {size})")]
+    #[error("openat2({dirfd}, {path:?}, {how}, {size})")]
     Openat2 {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -128,14 +128,14 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("readlinkat({dirfd}, {path})")]
+    #[error("readlinkat({dirfd}, {path:?})")]
     Readlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
         source: Errno,
     },
 
-    #[error("mkdirat({dirfd}, {path}, 0o{mode:o})")]
+    #[error("mkdirat({dirfd}, {path:?}, 0o{mode:o})")]
     Mkdirat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -143,7 +143,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("mknodat({dirfd}, {path}, 0o{mode:o}, {major}:{minor})")]
+    #[error("mknodat({dirfd}, {path:?}, 0o{mode:o}, {major}:{minor})")]
     Mknodat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -153,7 +153,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("unlinkat({dirfd}, {path}, {flags:?})")]
+    #[error("unlinkat({dirfd}, {path:?}, {flags:?})")]
     Unlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -161,7 +161,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("linkat({old_dirfd}, {old_path}, {new_dirfd}, {new_path}, {flags:?})")]
+    #[error("linkat({old_dirfd}, {old_path:?}, {new_dirfd}, {new_path:?}, {flags:?})")]
     Linkat {
         old_dirfd: FrozenFd,
         old_path: PathBuf,
@@ -171,7 +171,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("symlinkat({dirfd}, {path}, {target})")]
+    #[error("symlinkat({dirfd}, {path:?}, {target:?})")]
     Symlinkat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -179,7 +179,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("renameat({old_dirfd}, {old_path}, {new_dirfd}, {new_path})")]
+    #[error("renameat({old_dirfd}, {old_path:?}, {new_dirfd}, {new_path:?})")]
     Renameat {
         old_dirfd: FrozenFd,
         old_path: PathBuf,
@@ -188,7 +188,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("renameat2({old_dirfd}, {old_path}, {new_dirfd}, {new_path}, {flags:?})")]
+    #[error("renameat2({old_dirfd}, {old_path:?}, {new_dirfd}, {new_path:?}, {flags:?})")]
     Renameat2 {
         old_dirfd: FrozenFd,
         old_path: PathBuf,
@@ -201,7 +201,7 @@ pub(crate) enum Error {
     #[error("fstatfs({fd})")]
     Fstatfs { fd: FrozenFd, source: Errno },
 
-    #[error("fstatat({dirfd}, {path}, 0x{flags:x})")]
+    #[error("fstatat({dirfd}, {path:?}, {flags:?})")]
     Fstatat {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -209,7 +209,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("statx({dirfd}, {path}, flags=0x{flags:x}, mask=0x{mask:x})")]
+    #[error("statx({dirfd}, {path:?}, flags={flags:?}, mask={mask:?})")]
     Statx {
         dirfd: FrozenFd,
         path: PathBuf,
@@ -218,7 +218,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("fsopen({fstype}, {flags:?})")]
+    #[error("fsopen({fstype:?}, {flags:?})")]
     Fsopen {
         fstype: String,
         flags: FsOpenFlags,
@@ -244,7 +244,7 @@ pub(crate) enum Error {
         source: Errno,
     },
 
-    #[error("open_tree({dirfd}, {path}, {flags:?})")]
+    #[error("open_tree({dirfd}, {path:?}, {flags:?})")]
     OpenTree {
         dirfd: FrozenFd,
         path: PathBuf,
