@@ -96,6 +96,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
     `Root::remove_all` always succeeding is that it matches the behaviour of
     Go's `os.RemoveAll` and `rm -rf`, as well as being impractical for us to
     determine if the target to be deleted is a directory in a race-free way.
+  - `Root::rename` matches `renameat2(2)`'s behaviour to the best of our
+    ability.
+    * Trailing slashes on the source path are only allowed if the source is
+      actually a directory (otherwise you get `ENOTDIR`).
+    * For `RENAME_EXCHANGE`, the target path may only have trailing slashes if
+      it is actually a directory (same as the source path). Otherwise, if the
+      *target* path has a trailing slash then the *source* path must be a
+      directory (otherwise you get `ENOTDIR`).
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how

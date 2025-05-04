@@ -40,7 +40,7 @@ use std::{
 };
 
 use rustix::{
-    fs::{self as rustix_fs, AtFlags},
+    fs::{self as rustix_fs, AtFlags, FileType},
     io::Errno,
 };
 
@@ -765,7 +765,11 @@ impl RootRef<'_> {
     /// to decide what the correct handling of `trailing_slash` is (but if it is
     /// ignored by the caller then trailing slashes will be ignored wholesale).
     ///
+    /// If you expect the target path to exist already, then
+    /// [`resolve_exists_parent`] may be more suitable.
+    ///
     /// [`rename`]: Self::rename
+    /// [`resolve_exists_parent`]: Self::resolve_exists_parent
     fn resolve_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, &'p Path, bool), Error> {
         let (path, trailing_slash) = utils::path_strip_trailing_slash(path);
         let (parent, name) = utils::path_split(path).wrap("split path into (parent, name)")?;
@@ -792,6 +796,32 @@ impl RootRef<'_> {
             .wrap("resolve parent directory")?
             .into();
         Ok((dir, name, trailing_slash))
+    }
+
+    /// Equivalent to [`resolve_parent`], except that we assume that the target
+    /// exists and so if `path` has a trailing slash we verify that the target
+    /// path is actually a directory.
+    ///
+    /// If you need more complicated handling, use [`resolve_parent`].
+    ///
+    /// [`resolve_parent`]: Self::resolve_parent
+    fn resolve_exists_parent<'p>(&self, path: &'p Path) -> Result<(OwnedFd, &'p Path), Error> {
+        let (dir, name, trailing_slash) = self.resolve_parent(path)?;
+
+        if trailing_slash {
+            let stat = syscalls::fstatat(&dir, name).map_err(|err| ErrorImpl::RawOsError {
+                operation: "check trailing slash path is a directory".into(),
+                source: err,
+            })?;
+            if !FileType::from_raw_mode(stat.st_mode).is_dir() {
+                Err(ErrorImpl::OsError {
+                    operation: "verify trailing slash path".into(),
+                    source: IOError::from_raw_os_error(libc::ENOTDIR),
+                })?;
+            }
+        }
+
+        Ok((dir, name))
     }
 
     /// Get the target of a symlink within a [`RootRef`].
@@ -1244,16 +1274,46 @@ impl RootRef<'_> {
         destination: P,
         rflags: RenameFlags,
     ) -> Result<(), Error> {
-        // renameat2(2) doesn't let us rename paths using just handles. In
-        // addition, the target path might not exist (except in the case of
-        // RENAME_EXCHANGE and clobbering).
-        // TODO: Improve trailing slash handling.
-        let (src_dir, src_name, _) = self
-            .resolve_parent(source.as_ref())
+        // renameat2(2) doesn't let us rename paths using AT_EMPTY_PATH handles.
+        // Note that the source must always exist, and we do want to verify the
+        // trailing path is correct.
+        let (src_dir, src_name) = self
+            .resolve_exists_parent(source.as_ref())
             .wrap("resolve rename source path")?;
-        let (dst_dir, dst_name, _) = self
-            .resolve_parent(destination.as_ref())
-            .wrap("resolve rename destination path")?;
+
+        // However, target path handling is unfortunately a little more
+        // complicated. Ideally we want to match the native trailing-slash
+        // behaviour of renameat2(2) to avoid confusion.
+        let (dst_dir, dst_name) = if rflags.contains(RenameFlags::RENAME_EXCHANGE) {
+            // For RENAME_EXCHANGE, the target simply must exist and can be a
+            // different type from the source. Trailing slashes are only allowed
+            // if the target path is a directory.
+            self.resolve_exists_parent(destination.as_ref())
+        } else {
+            // For all other renames, trailing slashes on the *target* path are
+            // only allowed if the *source* path is a directory. (Also, if the
+            // target path exists, it must be a directory but this is implicitly
+            // handled by renameat2(2) and so we don't need to check it here.)
+            self.resolve_parent(destination.as_ref())
+                .and_then(|(dir, name, trailing_slash)| {
+                    if trailing_slash {
+                        let src_stat = syscalls::fstatat(&src_dir, src_name).map_err(|err| {
+                            ErrorImpl::RawOsError {
+                                operation: "check rename source path is a directory".into(),
+                                source: err,
+                            }
+                        })?;
+                        if !FileType::from_raw_mode(src_stat.st_mode).is_dir() {
+                            Err(ErrorImpl::OsError {
+                                operation: "destination path has trailing slash but source is not a directory".into(),
+                                source: IOError::from_raw_os_error(libc::ENOTDIR),
+                            })?;
+                        }
+                    }
+                    Ok((dir, name))
+                })
+        }
+        .wrap("resolve rename destination path")?;
 
         syscalls::renameat2(src_dir, src_name, dst_dir, dst_name, rflags).map_err(|err| {
             ErrorImpl::RawOsError {
