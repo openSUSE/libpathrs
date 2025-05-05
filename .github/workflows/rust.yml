@@ -108,6 +108,8 @@ jobs:
     name: cargo test
     runs-on: ubuntu-latest
     steps:
+      - name: free unused space
+        uses: jlumbroso/free-disk-space@v1.3.1
       - uses: actions/checkout@v4
       # Nightly rust is required for llvm-cov --doc.
       - uses: dtolnay/rust-toolchain@nightly
