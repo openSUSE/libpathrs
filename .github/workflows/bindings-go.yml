@@ -47,7 +47,7 @@ jobs:
       - name: install libpathrs
         run: sudo ./install.sh --libdir=/usr/lib
       # Run golangci-lint.
-      - uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.1
           working-directory: go-pathrs
