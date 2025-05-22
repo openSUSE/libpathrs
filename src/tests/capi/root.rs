@@ -109,52 +109,62 @@ impl CapiRoot {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
-        capi_utils::call_capi_zst(|| unsafe {
-            match inode_type {
-                InodeType::File(perm) => capi::core::pathrs_inroot_mknod(
+        capi_utils::call_capi_zst(|| match inode_type {
+            InodeType::File(perm) => unsafe {
+                capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFREG | perm.mode(),
                     0,
-                ),
-                InodeType::Directory(perm) => {
-                    capi::core::pathrs_inroot_mkdir(root_fd.into(), path.as_ptr(), perm.mode())
-                }
-                InodeType::Symlink(target) => {
-                    let target = capi_utils::path_to_cstring(target);
+                )
+            },
+            InodeType::Directory(perm) => unsafe {
+                capi::core::pathrs_inroot_mkdir(root_fd.into(), path.as_ptr(), perm.mode())
+            },
+            InodeType::Symlink(target) => {
+                let target = capi_utils::path_to_cstring(target);
+                unsafe {
                     capi::core::pathrs_inroot_symlink(
                         root_fd.into(),
                         path.as_ptr(),
                         target.as_ptr(),
                     )
                 }
-                InodeType::Hardlink(target) => {
-                    let target = capi_utils::path_to_cstring(target);
+            }
+            InodeType::Hardlink(target) => {
+                let target = capi_utils::path_to_cstring(target);
+                unsafe {
                     capi::core::pathrs_inroot_hardlink(
                         root_fd.into(),
                         path.as_ptr(),
                         target.as_ptr(),
                     )
                 }
-                InodeType::Fifo(perm) => capi::core::pathrs_inroot_mknod(
+            }
+            InodeType::Fifo(perm) => unsafe {
+                capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFIFO | perm.mode(),
                     0,
-                ),
-                InodeType::CharacterDevice(perm, dev) => capi::core::pathrs_inroot_mknod(
+                )
+            },
+            InodeType::CharacterDevice(perm, dev) => unsafe {
+                capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFCHR | perm.mode(),
                     *dev,
-                ),
-                InodeType::BlockDevice(perm, dev) => capi::core::pathrs_inroot_mknod(
+                )
+            },
+            InodeType::BlockDevice(perm, dev) => unsafe {
+                capi::core::pathrs_inroot_mknod(
                     root_fd.into(),
                     path.as_ptr(),
                     libc::S_IFBLK | perm.mode(),
                     *dev,
-                ),
-            }
+                )
+            },
         })
     }
 
