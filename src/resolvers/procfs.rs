@@ -439,8 +439,8 @@ mod tests {
         resolve_no_symlinks3("/proc", "self/../cgroups", O_RDONLY, ResolverFlags::NO_SYMLINKS) == Err(ErrorKind::OsError(Some(libc::ELOOP)));
 
         // Check symlink loops.
-        symloop(tests_common::create_basic_tree()?.into_path(), "loop/basic-loop1", O_PATH, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::ELOOP)));
-        symloop_opath_onofollow(tests_common::create_basic_tree()?.into_path(), "loop/basic-loop1", O_PATH|O_NOFOLLOW, ResolverFlags::empty()) == Ok("loop/basic-loop1".into());
+        symloop(tests_common::create_basic_tree()?.keep(), "loop/basic-loop1", O_PATH, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        symloop_opath_onofollow(tests_common::create_basic_tree()?.keep(), "loop/basic-loop1", O_PATH|O_NOFOLLOW, ResolverFlags::empty()) == Ok("loop/basic-loop1".into());
 
         // Check that our {O_PATH, O_NOFOLLOW, O_DIRECTORY} logic is correct,
         // based on the table in opath_resolve().
