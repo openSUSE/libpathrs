@@ -19,10 +19,7 @@
 
 #[cfg(feature = "capi")]
 use crate::tests::capi::CapiRoot;
-use crate::{
-    error::ErrorKind, flags::ResolverFlags, resolvers::ResolverBackend,
-    tests::common as tests_common, Root,
-};
+use crate::{error::ErrorKind, flags::ResolverFlags, resolvers::ResolverBackend, Root};
 
 use std::path::Path;
 
@@ -35,171 +32,166 @@ macro_rules! resolve_tests {
     //          test_err: resolve(...) => Err(ErrorKind::...)
     //      }
     // }
-    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* rust-fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* rust-fn $test_name:ident (mut $root_var:ident : Root) $body:block => $expected:expr) => {
         paste::paste! {
             #[test]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _default>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let mut $root_var = Root::open(&root_dir)?;
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::default(),
-                    "ResolverBackend not the default despite not being configured"
-                );
+                utils::$with_root_fn(|root_dir: &Path| {
+                    let mut $root_var = Root::open(root_dir)?;
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::default(),
+                        "ResolverBackend not the default despite not being configured"
+                    );
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                // Make sure the mut $root_var doesn't give us a warning.
-                $root_var.set_resolver_flags($root_var.resolver_flags());
-                Ok(())
+                    // Make sure the mut $root_var doesn't give us a warning.
+                    $root_var.set_resolver_flags($root_var.resolver_flags());
+                    Ok(())
+                })
             }
 
             #[test]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _default>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let root = Root::open(&root_dir)?;
-                let mut $root_var = root.as_ref();
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::default(),
-                    "ResolverBackend not the default despite not being configured"
-                );
+                utils::$with_root_fn(|root_dir: &Path| {
+                    let root = Root::open(root_dir)?;
+                    let mut $root_var = root.as_ref();
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::default(),
+                        "ResolverBackend not the default despite not being configured"
+                    );
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                // Make sure the mut $root_var doesn't give us a warning.
-                $root_var.set_resolver_flags($root_var.resolver_flags());
-                Ok(())
+                    // Make sure the mut $root_var doesn't give us a warning.
+                    $root_var.set_resolver_flags($root_var.resolver_flags());
+                    Ok(())
+                })
             }
 
             #[test]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let mut $root_var = Root::open(&root_dir)?;
-                $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::KernelOpenat2,
-                    "incorrect ResolverBackend despite using set_resolver_backend"
-                );
+                utils::$with_root_fn(|root_dir: &Path| {
+                    let mut $root_var = Root::open(root_dir)?;
+                    $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::KernelOpenat2,
+                        "incorrect ResolverBackend despite using set_resolver_backend"
+                    );
 
-                if !$root_var.resolver_backend().supported() {
-                    // Skip if not supported.
-                    return Ok(());
-                }
+                    if !$root_var.resolver_backend().supported() {
+                        // Skip if not supported.
+                        return Ok(());
+                    }
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                Ok(())
+                    Ok(())
+                })
             }
 
             #[test]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _openat2>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let root = Root::open(&root_dir)?;
-                let mut $root_var = root.as_ref();
-                $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::KernelOpenat2,
-                    "incorrect ResolverBackend despite using set_resolver_backend"
-                );
-                if !$root_var.resolver_backend().supported() {
-                    // Skip if not supported.
-                    return Ok(());
-                }
+                utils::$with_root_fn(|root_dir: &Path| {
+                    let root = Root::open(root_dir)?;
+                    let mut $root_var = root.as_ref();
+                    $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::KernelOpenat2,
+                        "incorrect ResolverBackend despite using set_resolver_backend"
+                    );
+                    if !$root_var.resolver_backend().supported() {
+                        // Skip if not supported.
+                        return Ok(());
+                    }
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                Ok(())
+                    Ok(())
+                })
             }
 
             #[test]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let mut $root_var = Root::open(&root_dir)?;
-                $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::EmulatedOpath,
-                    "incorrect ResolverBackend despite using set_resolver_backend"
-                );
-                // EmulatedOpath is always supported.
-                assert!(
-                    $root_var.resolver_backend().supported(),
-                    "emulated opath is always supported",
-                );
+                utils::$with_root_fn(|root_dir: &Path| {
+                    let mut $root_var = Root::open(root_dir)?;
+                    $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::EmulatedOpath,
+                        "incorrect ResolverBackend despite using set_resolver_backend"
+                    );
+                    // EmulatedOpath is always supported.
+                    assert!(
+                        $root_var.resolver_backend().supported(),
+                        "emulated opath is always supported",
+                    );
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                Ok(())
+                    Ok(())
+                })
             }
 
             #[test]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _opath>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let root = Root::open(&root_dir)?;
-                let mut $root_var = root
-                    .as_ref();
-                $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::EmulatedOpath,
-                    "incorrect ResolverBackend despite using set_resolver_backend"
-                );
-                // EmulatedOpath is always supported.
-                assert!(
-                    $root_var.resolver_backend().supported(),
-                    "emulated opath is always supported",
-                );
+                utils::$with_root_fn(|root_dir: &Path| {
+                    let root = Root::open(root_dir)?;
+                    let mut $root_var = root
+                        .as_ref();
+                    $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::EmulatedOpath,
+                        "incorrect ResolverBackend despite using set_resolver_backend"
+                    );
+                    // EmulatedOpath is always supported.
+                    assert!(
+                        $root_var.resolver_backend().supported(),
+                        "emulated opath is always supported",
+                    );
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                Ok(())
+                    // Make sure root_dir is not dropped earlier.
+                    let _root_dir = root_dir;
+                    Ok(())
+                })
             }
         }
     };
 
-    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* capi-fn $test_name:ident ($root_var:ident : CapiRoot) $body:block => $expected:expr) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* capi-fn $test_name:ident ($root_var:ident : CapiRoot) $body:block => $expected:expr) => {
         paste::paste! {
             #[cfg(feature = "capi")]
             #[test]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<capi_root_ $test_name>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let $root_var = CapiRoot::open(&root_dir)?;
+                utils::$with_root_fn(|root_dir: &Path| {
+                    let $root_var = CapiRoot::open(root_dir)?;
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                Ok(())
+                    Ok(())
+                })
             }
         }
     };
 
-    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @rust-impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @rust-impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
         paste::paste! {
             resolve_tests! {
-                [$root_dir]
+                [$with_root_fn]
                 $(#[cfg($ignore_meta)])*
                 rust-fn [<$op_name _ $test_name>](mut root: Root) {
                     root.set_resolver_flags($rflags);
@@ -216,10 +208,10 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @capi-impl $test_name:ident $op_name:ident ($path:expr, $no_follow_trailing:expr) => $expected:expr) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @capi-impl $test_name:ident $op_name:ident ($path:expr, $no_follow_trailing:expr) => $expected:expr) => {
         paste::paste! {
             resolve_tests! {
-                [$root_dir]
+                [$with_root_fn]
                 $(#[cfg($ignore_meta)])*
                 capi-fn [<$op_name _ $test_name>](root: CapiRoot) {
                     let expected = $expected;
@@ -234,45 +226,45 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
             $(#[cfg($ignore_meta)])*
             @rust-impl $test_name $op_name($path, $(ResolverFlags::$rflag)|*, false) => $expected
         }
         // The C API doesn't support custom ResolverFlags.
     };
 
-    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
             $(#[cfg($ignore_meta)])*
             @rust-impl $test_name $op_name($path, ResolverFlags::empty(), $no_follow_trailing) => $expected
         }
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
             $(#[cfg($ignore_meta)])*
             @capi-impl $test_name $op_name($path, $no_follow_trailing) => $expected
         }
     };
 
-    ([$root_dir:expr] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
             $(#[cfg($ignore_meta)])*
             @rust-impl $test_name $op_name($path, ResolverFlags::empty(), false) => $expected
         }
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
             $(#[cfg($ignore_meta)])*
             @capi-impl $test_name $op_name($path, false) => $expected
         }
     };
 
-    ($([$root_dir:expr] { $($(#[cfg($ignore_meta:meta)])* $test_name:ident : $op_name:ident ($($args:tt)*) => $expected:expr);* $(;)? });* $(;)?) => {
+    ($([$with_root_fn:ident] { $($(#[cfg($ignore_meta:meta)])* $test_name:ident : $op_name:ident ($($args:tt)*) => $expected:expr);* $(;)? });* $(;)?) => {
         $( $(
             resolve_tests! {
-                [$root_dir]
+                [$with_root_fn]
                 $(#[cfg($ignore_meta)])*
                 @impl $test_name $op_name ($($args)*) => $expected
             }
@@ -282,7 +274,7 @@ macro_rules! resolve_tests {
 
 resolve_tests! {
     // Test the magic-link-related handling.
-    [Path::new("/proc")] {
+    [with_proc] {
         proc_pseudo_magiclink: resolve("self/sched") => Ok(("{{/proc/self}}/sched", libc::S_IFREG));
         proc_pseudo_magiclink_nosym1: resolve("self", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
         proc_pseudo_magiclink_nosym2: resolve("self/sched", rflags = NO_SYMLINKS) => Err(ErrorKind::OsError(Some(libc::ELOOP)));
@@ -296,7 +288,7 @@ resolve_tests! {
     };
 
     // Complete lookups.
-    [tests_common::create_basic_tree()?] {
+    [with_basic_tree] {
         complete_root1: resolve("/") => Ok(("/", libc::S_IFDIR));
         complete_root2: resolve("/../../../../../..") => Ok(("/", libc::S_IFDIR));
         complete_root_link1: resolve("root-link1") => Ok(("/", libc::S_IFDIR));
@@ -505,6 +497,25 @@ mod utils {
 
     use anyhow::{Context, Error};
     use pretty_assertions::assert_eq;
+
+    pub(super) fn with_basic_tree<F>(func: F) -> Result<(), Error>
+    where
+        F: FnOnce(&Path) -> Result<(), Error>,
+    {
+        let root_dir = tests_common::create_basic_tree()?;
+
+        let res = func(root_dir.path());
+
+        let _root_dir = root_dir; // make sure tmpdir is kept alive
+        res
+    }
+
+    pub(super) fn with_proc<F>(func: F) -> Result<(), Error>
+    where
+        F: FnOnce(&Path) -> Result<(), Error>,
+    {
+        func(Path::new("/proc"))
+    }
 
     pub(super) fn check_root_resolve<R, H, P: AsRef<Path>>(
         root: R,
