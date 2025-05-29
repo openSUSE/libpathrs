@@ -25,7 +25,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Error};
+use anyhow::{bail, Context, Error};
 use rustix::{
     mount::{self as rustix_mount, MountFlags, MountPropagationFlags},
     thread::{self as rustix_thread, LinkNameSpaceType, UnshareFlags},
@@ -35,6 +35,27 @@ use rustix::{
 pub(crate) enum MountType {
     Tmpfs,
     Bind { src: PathBuf },
+    RebindWithFlags { flags: MountFlags },
+}
+
+// TODO: NOSYMFOLLOW is not exported for the libc backend of rustix. Until this
+// is fixed by <https://github.com/bytecodealliance/rustix/pull/1471> we need to
+// hardcode the value here. Thanfully, it has the same value for all
+// architectures.
+pub(in crate::tests) const NOSYMFOLLOW: MountFlags = MountFlags::from_bits_retain(0x100); // From <linux/mount.h>.
+
+fn are_vfs_flags(flags: MountFlags) -> bool {
+    flags
+        .difference(
+            // MS_RDONLY can be both a vfsmount and sb flag, but if we're operating
+            // using MS_BIND then it acts like a vfs flag.
+            MountFlags::RDONLY |
+        // These NO* flags are all per-vfsmount flags.
+        MountFlags::NOSUID | MountFlags::NODEV | MountFlags::NOEXEC | NOSYMFOLLOW |
+        // Except LAZYATIME, these are all per-vfsmount flags.
+        MountFlags::NOATIME | MountFlags::NODIRATIME | MountFlags::RELATIME,
+        )
+        .is_empty()
 }
 
 pub(in crate::tests) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> {
@@ -76,6 +97,45 @@ pub(in crate::tests) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(
                         .unwrap_or(dst_path.into())
                 )
             })
+        }
+        MountType::RebindWithFlags { flags } => {
+            if !are_vfs_flags(flags) {
+                bail!("rebind-with-flags mount options {flags:?} contains non-vfsmount flags");
+            }
+
+            // Create a bind-mount first for us to apply our mount flags to.
+            rustix_mount::mount_bind_recursive(&dst_path, &dst_path).with_context(|| {
+                format!(
+                    "bind-mount {:?} to self",
+                    dst_file
+                        .as_unsafe_path_unchecked()
+                        .unwrap_or(dst_path.clone().into())
+                )
+            })?;
+
+            // We need to re-open the path because the handle references the
+            // dentry below the mount, and so MS_REMOUNT will return -EINVAL if
+            // we don't get a new handle.
+            // TODO: Would be nice to be able to do reopen(O_PATH|O_NOFOLLOW).
+            let dst_file = syscalls::openat(
+                syscalls::AT_FDCWD,
+                dst,
+                OpenFlags::O_NOFOLLOW | OpenFlags::O_PATH,
+                0,
+            )?;
+            let dst_path = format!("/proc/self/fd/{}", dst_file.as_raw_fd());
+
+            // Then apply our mount flags.
+            rustix_mount::mount_remount(&dst_path, MountFlags::BIND | flags, "").with_context(
+                || {
+                    format!(
+                        "vfs-remount {:?} with {flags:?}",
+                        dst_file
+                            .as_unsafe_path_unchecked()
+                            .unwrap_or(dst_path.into())
+                    )
+                },
+            )
         }
     }
 }

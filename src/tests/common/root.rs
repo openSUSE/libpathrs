@@ -23,10 +23,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::syscalls;
+use crate::{
+    syscalls,
+    tests::common::{self as tests_common, MountType},
+};
 
 use anyhow::{Context, Error};
-use rustix::fs::{self as rustix_fs, AtFlags, OFlags, CWD};
+use rustix::{
+    fs::{self as rustix_fs, AtFlags, OFlags, CWD},
+    mount::MountFlags,
+};
 use tempfile::TempDir;
 
 // TODO: Make these macros usable from outside this crate...
@@ -209,6 +215,12 @@ pub(crate) fn create_basic_tree() -> Result<TempDir, Error> {
         "loop/d" => (symlink -> "e");
         "loop/e/link" => (symlink -> "../a/link");
         "loop/link" => (symlink -> "a/link");
+        // Symlinks for use with MS_NOSYMFOLLOW testing.
+        "nosymfollow/goodlink" => (symlink -> "/");
+        "nosymfollow/badlink" => (symlink -> "/"); // MS_NOSYMFOLLOW
+        "nosymfollow/nosymdir/dir/badlink" => (symlink -> "/"); // MS_NOSYMFOLLOW
+        "nosymfollow/nosymdir/dir/goodlink" => (symlink -> "/");
+        "nosymfollow/nosymdir/dir/foo/yessymdir/bar/goodlink" => (symlink -> "/");
         // Symlinks in a world-writable directory (fs.protected_symlinks).
         // ... owned by us.
         "tmpfs-self" => (dir, {chmod 0o1777});
@@ -311,6 +323,42 @@ pub(crate) fn create_basic_tree() -> Result<TempDir, Error> {
         "deep-rmdir/cc/yy/foo/bar/baz" => (file);
         "deep-rmdir/cc/zz/foo/bar/baz" => (file);
     })
+}
+
+pub(crate) fn mask_nosymfollow(root: &Path) -> Result<(), Error> {
+    // Apply NOSYMFOLLOW for some subpaths.
+    let root_prefix = root.to_path_buf();
+
+    // NOSYMFOLLOW applied to a single symlink itself.
+    tests_common::mount(
+        root_prefix.join("nosymfollow/badlink"),
+        MountType::RebindWithFlags {
+            flags: tests_common::NOSYMFOLLOW,
+        },
+    )?;
+    // NOSYMFOLLOW applied to a directory.
+    tests_common::mount(
+        root_prefix.join("nosymfollow/nosymdir/dir"),
+        MountType::RebindWithFlags {
+            flags: tests_common::NOSYMFOLLOW,
+        },
+    )?;
+    // NOSYMFOLLOW cleared to paths under a directory. (To clear
+    // NOSYMFOLLOW we just remount with no flags.)
+    tests_common::mount(
+        root_prefix.join("nosymfollow/nosymdir/dir/goodlink"),
+        MountType::RebindWithFlags {
+            flags: MountFlags::empty(),
+        },
+    )?;
+    tests_common::mount(
+        root_prefix.join("nosymfollow/nosymdir/dir/foo/yessymdir"),
+        MountType::RebindWithFlags {
+            flags: MountFlags::empty(),
+        },
+    )?;
+
+    Ok(())
 }
 
 pub(crate) fn create_race_tree() -> Result<(TempDir, PathBuf), Error> {

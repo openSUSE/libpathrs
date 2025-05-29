@@ -481,6 +481,21 @@ resolve_tests! {
     }
 }
 
+resolve_tests! {
+    [with_nosymfollow_root] {
+        #[cfg(feature = "_test_as_root")]
+        symlink_regular_symfollow: resolve("nosymfollow/goodlink") => Ok((".", libc::S_IFDIR));
+        #[cfg(feature = "_test_as_root")]
+        symlink_itself_nosymfollow: resolve("nosymfollow/badlink") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        #[cfg(feature = "_test_as_root")]
+        symlink_inside_nosymfollow_dir: resolve("nosymfollow/nosymdir/dir/badlink") => Err(ErrorKind::OsError(Some(libc::ELOOP)));
+        #[cfg(feature = "_test_as_root")]
+        symlink_itself_nested_clear_symfollow: resolve("nosymfollow/nosymdir/dir/goodlink") => Ok((".", libc::S_IFDIR));
+        #[cfg(feature = "_test_as_root")]
+        symlink_inside_nested_clear_symfollow: resolve("nosymfollow/nosymdir/dir/foo/yessymdir/bar/goodlink") => Ok((".", libc::S_IFDIR));
+    }
+}
+
 mod utils {
     use crate::{
         error::ErrorKind,
@@ -515,6 +530,22 @@ mod utils {
         F: FnOnce(&Path) -> Result<(), Error>,
     {
         func(Path::new("/proc"))
+    }
+
+    pub(super) fn with_nosymfollow_root<F>(func: F) -> Result<(), Error>
+    where
+        F: FnOnce(&Path) -> Result<(), Error>,
+    {
+        tests_common::in_mnt_ns(|| {
+            let root_dir = tests_common::create_basic_tree()?;
+
+            tests_common::mask_nosymfollow(root_dir.path())?;
+
+            let res = func(root_dir.path());
+
+            let _root_dir = root_dir; // make sure tmpdir is kept alive
+            res
+        })
     }
 
     pub(super) fn check_root_resolve<R, H, P: AsRef<Path>>(

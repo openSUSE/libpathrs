@@ -673,6 +673,29 @@ resolve_tests! {
     }
 }
 
+resolve_tests! {
+    [with_nosymfollow_root] {
+        #[cfg(feature = "_test_as_root")]
+        symlink_regular_symfollow: resolve_partial("nosymfollow/goodlink") => Ok(PartialLookup::Complete((".", libc::S_IFDIR)));
+        #[cfg(feature = "_test_as_root")]
+        symlink_itself_nosymfollow: resolve_partial("nosymfollow/badlink") => Ok(PartialLookup::Partial{
+            handle: ("nosymfollow", libc::S_IFDIR),
+            remaining: "badlink".into(),
+            last_error: ErrorKind::OsError(Some(libc::ELOOP)),
+        });
+        #[cfg(feature = "_test_as_root")]
+        symlink_inside_nosymfollow_dir: resolve_partial("nosymfollow/nosymdir/dir/badlink") => Ok(PartialLookup::Partial{
+            handle: ("nosymfollow/nosymdir/dir", libc::S_IFDIR),
+            remaining: "badlink".into(),
+            last_error: ErrorKind::OsError(Some(libc::ELOOP)),
+        });
+        #[cfg(feature = "_test_as_root")]
+        symlink_itself_nested_clear_symfollow: resolve_partial("nosymfollow/nosymdir/dir/goodlink") => Ok(PartialLookup::Complete((".", libc::S_IFDIR)));
+        #[cfg(feature = "_test_as_root")]
+        symlink_inside_nested_clear_symfollow: resolve_partial("nosymfollow/nosymdir/dir/foo/yessymdir/bar/goodlink") => Ok(PartialLookup::Complete((".", libc::S_IFDIR)));
+    }
+}
+
 mod utils {
     use crate::{
         error::ErrorKind,
@@ -702,6 +725,23 @@ mod utils {
 
         let _root_dir = root_dir; // make sure tmpdir is kept alive
         res
+    }
+
+    pub(super) fn with_nosymfollow_root<F>(func: F) -> Result<(), Error>
+    where
+        F: FnOnce(Root) -> Result<(), Error>,
+    {
+        tests_common::in_mnt_ns(|| {
+            let root_dir = tests_common::create_basic_tree()?;
+            let root = Root::open(&root_dir)?;
+
+            tests_common::mask_nosymfollow(root_dir.path())?;
+
+            let res = func(root);
+
+            let _root_dir = root_dir; // make sure tmpdir is kept alive
+            res
+        })
     }
 
     pub(super) fn check_root_resolve_partial<P: AsRef<Path>>(
