@@ -146,7 +146,33 @@ static PROTECTED_SYMLINKS_SYSCTL: Lazy<u32> = Lazy::new(|| {
 /// Because we emulate symlink following in userspace, the kernel cannot apply
 /// `fs.protected_symlinks` restrictions so we need to emulate them ourselves.
 fn may_follow_link<DirFd: AsFd, Fd: AsFd>(dir: DirFd, link: Fd) -> Result<(), Error> {
-    // Skip doing checks if the fs.protected_symlinks sysctl is disabled.
+    let link = link.as_fd();
+
+    // Not exposed by rustix. rustix::fs::StatVfs has a proper bitflags type but
+    // StatVfsMountFlags doesn't provide ST_NOSYMFOLLOW because it's
+    // Linux-specific.
+    //
+    // NOTE: We also can't use a const here because the exact type depends on
+    // both the architecture and the backend used by rustix -- it's simpler to
+    // just let Rust pick the right integer size. It would be really nice if we
+    // could do something like "const A: typeof<B> = foo".
+    #[allow(non_snake_case)]
+    let ST_NOSYMFOLLOW = 0x2000; // From <linux/statfs.h>.
+
+    // If the symlink is on an MS_NOSYMFOLLOW mountpoint, we should block
+    // resolution to match the behaviour of openat2.
+    let link_statfs = syscalls::fstatfs(link).map_err(|err| ErrorImpl::RawOsError {
+        operation: "fetch mount flags of symlink".into(),
+        source: err,
+    })?;
+    if link_statfs.f_flags & ST_NOSYMFOLLOW == ST_NOSYMFOLLOW {
+        Err(ErrorImpl::OsError {
+            operation: "emulated MS_NOSYMFOLLOW".into(),
+            source: IOError::from_raw_os_error(libc::ELOOP),
+        })?
+    }
+
+    // Check that we aren't violating fs.protected_symlinks.
     let fsuid = syscalls::geteuid();
     let dir_meta = dir.metadata().wrap("fetch directory metadata")?;
     let link_meta = link.metadata().wrap("fetch symlink metadata")?;
@@ -359,11 +385,14 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
 
                     // Verify that we can follow the link.
                     // MSRV(1.69): Remove &*.
-                    may_follow_link(&*current, &next).with_wrap(|| {
-                        format!(
-                            "component {part:?} is an unsafe symlink that is blocked by fs.protected_symlinks"
-                        )
-                    })?;
+                    if let Err(err) = may_follow_link(&*current, &next) {
+                        return Ok(PartialLookup::Partial {
+                            handle: current,
+                            remaining,
+                            last_error: err
+                                .wrap(format!("component {part:?} is a symlink we cannot follow")),
+                        });
+                    }
 
                     // We need a limit on the number of symlinks we traverse to
                     // avoid hitting filesystem loops and DoSing.

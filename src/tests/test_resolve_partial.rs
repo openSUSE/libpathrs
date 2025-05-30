@@ -21,7 +21,6 @@ use crate::{
     error::ErrorKind,
     flags::ResolverFlags,
     resolvers::{PartialLookup, ResolverBackend},
-    tests::common as tests_common,
     Root,
 };
 
@@ -34,80 +33,78 @@ macro_rules! resolve_tests {
     //          test_err: resolve_partial(...) => Err(ErrorKind::...);
     //      }
     // }
-    ([$root_dir:expr] fn $test_name:ident (mut $root_var:ident : Root) $body:block) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* fn $test_name:ident (mut $root_var:ident : Root) $body:block) => {
         paste::paste! {
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _default>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let mut $root_var = Root::open(&root_dir)?;
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::default(),
-                    "ResolverBackend not the default despite not being configured"
-                );
+                utils::$with_root_fn(|mut $root_var: Root| {
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::default(),
+                        "ResolverBackend not the default despite not being configured"
+                    );
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                // Make sure the mut $root_var doesn't give us a warning.
-                $root_var.set_resolver_flags($root_var.resolver_flags());
-                Ok(())
+                    // Make sure the mut $root_var doesn't give us a warning.
+                    $root_var.set_resolver_flags($root_var.resolver_flags());
+                    Ok(())
+                })
             }
 
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let mut $root_var = Root::open(&root_dir)?;
-                $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::KernelOpenat2,
-                    "incorrect ResolverBackend despite using set_resolver_backend"
-                );
+                utils::$with_root_fn(|mut $root_var: Root| {
+                    $root_var.set_resolver_backend(ResolverBackend::KernelOpenat2);
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::KernelOpenat2,
+                        "incorrect ResolverBackend despite using set_resolver_backend"
+                    );
 
-                if !$root_var.resolver_backend().supported() {
-                    // Skip if not supported.
-                    return Ok(());
-                }
+                    if !$root_var.resolver_backend().supported() {
+                        // Skip if not supported.
+                        return Ok(());
+                    }
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                Ok(())
+                    Ok(())
+                })
             }
 
             #[test]
+            $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
-                let root_dir = $root_dir;
-                let mut $root_var = Root::open(&root_dir)?;
-                $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
-                assert_eq!(
-                    $root_var.resolver_backend(),
-                    ResolverBackend::EmulatedOpath,
-                    "incorrect ResolverBackend despite using set_resolver_backend"
-                );
+                utils::$with_root_fn(|mut $root_var: Root| {
+                    $root_var.set_resolver_backend(ResolverBackend::EmulatedOpath);
+                    assert_eq!(
+                        $root_var.resolver_backend(),
+                        ResolverBackend::EmulatedOpath,
+                        "incorrect ResolverBackend despite using set_resolver_backend"
+                    );
 
-                // EmulatedOpath is always supported.
-                assert!(
-                    $root_var.resolver_backend().supported(),
-                    "emulated opath is always supported",
-                );
+                    // EmulatedOpath is always supported.
+                    assert!(
+                        $root_var.resolver_backend().supported(),
+                        "emulated opath is always supported",
+                    );
 
-                { $body }
+                    { $body }
 
-                // Make sure root_dir is not dropped earlier.
-                let _root_dir = root_dir;
-                Ok(())
+                    Ok(())
+                })
             }
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, $rflags:expr, $no_follow_trailing:expr) => $expected:expr) => {
         paste::paste! {
             resolve_tests! {
-                [$root_dir]
+                [$with_root_fn]
+                $(#[cfg($ignore_meta)])*
                 fn [<$op_name _ $test_name>](mut root: Root) {
                     root.set_resolver_flags($rflags);
 
@@ -123,31 +120,35 @@ macro_rules! resolve_tests {
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, rflags = $($rflag:ident)|+) => $expected:expr ) => {
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
+            $(#[cfg($ignore_meta)])*
             @impl $test_name $op_name($path, $(ResolverFlags::$rflag)|*, false) => $expected
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr, no_follow_trailing = $no_follow_trailing:expr) => $expected:expr ) => {
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
+            $(#[cfg($ignore_meta)])*
             @impl $test_name $op_name($path, ResolverFlags::empty(), $no_follow_trailing) => $expected
         }
     };
 
-    ([$root_dir:expr] @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
+    ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* @impl $test_name:ident $op_name:ident ($path:expr) => $expected:expr ) => {
         resolve_tests! {
-            [$root_dir]
+            [$with_root_fn]
+            $(#[cfg($ignore_meta)])*
             @impl $test_name $op_name($path, ResolverFlags::empty(), false) => $expected
         }
     };
 
-    ($([$root_dir:expr] { $($test_name:ident : $op_name:ident ($($args:tt)*) => $expected:expr);* $(;)? });* $(;)?) => {
+    ($([$with_root_fn:ident] { $($(#[cfg($ignore_meta:meta)])* $test_name:ident : $op_name:ident ($($args:tt)*) => $expected:expr);* $(;)? });* $(;)?) => {
         $( $(
             resolve_tests! {
-                [$root_dir]
+                [$with_root_fn]
+                $(#[cfg($ignore_meta)])*
                 @impl $test_name $op_name ($($args)*) => $expected
             }
         )* )*
@@ -155,7 +156,7 @@ macro_rules! resolve_tests {
 }
 
 resolve_tests! {
-    [tests_common::create_basic_tree()?] {
+    [with_basic_tree] {
         // Complete lookups.
         complete_root1: resolve_partial("/") => Ok(PartialLookup::Complete(("/", libc::S_IFDIR)));
         complete_root2: resolve_partial("/../../../../../..") => Ok(PartialLookup::Complete(("/", libc::S_IFDIR)));
@@ -672,6 +673,29 @@ resolve_tests! {
     }
 }
 
+resolve_tests! {
+    [with_nosymfollow_root] {
+        #[cfg(feature = "_test_as_root")]
+        symlink_regular_symfollow: resolve_partial("nosymfollow/goodlink") => Ok(PartialLookup::Complete((".", libc::S_IFDIR)));
+        #[cfg(feature = "_test_as_root")]
+        symlink_itself_nosymfollow: resolve_partial("nosymfollow/badlink") => Ok(PartialLookup::Partial{
+            handle: ("nosymfollow", libc::S_IFDIR),
+            remaining: "badlink".into(),
+            last_error: ErrorKind::OsError(Some(libc::ELOOP)),
+        });
+        #[cfg(feature = "_test_as_root")]
+        symlink_inside_nosymfollow_dir: resolve_partial("nosymfollow/nosymdir/dir/badlink") => Ok(PartialLookup::Partial{
+            handle: ("nosymfollow/nosymdir/dir", libc::S_IFDIR),
+            remaining: "badlink".into(),
+            last_error: ErrorKind::OsError(Some(libc::ELOOP)),
+        });
+        #[cfg(feature = "_test_as_root")]
+        symlink_itself_nested_clear_symfollow: resolve_partial("nosymfollow/nosymdir/dir/goodlink") => Ok(PartialLookup::Complete((".", libc::S_IFDIR)));
+        #[cfg(feature = "_test_as_root")]
+        symlink_inside_nested_clear_symfollow: resolve_partial("nosymfollow/nosymdir/dir/foo/yessymdir/bar/goodlink") => Ok(PartialLookup::Complete((".", libc::S_IFDIR)));
+    }
+}
+
 mod utils {
     use crate::{
         error::ErrorKind,
@@ -689,6 +713,36 @@ mod utils {
 
     use anyhow::{Context, Error};
     use pretty_assertions::assert_eq;
+
+    pub(super) fn with_basic_tree<F>(func: F) -> Result<(), Error>
+    where
+        F: FnOnce(Root) -> Result<(), Error>,
+    {
+        let root_dir = tests_common::create_basic_tree()?;
+        let root = Root::open(&root_dir)?;
+
+        let res = func(root);
+
+        let _root_dir = root_dir; // make sure tmpdir is kept alive
+        res
+    }
+
+    pub(super) fn with_nosymfollow_root<F>(func: F) -> Result<(), Error>
+    where
+        F: FnOnce(Root) -> Result<(), Error>,
+    {
+        tests_common::in_mnt_ns(|| {
+            let root_dir = tests_common::create_basic_tree()?;
+            let root = Root::open(&root_dir)?;
+
+            tests_common::mask_nosymfollow(root_dir.path())?;
+
+            let res = func(root);
+
+            let _root_dir = root_dir; // make sure tmpdir is kept alive
+            res
+        })
+    }
 
     pub(super) fn check_root_resolve_partial<P: AsRef<Path>>(
         root: &Root,
