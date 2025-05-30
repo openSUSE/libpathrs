@@ -306,10 +306,15 @@ macro_rules! root_op_tests {
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             @impl-race $op_name [#64] $test_name( $($args)* ) => $expected_result
         }
-        root_op_tests! {
-            $(#[cfg_attr(not($ignore_meta), ignore)])*
-            @impl-race $op_name [#128] $test_name( $($args)* ) => $expected_result
-        }
+        // This test fails fairly frequently in our GHA CI because the open file
+        // limit is quite small. In principle the 64-parallel test should
+        // already be more than enough.
+        /*
+            root_op_tests! {
+                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                @impl-race $op_name [#128] $test_name( $($args)* ) => $expected_result
+            }
+        */
     };
 
     ($(#[cfg($ignore_meta:meta)])* @impl mkdir_all_racing $test_name:ident ( $($args:tt)* ) => $expected_result:expr) => {
