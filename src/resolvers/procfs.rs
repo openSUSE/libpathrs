@@ -430,6 +430,7 @@ mod tests {
 
     procfs_resolver_tests! {
         xdev("/", "proc", O_DIRECTORY, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::EXDEV)));
+        dotdot_xdev("/proc", "..", O_DIRECTORY, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::EXDEV)));
         bad_flag_ocreat("/tmp", "foobar", O_CREAT|O_RDWR, ResolverFlags::empty()) == Err(ErrorKind::InvalidArgument);
         bad_flag_otmpfile("/tmp", "foobar", O_TMPFILE|O_RDWR, ResolverFlags::empty()) == Err(ErrorKind::InvalidArgument);
 
