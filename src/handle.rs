@@ -230,9 +230,9 @@ impl AsFd for HandleRef<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{HandleRef, Root};
+    use crate::{Handle, HandleRef, Root};
 
-    use std::os::unix::io::{AsFd, AsRawFd};
+    use std::os::unix::io::{AsFd, AsRawFd, OwnedFd};
 
     use anyhow::Error;
     use pretty_assertions::assert_eq;
@@ -252,6 +252,29 @@ mod tests {
             handle.as_fd().as_raw_fd(),
             handle_ref2.as_fd().as_raw_fd(),
             "HandleRef::from_fd should have the same underlying fd"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn into_from_ownedfd() -> Result<(), Error> {
+        let handle = Root::open(".")?.resolve(".")?;
+        let handle_fd = handle.as_fd().as_raw_fd();
+
+        let owned: OwnedFd = handle.into();
+        let owned_fd = owned.as_fd().as_raw_fd();
+
+        let handle2: Handle = owned.into();
+        let handle2_fd = handle2.as_fd().as_raw_fd();
+
+        assert_eq!(
+            handle_fd, owned_fd,
+            "OwnedFd::from(handle) should have same underlying fd",
+        );
+        assert_eq!(
+            handle_fd, handle2_fd,
+            "Handle -> OwnedFd -> Handle roundtrip should have same underlying fd",
         );
 
         Ok(())

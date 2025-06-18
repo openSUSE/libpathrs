@@ -1349,7 +1349,7 @@ impl AsFd for RootRef<'_> {
 mod tests {
     use crate::{resolvers::ResolverBackend, Root, RootRef};
 
-    use std::os::unix::io::{AsFd, AsRawFd};
+    use std::os::unix::io::{AsFd, AsRawFd, OwnedFd};
 
     use anyhow::Error;
     use pretty_assertions::assert_eq;
@@ -1413,6 +1413,29 @@ mod tests {
             root.as_fd().as_raw_fd(),
             root_ref2.as_fd().as_raw_fd(),
             "RootRef::from_fd should have the same underlying fd"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn into_from_ownedfd() -> Result<(), Error> {
+        let root = Root::open(".")?;
+        let root_fd = root.as_fd().as_raw_fd();
+
+        let owned: OwnedFd = root.into();
+        let owned_fd = owned.as_fd().as_raw_fd();
+
+        let root2: Root = owned.into();
+        let root2_fd = root2.as_fd().as_raw_fd();
+
+        assert_eq!(
+            root_fd, owned_fd,
+            "OwnedFd::from(root) should have same underlying fd",
+        );
+        assert_eq!(
+            root_fd, root2_fd,
+            "Root -> OwnedFd -> Root roundtrip should have same underlying fd",
         );
 
         Ok(())
