@@ -153,11 +153,23 @@ fn opath_resolve<Fd: AsFd, P: AsRef<Path>>(
             source: err,
         })?;
 
+    // In order to match the behaviour of RESOLVE_BENEATH, we need to error out
+    // if we get asked to resolve an absolute path.
+    let path = path.as_ref();
+    if path.is_absolute() {
+        Err(ErrorImpl::OsError {
+            operation: "emulated RESOLVE_BENEATH".into(),
+            source: IOError::from_raw_os_error(libc::EXDEV),
+        })
+        .wrap(format!(
+            "requested subpath {path:?} is absolute but this is forbidden by RESOLVE_BENEATH",
+        ))?
+    }
+
     // Get initial set of components from the passed path. We remove components
     // as we do the path walk, and update them with the contents of any symlinks
     // we encounter. Path walking terminates when there are no components left.
     let mut remaining_components = path
-        .as_ref()
         .raw_components()
         .map(|p| p.to_os_string())
         .collect::<VecDeque<_>>();
@@ -430,7 +442,9 @@ mod tests {
 
     procfs_resolver_tests! {
         xdev("/", "proc", O_DIRECTORY, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::EXDEV)));
-        dotdot_xdev("/proc", "..", O_DIRECTORY, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::EXDEV)));
+        xdev_dotdot("/proc", "..", O_DIRECTORY, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::EXDEV)));
+        xdev_abs_slash("/proc", "/", O_DIRECTORY, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::EXDEV)));
+        xdev_abs_path("/proc", "/etc/passwd", O_DIRECTORY, ResolverFlags::empty()) == Err(ErrorKind::OsError(Some(libc::EXDEV)));
         bad_flag_ocreat("/tmp", "foobar", O_CREAT|O_RDWR, ResolverFlags::empty()) == Err(ErrorKind::InvalidArgument);
         bad_flag_otmpfile("/tmp", "foobar", O_TMPFILE|O_RDWR, ResolverFlags::empty()) == Err(ErrorKind::InvalidArgument);
 
