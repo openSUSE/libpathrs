@@ -28,7 +28,8 @@ clean:
 
 .PHONY: lint
 lint:
-	black --check .
+	ruff format --check --diff .
+	ruff check .
 	mypy .
 
 .PHONY: install

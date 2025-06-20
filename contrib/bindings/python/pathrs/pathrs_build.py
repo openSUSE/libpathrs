@@ -83,7 +83,7 @@ def find_rootdir() -> str:
             if re.findall(r'^name = "pathrs"$', content, re.MULTILINE):
                 root_dir = candidate
                 break
-        except:
+        except FileNotFoundError:
             pass
         candidate = os.path.dirname(candidate)
 

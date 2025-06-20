@@ -14,9 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import cffi
-
-from typing import Optional, overload, type_check_only, Union
+from typing import type_check_only, Union
 
 # TODO: Remove this once we only support Python >= 3.10.
 from typing_extensions import TypeAlias, Literal
