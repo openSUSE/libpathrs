@@ -32,24 +32,15 @@ env:
 name: bindings-python
 
 jobs:
-  black:
+  ruff:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: black --check contrib/bindings/python
-        uses: psf/black@stable
+      - uses: astral-sh/ruff-action@v3
         with:
-          options: "--check --verbose"
-          src: "./contrib/bindings/python"
-          version: "~= 24.0"
-      - name: black --check examples/python
-        uses: psf/black@stable
-        with:
-          options: "--check --verbose"
-          src: "./examples/python"
-          version: "~= 24.0"
-
-  # TODO: Do some kind of lints?
+          args: "--version"
+      - run: ruff check
+      - run: ruff format --check --diff
 
   mypy:
     permissions:
@@ -178,7 +169,7 @@ jobs:
   complete:
     if: ${{ ! failure() && ! cancelled() }}
     needs:
-      - black
+      - ruff
       - mypy
       - build-pyproject
       - smoke-test
