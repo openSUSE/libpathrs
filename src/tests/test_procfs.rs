@@ -102,30 +102,35 @@ macro_rules! procfs_tests {
     };
 
     // Create a test for each ProcfsHandle::new_* method.
-    (@impl $test_name:ident $procfs_var:ident . $procfs_op:ident ($($args:tt)*) => ($($tt:tt)*) ;) => {
+    ($(#[$meta:meta])* @impl $test_name:ident $procfs_var:ident . $procfs_op:ident ($($args:tt)*) => ($($tt:tt)*) ;) => {
         procfs_tests! {
+            $(#[$meta])*
             @rust-fn [<new_ $test_name>]
                 { ProcfsHandle::new() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
+            $(#[$meta])*
             @rust-fn [<new_unmasked_ $test_name>]
                 { ProcfsHandle::new_unmasked() }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
+            $(#[$meta])*
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_fsopen_ $test_name>]
                 { ProcfsHandle::new_fsopen(false) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
+            $(#[$meta])*
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_fsopen_subset_ $test_name>]
                 { ProcfsHandle::new_fsopen(true) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
+            $(#[$meta])*
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_open_tree_ $test_name>]
                 {
@@ -134,6 +139,7 @@ macro_rules! procfs_tests {
         }
 
         procfs_tests! {
+            $(#[$meta])*
             #[cfg_attr(not(feature = "_test_as_root"), ignore)]
             @rust-fn [<new_open_tree_recursive_ $test_name>]
                 {
@@ -142,6 +148,7 @@ macro_rules! procfs_tests {
         }
 
         procfs_tests! {
+            $(#[$meta])*
             @rust-fn [<new_unsafe_open_ $test_name>]
                 { ProcfsHandle::new_unsafe_open() }.$procfs_op($($args)*) => (over_mounts: true, $($tt)*);
         }
@@ -153,58 +160,66 @@ macro_rules! procfs_tests {
         // tests will fail) but it would be nice to avoid possible spurious
         // errors.
         procfs_tests! {
+            $(#[$meta])*
             @capi-fn [<capi_ $test_name>]
                 { Ok(CapiProcfsHandle) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
     };
 
     // procfs_tests! { abc: readlink(ProcfsBase::ProcRoot, "foo") => (error: ExpectedResult::Some(ErrorKind::OsError(Some(libc::ENOENT)))) }
-    ($test_name:ident : readlink (ProcfsBase::$base:ident, $path:expr ) => ($($tt:tt)*)) => {
+    ($(#[cfg($ignore_meta:meta)])* $test_name:ident : readlink (ProcfsBase::$base:ident $(($pid:literal))?, $path:expr ) => ($($tt:tt)*)) => {
         paste::paste! {
             procfs_tests! {
-                @impl [<$base:lower _readlink_ $test_name>]
-                    procfs.readlink(ProcfsBase::$base, $path) => ($($tt)*);
+                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                @impl [<$base:lower $($pid)* _readlink_ $test_name>]
+                    procfs.readlink(ProcfsBase::$base $(($pid))*, $path) => ($($tt)*);
             }
         }
     };
 
     // procfs_tests! { xyz: open(ProcfsBase::ProcSelf, "fd", O_DIRECTORY) => (error: None) }
-    ($test_name:ident : open (ProcfsBase::$base:ident, $path:expr, $($flag:ident)|* ) => ($($tt:tt)*)) => {
+    ($(#[cfg($ignore_meta:meta)])* $test_name:ident : open (ProcfsBase::$base:ident $(($pid:literal))?, $path:expr, $($flag:ident)|* ) => ($($tt:tt)*)) => {
         paste::paste! {
             procfs_tests! {
-                @impl [<$base:lower _open_ $test_name>]
-                    procfs.open(ProcfsBase::$base, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
+                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                @impl [<$base:lower $($pid)* _open_ $test_name>]
+                    procfs.open(ProcfsBase::$base $(($pid))*, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }
         }
     };
 
     // procfs_tests! { def: open_follow(ProcfsBase::ProcSelf, "exe", O_DIRECTORY | O_PATH) => (error: ErrorKind::OsError(Some(libc::ENOTDIR) }
-    ($test_name:ident : open_follow (ProcfsBase::$base:ident, $path:expr, $($flag:ident)|* ) => ($($tt:tt)*)) => {
+    ($(#[cfg($ignore_meta:meta)])* $test_name:ident : open_follow (ProcfsBase::$base:ident $(($pid:literal))?, $path:expr, $($flag:ident)|* ) => ($($tt:tt)*)) => {
         paste::paste! {
             procfs_tests! {
-                @impl [<$base:lower _open_follow_ $test_name>]
-                    procfs.open_follow(ProcfsBase::$base, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
+                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                @impl [<$base:lower $($pid)* _open_follow_ $test_name>]
+                    procfs.open_follow(ProcfsBase::$base $(($pid))*, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }
         }
     };
 
     // procfs_tests! { xyz: open(self, "fd", O_DIRECTORY) => (error: None) }
+    // procfs_tests! { abc: open(ProcfsBase::ProcPid(1), "stat", O_RDONLY) => (error: None) }
     // procfs_tests! { def: open_follow(self, "exe", O_DIRECTORY | O_PATH) => (error: ErrorKind::OsError(Some(libc::ENOTDIR) }
     // procfs_tests! { abc: readlink(ProcfsBase::ProcRoot, "foo") => (error: ExpectedResult::Some(ErrorKind::OsError(Some(libc::ENOENT)))) }
-    ($test_name:ident : $func:ident (self, $($args:tt)*) => ($($tt:tt)*)) => {
+    ($(#[$meta:meta])* $test_name:ident : $func:ident (self, $($args:tt)*) => ($($tt:tt)*)) => {
         paste::paste! {
             procfs_tests! {
+                $(#[$meta])*
                 $test_name : $func (ProcfsBase::ProcSelf, $($args)*) => ($($tt)*);
             }
             procfs_tests! {
+                $(#[$meta])*
                 $test_name : $func (ProcfsBase::ProcThreadSelf, $($args)*) => ($($tt)*);
             }
         }
     };
 
-    ($($test_name:ident : $func:ident ($($args:tt)*) => ($($res:tt)*) );* $(;)?) => {
+    ($($(#[$meta:meta])* $test_name:ident : $func:ident ($($args:tt)*) => ($($res:tt)*) );* $(;)?) => {
         paste::paste! {
             $(
+                $(#[$meta])*
                 procfs_tests!{$test_name : $func ( $($args)* ) => ($($res)*) }
             )*
         }
@@ -226,6 +241,12 @@ procfs_tests! {
     nomount_dir_trailing_slash: open_follow(self, "attr/", O_RDONLY) => (error: Ok);
     global_nomount: open(ProcfsBase::ProcRoot, "filesystems", O_RDONLY) => (error: Ok);
     global_nomount: readlink(ProcfsBase::ProcRoot, "mounts") => (error: Ok);
+    pid1_nomount: open(ProcfsBase::ProcPid(1), "stat", O_RDONLY) => (error: Ok);
+    pid1_nomount: open_follow(ProcfsBase::ProcPid(1), "stat", O_RDONLY) => (error: Ok);
+    #[cfg(feature = "_test_as_root")]
+    pid1_nomount: readlink(ProcfsBase::ProcPid(1), "cwd") => (error: Ok);
+    #[cfg(not(feature = "_test_as_root"))]
+    pid1_nomount: readlink(ProcfsBase::ProcPid(1), "cwd") => (error: Err(ErrorKind::OsError(Some(libc::EACCES))));
     // Procfs regular file overmount.
     proc_file_wr: open(self, "attr/exec", O_WRONLY) => (error: ErrOvermount("/proc/self/attr/exec", ErrorKind::OsError(Some(libc::EXDEV))));
     proc_file_wr: open_follow(self, "attr/exec", O_WRONLY) => (error: ErrOvermount("/proc/self/attr/exec", ErrorKind::OsError(Some(libc::EXDEV))));
