@@ -39,7 +39,7 @@
 use crate::{
     error::{Error, ErrorExt, ErrorImpl},
     flags::{OpenFlags, ResolverFlags},
-    procfs::GLOBAL_PROCFS_HANDLE,
+    procfs::ProcfsHandle,
     resolvers::{opath::SymlinkStack, PartialLookup, MAX_SYMLINK_TRAVERSALS},
     syscalls,
     utils::{self, FdExt, PathIterExt},
@@ -65,6 +65,7 @@ use once_cell::sync::Lazy;
 
 /// Ensure that the expected path within the root matches the current fd.
 fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
+    procfs: &ProcfsHandle,
     current: Fd,
     root: RootFd,
     expected: P,
@@ -74,7 +75,7 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     //         path will be re-checked after the unsafe "current_path" is
     //         generated.
     let root_path = root
-        .as_unsafe_path(&GLOBAL_PROCFS_HANDLE)
+        .as_unsafe_path(procfs)
         .wrap("get root path to construct expected path")?;
 
     // Combine the root path and our expected_path to get the full path to
@@ -99,7 +100,7 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     // SAFETY: as_unsafe_path is safe here since we're explicitly doing a
     //         string-based check to see whether the path we want is correct.
     let current_path = current
-        .as_unsafe_path(&GLOBAL_PROCFS_HANDLE)
+        .as_unsafe_path(procfs)
         .wrap("check fd against expected path")?;
 
     // The paths should be identical.
@@ -120,7 +121,7 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
     // SAFETY: as_unsafe_path path is safe here because it's just used in a
     //         string check -- and it's known that this check isn't perfect.
     let new_root_path = root
-        .as_unsafe_path(&GLOBAL_PROCFS_HANDLE)
+        .as_unsafe_path(procfs)
         .wrap("get root path to double-check it hasn't moved")?;
     if root_path != new_root_path {
         Err(ErrorImpl::SafetyViolation {
@@ -137,7 +138,8 @@ fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
 // checking this for every symlink lookup is more likely to be an issue.
 // MSRV(1.80): Use LazyLock.
 static PROTECTED_SYMLINKS_SYSCTL: Lazy<u32> = Lazy::new(|| {
-    utils::sysctl_read_parse(&GLOBAL_PROCFS_HANDLE, "fs.protected_symlinks")
+    let procfs = ProcfsHandle::new().expect("should be able to get a procfs handle");
+    utils::sysctl_read_parse(&procfs, "fs.protected_symlinks")
         .expect("should be able to parse fs.protected_symlinks")
 });
 
@@ -209,6 +211,9 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
     no_follow_trailing: bool,
     mut symlink_stack: Option<&mut SymlinkStack<OwnedFd>>,
 ) -> Result<PartialLookup<Rc<OwnedFd>>, Error> {
+    // We always need procfs for validation when using this resolver.
+    let procfs = ProcfsHandle::new()?;
+
     // What is the final path we expect to get after we do the final open? This
     // allows us to track any attacker moving path components around and we can
     // sanity-check at the very end. This does not include rootpath.
@@ -333,7 +338,7 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
                 // was a racing rename -- we have to do it every time.
                 if part.as_bytes() == b".." {
                     // MSRV(1.69): Remove &*.
-                    check_current(&next, &*root, &expected_path)
+                    check_current(&procfs, &next, &*root, &expected_path)
                         .wrap("check next '..' component didn't escape")?;
                 }
 
@@ -479,7 +484,8 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
 
     // Make sure that the path is what we expect...
     // MSRV(1.69): Remove &*.
-    check_current(&*current, &*root, &expected_path).wrap("check final handle didn't escape")?;
+    check_current(&procfs, &*current, &*root, &expected_path)
+        .wrap("check final handle didn't escape")?;
 
     // We finished the lookup with no remaining components.
     Ok(PartialLookup::Complete(current))

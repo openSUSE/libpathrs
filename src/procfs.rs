@@ -39,16 +39,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use once_cell::sync::Lazy;
 use rustix::{
     fs::{self as rustix_fs, Access, AtFlags},
     mount::{FsMountFlags, FsOpenFlags, MountAttrFlags, OpenTreeFlags},
 };
-
-/// A `procfs` handle to which is used globally by libpathrs.
-// MSRV(1.80): Use LazyLock.
-pub(crate) static GLOBAL_PROCFS_HANDLE: Lazy<ProcfsHandle> =
-    Lazy::new(|| ProcfsHandle::new().expect("should be able to get some /proc handle"));
 
 /// Indicate what base directory should be used when doing `/proc/...`
 /// operations with a [`ProcfsHandle`].
@@ -186,10 +180,10 @@ pub struct ProcfsHandle {
     pub(crate) resolver: ProcfsResolver,
 }
 
-// TODO: Implement Into<OwnedFd> or AsFd? In theory someone could use this to
-// modify the configuration of GLOBAL_PROCFS_HANDLE (or even dup2 over it), but
-// that would be kind of hard to do by accident and would allow for users to use
-// the procfs handle directly for more complicated things...
+// TODO: Implement Into<OwnedFd> or AsFd? We (no longer) provide a global
+// handle, so the previous concerns about someone dup2-ing over the handle fd
+// are not really that relevant anymore. On the other hand, providing the
+// underlying file descriptor can easily lead to attacks.
 
 impl ProcfsHandle {
     // This is part of Linux's ABI.
@@ -298,8 +292,10 @@ impl ProcfsHandle {
     /// mount table while these operations are running.
     pub fn new() -> Result<Self, Error> {
         Self::new_fsopen(true)
+            // TODO: Should we also try ~AT_RECURSIVE...?
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::AT_RECURSIVE))
             .or_else(|_| Self::new_unsafe_open())
+            .wrap("get safe procfs handle")
     }
 
     /// Create a new handle, trying to create a non-masked handle.
@@ -311,6 +307,7 @@ impl ProcfsHandle {
         Self::new_fsopen(false)
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
             .or_else(|_| Self::new_unsafe_open())
+            .wrap("get safe unmasked procfs handle")
     }
 
     fn open_base(&self, base: ProcfsBase) -> Result<OwnedFd, Error> {

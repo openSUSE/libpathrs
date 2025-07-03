@@ -21,7 +21,7 @@ use crate::{
     capi::{ret::IntoCReturn, utils},
     error::{Error, ErrorImpl},
     flags::OpenFlags,
-    procfs::{ProcfsBase, GLOBAL_PROCFS_HANDLE},
+    procfs::{ProcfsBase, ProcfsHandle},
 };
 
 use std::os::unix::io::{OwnedFd, RawFd};
@@ -131,10 +131,11 @@ pub unsafe extern "C" fn pathrs_proc_open(
         let base = base.try_into()?;
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
         let oflags = OpenFlags::from_bits_retain(flags);
+        let procfs = ProcfsHandle::new()?;
 
         match oflags.contains(OpenFlags::O_NOFOLLOW) {
-            true => GLOBAL_PROCFS_HANDLE.open(base, path, oflags),
-            false => GLOBAL_PROCFS_HANDLE.open_follow(base, path, oflags),
+            true => procfs.open(base, path, oflags),
+            false => procfs.open_follow(base, path, oflags),
         }
     }()
     .map(OwnedFd::from)
@@ -187,7 +188,7 @@ pub unsafe extern "C" fn pathrs_proc_readlink(
     || -> Result<_, Error> {
         let base = base.try_into()?;
         let path = unsafe { utils::parse_path(path) }?; // SAFETY: C caller guarantees path is safe.
-        let link_target = GLOBAL_PROCFS_HANDLE.readlink(base, path)?;
+        let link_target = ProcfsHandle::new()?.readlink(base, path)?;
         // SAFETY: C caller guarantees buffer is at least linkbuf_size and can
         // be written to.
         unsafe { utils::copy_path_into_buffer(link_target, linkbuf, linkbuf_size) }
