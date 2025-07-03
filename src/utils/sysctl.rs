@@ -67,21 +67,27 @@ where
 mod tests {
     use crate::{
         error::{Error, ErrorKind},
-        procfs::GLOBAL_PROCFS_HANDLE,
+        procfs::ProcfsHandle,
     };
+
+    use once_cell::sync::Lazy;
     use pretty_assertions::assert_eq;
+
+    // MSRV(1.80): Use LazyLock.
+    static TEST_PROCFS_HANDLE: Lazy<ProcfsHandle> =
+        Lazy::new(|| ProcfsHandle::new().expect("should be able to get some /proc handle"));
 
     #[test]
     fn bad_sysctl_file_noexist() {
         assert_eq!(
-            super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "nonexistent.dummy.sysctl.path")
+            super::sysctl_read_line(&TEST_PROCFS_HANDLE, "nonexistent.dummy.sysctl.path")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::ENOENT))),
             "reading line from non-existent sysctl",
         );
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "nonexistent.sysctl.path")
+            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "nonexistent.sysctl.path")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::ENOENT))),
@@ -92,14 +98,14 @@ mod tests {
     #[test]
     fn bad_sysctl_file_noread() {
         assert_eq!(
-            super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "vm.drop_caches")
+            super::sysctl_read_line(&TEST_PROCFS_HANDLE, "vm.drop_caches")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::EACCES))),
             "reading line from non-readable sysctl",
         );
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "vm.drop_caches")
+            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "vm.drop_caches")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::EACCES))),
@@ -109,9 +115,9 @@ mod tests {
 
     #[test]
     fn bad_sysctl_parse_invalid_multinumber() {
-        assert!(super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "kernel.printk").is_ok());
+        assert!(super::sysctl_read_line(&TEST_PROCFS_HANDLE, "kernel.printk").is_ok());
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "kernel.printk")
+            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "kernel.printk")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::InternalError),
@@ -121,9 +127,9 @@ mod tests {
 
     #[test]
     fn bad_sysctl_parse_invalid_nonnumber() {
-        assert!(super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "kernel.random.uuid").is_ok());
+        assert!(super::sysctl_read_line(&TEST_PROCFS_HANDLE, "kernel.random.uuid").is_ok());
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&GLOBAL_PROCFS_HANDLE, "kernel.random.uuid")
+            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "kernel.random.uuid")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::InternalError),
@@ -133,7 +139,7 @@ mod tests {
 
     #[test]
     fn sysctl_parse_int() {
-        assert!(super::sysctl_read_line(&GLOBAL_PROCFS_HANDLE, "kernel.pid_max").is_ok());
-        assert!(super::sysctl_read_parse::<u64>(&GLOBAL_PROCFS_HANDLE, "kernel.pid_max").is_ok());
+        assert!(super::sysctl_read_line(&TEST_PROCFS_HANDLE, "kernel.pid_max").is_ok());
+        assert!(super::sysctl_read_parse::<u64>(&TEST_PROCFS_HANDLE, "kernel.pid_max").is_ok());
     }
 }

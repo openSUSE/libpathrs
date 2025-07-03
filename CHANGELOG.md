@@ -44,6 +44,40 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   surprise, given libpathrs's design, but we now have more extensive tests than
   `github.com/cyphar/filepath-securejoin`.
 
+### Changes ###
+- procfs: our internal `GLOBAL_PROCFS_HANDLE` has been removed entirely, and
+  now every libpathrs operation that requires an internal procfs handle will
+  create a temporary copy of procfs. (#203)
+
+  The primary concern is that there have been attacks like [CVE-2024-21626][],
+  where long-lived file descriptors (even those with `O_CLOEXEC`) can be used
+  by an attacker to persist handles or otherwise mess with the system by
+  passing `/proc/self/fd/$n` as a path to use for some other purpose, thus
+  pinning the file descriptor reference.
+
+  It seems far more prudent for a security-oriented library to eschew the
+  performance benefit of caching results at the risk of possible (avoidable)
+  security issues, and instead we should opt for very-short-lived procfs
+  handles which should make such attacks impractical (assuming programs make
+  correct use of `PR_SET_DUMPABLE` to avoid fd-snooping by attackers).
+
+  For Rust users that wish to have a cache, they can very easily wrap
+  `ProcfsHandle` inside a `std::sync::OnceLock` in their own programs to
+  improve the performance of direct `ProcfsHandle` operations, while also
+  giving more visibility to such users that there is a level of caching thatj
+  will extend the file descriptor lifetime. The only major internal usage of
+  `ProcfsHandle` (which would not be cached in this method) is the `O_PATH`
+  resolver, which already has so much syscall overhead that caching is probably
+  not going to help much (and internally the resolver will use a single procfs
+  handle instance for an entire lookup).
+
+  For non-Rust users, there is no easy way to do the same kind of caching (the
+  C API doesn't currently let you provide a `procfs_fd`) but it seems likely
+  that the overhead of C FFI in most languages (except for C programs) would
+  overwhelm the performance overhead of even `fsopen(2)`. It might make sense
+  to revisit this in the future -- please open an issue if you can demonstrate
+  that the lack of caching causes a measurable performance issue.
+
 ### Fixes ###
 - multiarch: we now build correctly on 32-bit architectures as well as
   architectures that have unsigned char. We also have CI jobs that verify that
@@ -116,6 +150,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   uglier than necessary ([rustix#1186][], [rustix#1187][]), but this is a net
   improvement overall.
 
+[CVE-2024-21626]: https://github.com/opencontainers/runc/security/advisories/GHSA-xr7r-f8xq-vfvv
 [rustix#1186]: https://github.com/bytecodealliance/rustix/issues/1186
 [rustix#1187]: https://github.com/bytecodealliance/rustix/issues/1187
 [opencontainers/runc#4543]: https://github.com/opencontainers/runc/issues/4543

@@ -22,7 +22,7 @@
 use crate::{
     error::{Error, ErrorImpl},
     flags::OpenFlags,
-    procfs::GLOBAL_PROCFS_HANDLE,
+    procfs::ProcfsHandle,
     utils::FdExt,
 };
 
@@ -197,7 +197,7 @@ impl HandleRef<'_> {
     #[doc(alias = "pathrs_reopen")]
     pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
         self.inner
-            .reopen(&GLOBAL_PROCFS_HANDLE, flags.into())
+            .reopen(&ProcfsHandle::new()?, flags.into())
             .map(File::from)
     }
 

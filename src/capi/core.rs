@@ -24,7 +24,7 @@ use crate::{
     },
     error::{Error, ErrorImpl},
     flags::{OpenFlags, RenameFlags},
-    procfs::GLOBAL_PROCFS_HANDLE,
+    procfs::ProcfsHandle,
     utils::FdExt,
     InodeType, Root, RootRef,
 };
@@ -91,7 +91,7 @@ pub extern "C" fn pathrs_reopen(fd: CBorrowedFd<'_>, flags: c_int) -> RawFd {
 
     || -> Result<_, Error> {
         fd.try_as_borrowed_fd()?
-            .reopen(&GLOBAL_PROCFS_HANDLE, flags)
+            .reopen(&ProcfsHandle::new()?, flags)
     }()
     .into_c_return()
 }
