@@ -136,8 +136,8 @@ impl ProcfsBase {
 /// libpathrs uses `/proc` internally for the first purpose and many libpathrs
 /// users use `/proc` for all three. As such, it is not sufficient that
 /// operations on `/proc` paths do not escape the `/proc` filesystem -- it is
-/// absolutely critical that operations through `/proc` operate on the path that
-/// the caller expected.
+/// absolutely critical that operations through `/proc` operate **on the exact
+/// subpath that the caller requested**.
 ///
 /// This might seem like an esoteric concern, but there have been several
 /// security vulnerabilities where a maliciously configured `/proc` could be
@@ -148,24 +148,36 @@ impl ProcfsBase {
 /// video][lpc2022] for some other procfs challenges libpathrs has to contend
 /// with.
 ///
-/// NOTE: At the moment, `ProcfsHandle` only supports doing operations within
-/// `/proc/self` and `/proc/thread-self`. This is because there are tools like
-/// [lxcfs] which intentionally mask parts of `/proc` in order to fix issues
-/// like `/proc/meminfo` and `/proc/cpuinfo` not being cgroup-aware.
-/// `ProcfsHandle` will refuse to open files that have these overmounts, which
-/// could lead to application errors that users may not expect. However, no such
-/// tool masks paths inside `/proc/$pid` directories because such masking would
-/// be expensive (because of FUSE limitations, you would need to emulate every
-/// file within `/proc` to do this properly) and would cause application-visible
-/// issues (magic-link lookups would not work as they normally do). So we can
-/// safely provide handlers for `/proc/self` and `/proc/thread-self` (which are
-/// the main things a lot of libpathrs users care about).
+/// It should be noted that there is interest in Linux upstream to block certain
+/// classes of procfs overmounts entirely. Linux 6.12 notably introduced
+/// [several restrictions on such mounts][linux612-procfs-overmounts], [with
+/// plans to eventually block most-if-not-all overmounts inside
+/// `/proc/self`][lwn-procfs-overmounts]. `ProcfsHandle` is still useful for
+/// older kernels, as well as verifying that there aren't any tricky overmounts
+/// anywhere else in the procfs path (such as on top of `/proc/self`).
+///
+/// NOTE: Users of `ProcfsHandle` should be aware that sometimes `/proc`
+/// overmounting is a feature -- tools like [lxcfs] provide better compatibility
+/// for system tools by overmounting global procfs files (notably
+/// `/proc/meminfo` and `/proc/cpuinfo` to emulate cgroup-aware support for
+/// containerisation in procfs). This means that using [`ProcfsBase::ProcRoot`]
+/// may result in errors on such systems for non-privileged users, even in the
+/// absence of an active attack. This is an intentional feature of libpathrs,
+/// but it may be unexpected. Note that (to the best of our knowledge), there
+/// are no benevolent tools which create mounts in `/proc/self` or
+/// `/proc/thread-self` (mainly due to scaling and correctness issues that would
+/// make production usage of such a tool impractical, even if such behaviour may
+/// be desirable). As a result, we would only expect [`ProcfsBase::ProcSelf`]
+/// and [`ProcfsBase::ProcThreadSelf`] operations to produce errors when you are
+/// actually being attacked.
 ///
 /// [cve-2019-16884]: https://nvd.nist.gov/vuln/detail/CVE-2019-16884
 /// [cve-2019-19921]: https://nvd.nist.gov/vuln/detail/CVE-2019-19921
 /// [lca2020]: https://youtu.be/tGseJW_uBB8
 /// [lpc2022]: https://youtu.be/y1PaBzxwRWQ
 /// [lxcfs]: https://github.com/lxc/lxcfs
+/// [linux612-procfs-overmounts]: https://lore.kernel.org/all/20240806-work-procfs-v1-0-fb04e1d09f0c@kernel.org/
+/// [lwn-procfs-overmounts]: https://lwn.net/Articles/934460/
 #[derive(Debug)]
 pub struct ProcfsHandle {
     inner: OwnedFd,
