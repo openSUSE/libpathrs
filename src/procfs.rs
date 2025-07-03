@@ -64,13 +64,43 @@ pub enum ProcfsBase {
     /// possible.
     ///
     /// [`ProcSelf`]: Self::ProcSelf
-    // TODO: Should we have a ProcfsBase::Pid(pid_t)? This isn't strictly
-    // necessary (and the C API for this could be a little weird) but it might
-    // be nice for users to explicitly say that an operation is in reference to
-    // a PID. However, at the moment the maximum pid the kernel supports is 2^22
-    // (and almost all systems have smaller defaults) so we could use values
-    // >=2^63 in the C API.
     ProcRoot,
+
+    /// Use `/proc/<pid>`. This is useful shorthand when looking up information
+    /// about other processes (the alternative being passing the PID as a string
+    /// component with [`ProcRoot`][`Self::ProcRoot`] manually).
+    ///
+    /// Note that this operation is inherently racy -- the process referenced by
+    /// this PID may have died and the PID recycled with a different process. In
+    /// principle, this means that it is only really safe to use this with:
+    ///
+    ///  * PID 1 (the init process), as that PID cannot ever get recycled.
+    ///  * Your current PID (though you should just use [`ProcSelf`]).
+    ///  * Your current TID (though you should just use [`ProcThreadSelf`]), or
+    ///    _possibly_ other TIDs in your thread-group if you are absolutely sure
+    ///    they have not been reaped (typically with [`JoinHandle::join`],
+    ///    though there are other ways).
+    ///  * PIDs of child processes (as long as you are sure that no other part
+    ///    of your program incorrectly catches or ignores `SIGCHLD`, and that
+    ///    you do it *before* you call [`wait(2)`] or any equivalent method that
+    ///    could reap zombies).
+    ///
+    /// Outside of those specific uses, users should probably avoid using this.
+    // TODO: Add support for pidfds, to resolve the race issue.
+    ///
+    /// [`ProcRoot`]: Self::ProcRoot
+    /// [`ProcSelf`]: Self::ProcSelf
+    /// [`ProcThreadSelf`]: Self::ProcThreadSelf
+    /// [`JoinHandle::join`]: https://doc.rust-lang.org/std/thread/struct.JoinHandle.html#method.join
+    /// [`pthread_join(3)`]: https://man7.org/linux/man-pages/man3/pthread_join.3.html
+    /// [`wait(2)`]: https://man7.org/linux/man-pages/man2/wait.2.html
+    // NOTE: It seems incredibly unlikely that this will ever need to be
+    //       expanded beyond u32. glibc has always used u16 for pid_t, and the
+    //       kernel itself (even at time of writing) only supports a maximum of
+    //       2^22 PIDs internally. Even the newest pid-related APIs
+    //       (PIDFD_GET_INFO for instance) only allocate a u32 for pids. By
+    //       making this a u32 we can easily pack it inside a u64 for the C API.
+    ProcPid(u32),
 
     /// Use `/proc/self`. For most programs, this is the standard choice.
     ProcSelf,
@@ -112,6 +142,7 @@ impl ProcfsBase {
         match self {
             Self::ProcRoot => PathBuf::from("."),
             Self::ProcSelf => PathBuf::from("self"),
+            Self::ProcPid(pid) => PathBuf::from(format!("{pid}")),
             Self::ProcThreadSelf => [
                 // /proc/thread-self was added in Linux 3.17.
                 "thread-self".into(),
@@ -351,6 +382,8 @@ impl ProcfsHandle {
         )?;
         self.verify_same_procfs_mnt(&fd)?;
         Ok(fd)
+        // TODO: For ProcfsBase::ProcPid, should ENOENT here be converted to
+        //       ESRCH to be more "semantically correct"?
     }
 
     /// Safely open a magic-link inside `procfs`.

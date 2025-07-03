@@ -58,6 +58,7 @@ open-enum = { version = "=0.3.0", optional = true }
 rand = { version = "^0.9", optional = true }
 rustix = { version = "^1", features = ["fs", "process", "thread", "mount"] }
 thiserror = "^2"
+static_assertions = "^1.1"
 
 [dev-dependencies]
 anyhow = "^1"
