@@ -193,3 +193,126 @@ pub unsafe extern "C" fn pathrs_proc_readlink(
     }()
     .into_c_return()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{error::ErrorKind, procfs::ProcfsBase};
+
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn procfsbase_try_from_crepr_procroot() {
+        assert_eq!(
+            ProcfsBase::try_from(CProcfsBase::PATHRS_PROC_ROOT).map_err(|e| e.kind()),
+            Ok(ProcfsBase::ProcRoot),
+            "PATHRS_PROC_ROOT.try_into()"
+        );
+    }
+
+    #[test]
+    fn procfsbase_try_from_crepr_procself() {
+        assert_eq!(
+            ProcfsBase::try_from(CProcfsBase::PATHRS_PROC_SELF).map_err(|e| e.kind()),
+            Ok(ProcfsBase::ProcSelf),
+            "PATHRS_PROC_SELF.try_into()"
+        );
+    }
+
+    #[test]
+    fn procfsbase_try_from_crepr_procthreadself() {
+        assert_eq!(
+            ProcfsBase::try_from(CProcfsBase::PATHRS_PROC_THREAD_SELF).map_err(|e| e.kind()),
+            Ok(ProcfsBase::ProcThreadSelf),
+            "PATHRS_PROC_THREAD_SELF.try_into()"
+        );
+    }
+
+    #[test]
+    fn procfsbase_try_from_crepr_invalid() {
+        // Plain values are invalid.
+        assert_eq!(
+            ProcfsBase::try_from(CProcfsBase(0)).map_err(|e| e.kind()),
+            Err(ErrorKind::InvalidArgument),
+            "(0).try_into() -- invalid value"
+        );
+        assert_eq!(
+            ProcfsBase::try_from(CProcfsBase(0xDEADBEEF)).map_err(|e| e.kind()),
+            Err(ErrorKind::InvalidArgument),
+            "(0xDEADBEEF).try_into() -- invalid value"
+        );
+    }
+
+    #[test]
+    fn procfsbase_into_crepr_procroot() {
+        assert_eq!(
+            CProcfsBase::from(ProcfsBase::ProcRoot),
+            CProcfsBase::PATHRS_PROC_ROOT,
+            "ProcRoot.into() == PATHRS_PROC_ROOT"
+        );
+    }
+
+    #[test]
+    fn procfsbase_into_crepr_procself() {
+        assert_eq!(
+            CProcfsBase::from(ProcfsBase::ProcSelf),
+            CProcfsBase::PATHRS_PROC_SELF,
+            "ProcSelf.into() == PATHRS_PROC_SELF"
+        );
+    }
+
+    #[test]
+    fn procfsbase_into_crepr_procthreadself() {
+        assert_eq!(
+            CProcfsBase::from(ProcfsBase::ProcThreadSelf),
+            CProcfsBase::PATHRS_PROC_THREAD_SELF,
+            "ProcThreadSelf.into() == PATHRS_PROC_THREAD_SELF"
+        );
+    }
+
+    fn check_round_trip(rust: ProcfsBase, c: CProcfsBase) {
+        let c_to_rust: ProcfsBase = c.try_into().expect("should be valid value");
+        assert_eq!(
+            rust, c_to_rust,
+            "c-to-rust ProcfsBase conversion ({c:?}.try_into())"
+        );
+
+        let rust_to_c: CProcfsBase = rust.into();
+        assert_eq!(
+            c, rust_to_c,
+            "rust-to-c ProcfsBase conversion ({rust:?}.into())"
+        );
+
+        let c_to_rust_to_c: CProcfsBase = c_to_rust.into();
+        assert_eq!(
+            c, c_to_rust_to_c,
+            "rust-to-c-to-rust ProcfsBase conversion ({c_to_rust:?}.into())"
+        );
+
+        let rust_to_c_to_rust: ProcfsBase = rust_to_c
+            .try_into()
+            .expect("must be valid value when round-tripping");
+        assert_eq!(
+            rust, rust_to_c_to_rust,
+            "rust-to-c-to-rust ProcfsBase conversion ({rust_to_c:?}.try_into())"
+        );
+    }
+
+    #[test]
+    fn procfsbase_round_trip_procroot() {
+        check_round_trip(ProcfsBase::ProcRoot, CProcfsBase::PATHRS_PROC_ROOT);
+    }
+
+    #[test]
+    fn procfsbase_round_trip_procself() {
+        check_round_trip(ProcfsBase::ProcSelf, CProcfsBase::PATHRS_PROC_SELF);
+    }
+
+    #[test]
+    fn procfsbase_round_trip_procthreadself() {
+        check_round_trip(
+            ProcfsBase::ProcThreadSelf,
+            CProcfsBase::PATHRS_PROC_THREAD_SELF,
+        );
+    }
+}

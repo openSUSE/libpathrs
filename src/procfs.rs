@@ -54,7 +54,7 @@ use rustix::{
 /// [`ProcSelf`]: Self::ProcSelf
 /// [`ProcThreadSelf`]: Self::ProcThreadSelf
 #[doc(alias = "pathrs_proc_base_t")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum ProcfsBase {
     /// Use `/proc`. As this requires us to disable any masking of our internal
