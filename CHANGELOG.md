@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   different values, in order to support `ProcfsBase::ProcPid` passing from C
   callers. Any binaries compiled with the old headers will need to be
   recompiled to avoid spurious behaviour.
+  - This required a breaking change in the Go bindings for libpathrs.
+    `ProcfsBase` is now an opaque `struct` type rather than a simple `int`
+    wrapper -- this was necessary in order to add support for
+    `ProcfsBase::ProcPid` in the form of the `ProcBasePid` helper function.
 
 ### Added ###
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a

@@ -216,6 +216,9 @@ const (
 	pathrsProcRoot       pathrsProcBase = 0xFFFF_FFFE_7072_6F63 // C.PATHRS_PROC_ROOT
 	pathrsProcSelf       pathrsProcBase = 0xFFFF_FFFE_091D_5E1F // C.PATHRS_PROC_SELF
 	pathrsProcThreadSelf pathrsProcBase = 0xFFFF_FFFE_3EAD_5E1F // C.PATHRS_PROC_THREAD_SELF
+
+	pathrsProcBaseTypeMask pathrsProcBase = 0xFFFF_FFFF_0000_0000 // C.__PATHRS_PROC_TYPE_MASK
+	pathrsProcBaseTypePid  pathrsProcBase = 0x8000_0000_0000_0000 // C.__PATHRS_PROC_TYPE_PID
 )
 
 // Verify that the values above match the actual C values. Unfortunately, Go
@@ -239,7 +242,17 @@ func init() {
 	assertEqual(pathrsProcRoot, pathrsProcBase(actualProcRoot), "PATHRS_PROC_ROOT")
 	assertEqual(pathrsProcSelf, pathrsProcBase(actualProcSelf), "PATHRS_PROC_SELF")
 	assertEqual(pathrsProcThreadSelf, pathrsProcBase(actualProcThreadSelf), "PATHRS_PROC_THREAD_SELF")
+
+	var (
+		actualProcBaseTypeMask uint64 = C.__PATHRS_PROC_TYPE_MASK
+		actualProcBaseTypePid  uint64 = C.__PATHRS_PROC_TYPE_PID
+	)
+
+	assertEqual(pathrsProcBaseTypeMask, pathrsProcBase(actualProcBaseTypeMask), "__PATHRS_PROC_TYPE_MASK")
+	assertEqual(pathrsProcBaseTypePid, pathrsProcBase(actualProcBaseTypePid), "__PATHRS_PROC_TYPE_PID")
 }
+
+func pathrsProcPid(pid uint32) pathrsProcBase { return pathrsProcBaseTypePid | pathrsProcBase(pid) }
 
 func pathrsProcOpen(base pathrsProcBase, path string, flags int) (uintptr, error) {
 	cBase := C.pathrs_proc_base_t(base)
