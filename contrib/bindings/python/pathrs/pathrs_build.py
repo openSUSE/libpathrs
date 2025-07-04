@@ -33,8 +33,18 @@ def load_hdr(ffi: cffi.FFI, hdr_path: str) -> None:
     with open(hdr_path) as f:
         hdr = f.read()
 
-    # Drop all #-lines.
-    hdr = re.sub("^#.*$", "", hdr, flags=re.MULTILINE)
+    # We need to first filter out all the bits of <pathrs.h> that are not
+    # supported by cffi. Ideally this wouldn't be necessary, but the macro
+    # support in cffi is very limited, and we make use of basic features that
+    # are unsupported by cffi.
+
+    # Drop all non-#define lines (directives are not supported).
+    hdr = re.sub(r"^#\s*(?!define\b).*$", "", hdr, flags=re.MULTILINE)
+    # Drop all:
+    #  * "#define FOO(n) ..." lines (function-style macros are not supported).
+    #  * Empty-value "#define FOO" lines (empty macros are not supported)
+    # TODO: We probably should support multi-line macros.
+    hdr = re.sub(r"^#\s*define\b\s*\w*\s*(\(.*|)$", "", hdr, flags=re.MULTILINE)
 
     # Replace each struct-like body that has __CBINDGEN_ALIGNED before it,
     # remove the __CBINDGEN_ALIGNED and add "...;" as the last field in the

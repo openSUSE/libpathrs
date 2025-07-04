@@ -39,6 +39,9 @@ PATHRS_PROC_ROOT: ProcfsBase
 PATHRS_PROC_SELF: ProcfsBase
 PATHRS_PROC_THREAD_SELF: ProcfsBase
 
+__PATHRS_PROC_TYPE_MASK: ProcfsBase
+__PATHRS_PROC_TYPE_PID: ProcfsBase
+
 def pathrs_proc_open(
     base: ProcfsBase, path: CString, flags: int
 ) -> Union[RawFd, ErrorId]: ...

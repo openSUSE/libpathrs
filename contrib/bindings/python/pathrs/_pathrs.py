@@ -54,6 +54,7 @@ __all__ = [
     "PROC_ROOT",
     "PROC_SELF",
     "PROC_THREAD_SELF",
+    "PROC_PID",
     "proc_open",
     "proc_open_raw",
     "proc_readlink",
@@ -375,6 +376,24 @@ PROC_SELF: ProcfsBase = libpathrs_so.PATHRS_PROC_SELF
 #: /proc/self to point the wrong thread and so /proc/thread-self may be
 #: necessary.
 PROC_THREAD_SELF: ProcfsBase = libpathrs_so.PATHRS_PROC_THREAD_SELF
+
+
+def PROC_PID(pid: int) -> ProcfsBase:
+    """
+    Resolve proc_* operations relative to /proc/<pid>. Be aware that due to PID
+    recycling, using this is generally not safe except in certain
+    circumstances. Namely:
+
+     * PID 1 (the init process), as that PID cannot ever get recycled.
+     * Your current PID (though you should just use PROC_SELF).
+     * PIDs of child processes (as long as you are sure that no other part of
+       your program incorrectly catches or ignores SIGCHLD, and that you do it
+       *before* you call wait(2)or any equivalent method that could reap
+       zombies).
+    """
+    if pid & libpathrs_so.__PATHRS_PROC_TYPE_MASK:
+        raise ValueError(f"invalid PROC_PID value {pid}")
+    return libpathrs_so.__PATHRS_PROC_TYPE_PID | pid
 
 
 def proc_open(
