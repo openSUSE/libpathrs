@@ -155,6 +155,7 @@ where
     };
 
     // Start with a smaller buffer so we can exercise the trimming logic.
+    // TODO: Use slice::assume_init_ref() once maybe_uninit_slice is stabilised.
     let mut linkbuf: Vec<u8> = Vec::with_capacity(0);
     actual_size /= 2;
     while actual_size > linkbuf.capacity() {
