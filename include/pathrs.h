@@ -40,15 +40,13 @@
 
 /**
  * Indicate what base directory should be used when doing operations with
- * pathrs_proc_*. This is necessary because /proc/thread-self is not present on
- * pre-3.17 kernels and so it may be necessary to emulate /proc/thread-self
- * access on those older kernels.
+ * `pathrs_proc_*`.
  */
 enum pathrs_proc_base_t {
     /**
-     * Use `/proc`. Note that this mode may be more expensive because we have
+     * Use /proc. Note that this mode may be more expensive because we have
      * to take steps to try to avoid leaking unmasked procfs handles, so you
-     * should use `PATHRS_PROC_SELF` if you can.
+     * should use PATHRS_PROC_SELF if you can.
      */
     PATHRS_PROC_ROOT = 1342308351,
     /**
