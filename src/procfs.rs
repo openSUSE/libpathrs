@@ -308,6 +308,8 @@ impl ProcfsHandle {
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
             .or_else(|_| Self::new_unsafe_open())
             .wrap("get safe unmasked procfs handle")
+        // TODO: We should probably verify is_subset here, to avoid an infinite
+        //       loop in the ProcfsHandle::open fallback...
     }
 
     fn open_base(&self, base: ProcfsBase) -> Result<OwnedFd, Error> {
