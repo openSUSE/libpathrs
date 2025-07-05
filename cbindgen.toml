@@ -39,6 +39,35 @@ header = """
 #undef __CBINDGEN_ALIGNED
 #endif
 #define __CBINDGEN_ALIGNED(n) __attribute__((aligned(n)))
+
+#ifndef PATHRS_PROC_PID
+/*
+ * Used to construct pathrs_proc_base_t values for a PID (or TID). Passing
+ * PATHRS_PROC_PID(pid) to pathrs_proc_*() as pathrs_proc_base_t will cause
+ * libpathrs to use /proc/$pid as the base of the operation.
+ *
+ * This is essentially functionally equivalent to prefixing "$pid/" to the
+ * subpath argument and using PATHRS_PROC_ROOT.
+ *
+ * Note that this operation is inherently racy -- the process referenced by this
+ * PID may have died and the PID recycled with a different process. In
+ * principle, this means that it is only really safe to use this with:
+ *
+ *  - PID 1 (the init process), as that PID cannot ever get recycled.
+ *  - Your current PID (though you should just use PATHRS_PROC_SELF).
+ *  - Your current TID (though you should just use PATHRS_PROC_THREAD_SELF),
+ *    or _possibly_ other TIDs in your thread-group if you are absolutely sure
+ *    they have not been reaped (typically with pthread_join(3), though there
+ *    are other ways).
+ *  - PIDs of child processes (as long as you are sure that no other part of
+ *    your program incorrectly catches or ignores SIGCHLD, and that you do it
+ *    *before* you call wait(2) or any equivalent method that could reap
+ *    zombies).
+ *
+ * Outside of those specific uses, users should probably avoid using this.
+ */
+#define PATHRS_PROC_PID(n) (__PATHRS_PROC_TYPE_PID | (n))
+#endif /* PATHRS_PROC_PID */
 """
 
 trailer = """

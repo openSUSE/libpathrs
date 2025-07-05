@@ -28,34 +28,42 @@ import (
 
 // ProcBase is used with [ProcReadlink] and related functions to indicate what
 // /proc subpath path operations should be done relative to.
-type ProcBase int
+type ProcBase struct {
+	inner pathrsProcBase
+}
 
-const (
+var (
 	// ProcBaseRoot indicates to use /proc. Note that this mode may be more
 	// expensive because we have to take steps to try to avoid leaking unmasked
 	// procfs handles, so you should use [ProcBaseSelf] if you can.
-	ProcBaseRoot ProcBase = iota
+	ProcBaseRoot = ProcBase{inner: pathrsProcRoot}
 	// ProcBaseSelf indicates to use /proc/self. For most programs, this is the
 	// standard choice.
-	ProcBaseSelf
+	ProcBaseSelf = ProcBase{inner: pathrsProcSelf}
 	// ProcBaseThreadSelf indicates to use /proc/thread-self. In multi-threaded
 	// programs where one thread has a different CLONE_FS, it is possible for
 	// /proc/self to point the wrong thread and so /proc/thread-self may be
 	// necessary.
-	ProcBaseThreadSelf
+	ProcBaseThreadSelf = ProcBase{inner: pathrsProcThreadSelf}
 )
 
-func (b ProcBase) toPathrsBase() (pathrsProcBase, error) {
-	switch b {
-	case ProcBaseRoot:
-		return pathrsProcRoot, nil
-	case ProcBaseSelf:
-		return pathrsProcSelf, nil
-	case ProcBaseThreadSelf:
-		return pathrsProcThreadSelf, nil
-	default:
-		return 0, fmt.Errorf("invalid proc base: %v", b)
+// ProcBasePid returns a ProcBase which indicates to use /proc/$pid for the
+// given PID (or TID). Be aware that due to PID recycling, using this is
+// generally not safe except in certain circumstances. Namely:
+//
+//   - PID 1 (the init process), as that PID cannot ever get recycled.
+//   - Your current PID (though you should just use [ProcBaseSelf]).
+//   - Your current TID if you have used [runtime.LockOSThread] (though you
+//     should just use [ProcBaseThreadSelf]).
+//   - PIDs of child processes (as long as you are sure that no other part of
+//     your program incorrectly catches or ignores SIGCHLD, and that you do it
+//     *before* you call wait(2)or any equivalent method that could reap
+//     zombies).
+func ProcBasePid(pid int) ProcBase {
+	if pid < 0 || pid >= 1<<31 {
+		panic("invalid ProcBasePid value") // TODO: should this be an error?
 	}
+	return ProcBase{inner: pathrsProcPid(uint32(pid))}
 }
 
 func (b ProcBase) namePrefix() string {
@@ -66,9 +74,13 @@ func (b ProcBase) namePrefix() string {
 		return "/proc/self/"
 	case ProcBaseThreadSelf:
 		return "/proc/thread-self/"
-	default:
-		return "<invalid procfs base>/"
 	}
+	switch b.inner & pathrsProcBaseTypeMask { //nolint:exhaustive // we only care about some types
+	case pathrsProcBaseTypePid:
+		return fmt.Sprintf("/proc/%d/", b.inner&^pathrsProcBaseTypeMask)
+	default:
+	}
+	return "<invalid procfs base>/"
 }
 
 // ProcHandleCloser is a callback that needs to be called when you are done
@@ -79,29 +91,24 @@ type ProcHandleCloser func()
 
 // TODO: Should we expose procOpen?
 func procOpen(base ProcBase, path string, flags int) (*os.File, ProcHandleCloser, error) {
-	pathrsBase, err := base.toPathrsBase()
-	if err != nil {
-		return nil, nil, err
-	}
 	namePrefix := base.namePrefix()
 
 	switch base {
-	case ProcBaseRoot, ProcBaseSelf:
-		fd, err := pathrsProcOpen(pathrsBase, path, flags)
-		if err != nil {
-			return nil, nil, err
-		}
-		return os.NewFile(fd, namePrefix+path), nil, nil
 	case ProcBaseThreadSelf:
 		runtime.LockOSThread()
-		fd, err := pathrsProcOpen(pathrsBase, path, flags)
+		fd, err := pathrsProcOpen(base.inner, path, flags)
 		if err != nil {
 			runtime.UnlockOSThread()
 			return nil, nil, err
 		}
 		return os.NewFile(fd, namePrefix+path), runtime.UnlockOSThread, nil
+	default:
+		fd, err := pathrsProcOpen(base.inner, path, flags)
+		if err != nil {
+			return nil, nil, err
+		}
+		return os.NewFile(fd, namePrefix+path), nil, nil
 	}
-	panic("unreachable")
 }
 
 // ProcRootOpen safely opens a given path from inside /proc/.
@@ -173,6 +180,16 @@ func ProcThreadSelfOpen(path string, flags int) (*os.File, ProcHandleCloser, err
 	return procOpen(ProcBaseThreadSelf, path, flags)
 }
 
+// ProcPidOpen safely opens a given path from inside /proc/$pid/.
+func ProcPidOpen(pid int, path string, flags int) (*os.File, error) {
+	file, closer, err := procOpen(ProcBasePid(pid), path, flags)
+	if closer != nil {
+		// should not happen
+		panic("non-zero closer returned from procOpen(ProcPidOpen)")
+	}
+	return file, err
+}
+
 // ProcReadlink safely reads the contents of a symlink from the given procfs
 // base.
 //
@@ -180,9 +197,5 @@ func ProcThreadSelfOpen(path string, flags int) (*os.File, ProcHandleCloser, err
 // the path and then doing unix.Readlinkat(fd, ""), but with the benefit that
 // thread locking is not necessary for [ProcBaseThreadSelf].
 func ProcReadlink(base ProcBase, path string) (string, error) {
-	pathrsBase, err := base.toPathrsBase()
-	if err != nil {
-		return "", err
-	}
-	return pathrsProcReadlink(pathrsBase, path)
+	return pathrsProcReadlink(base.inner, path)
 }

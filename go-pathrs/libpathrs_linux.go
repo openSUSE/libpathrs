@@ -21,6 +21,7 @@
 package pathrs
 
 import (
+	"fmt"
 	"syscall"
 	"unsafe"
 )
@@ -207,11 +208,51 @@ func pathrsInRootHardlink(rootFd uintptr, path, target string) error {
 
 type pathrsProcBase C.pathrs_proc_base_t
 
+// FIXME: We need to open-code the constants because CGo unfortunately will
+// implicitly convert any non-literal constants (i.e. those resolved using gcc)
+// to signed integers. See <https://github.com/golang/go/issues/39136> for some
+// more information on the underlying issue (though.
 const (
-	pathrsProcRoot       pathrsProcBase = C.PATHRS_PROC_ROOT
-	pathrsProcSelf       pathrsProcBase = C.PATHRS_PROC_SELF
-	pathrsProcThreadSelf pathrsProcBase = C.PATHRS_PROC_THREAD_SELF
+	pathrsProcRoot       pathrsProcBase = 0xFFFF_FFFE_7072_6F63 // C.PATHRS_PROC_ROOT
+	pathrsProcSelf       pathrsProcBase = 0xFFFF_FFFE_091D_5E1F // C.PATHRS_PROC_SELF
+	pathrsProcThreadSelf pathrsProcBase = 0xFFFF_FFFE_3EAD_5E1F // C.PATHRS_PROC_THREAD_SELF
+
+	pathrsProcBaseTypeMask pathrsProcBase = 0xFFFF_FFFF_0000_0000 // C.__PATHRS_PROC_TYPE_MASK
+	pathrsProcBaseTypePid  pathrsProcBase = 0x8000_0000_0000_0000 // C.__PATHRS_PROC_TYPE_PID
 )
+
+// Verify that the values above match the actual C values. Unfortunately, Go
+// only allows us to forcefully cast int64 to uint64 if you use a temporary
+// variable, which means we cannot do it in a const context and thus need to do
+// it at runtime (even though it is a check that fundamentally could be done at
+// compile-time)...
+func init() {
+	assertEqual := func(a, b pathrsProcBase, msg string) {
+		if a != b {
+			panic(fmt.Sprintf("%s ((%T) %#v != (%T) %#v)", msg, a, a, b, b))
+		}
+	}
+
+	var (
+		actualProcRoot       int64 = C.PATHRS_PROC_ROOT
+		actualProcSelf       int64 = C.PATHRS_PROC_SELF
+		actualProcThreadSelf int64 = C.PATHRS_PROC_THREAD_SELF
+	)
+
+	assertEqual(pathrsProcRoot, pathrsProcBase(actualProcRoot), "PATHRS_PROC_ROOT")
+	assertEqual(pathrsProcSelf, pathrsProcBase(actualProcSelf), "PATHRS_PROC_SELF")
+	assertEqual(pathrsProcThreadSelf, pathrsProcBase(actualProcThreadSelf), "PATHRS_PROC_THREAD_SELF")
+
+	var (
+		actualProcBaseTypeMask uint64 = C.__PATHRS_PROC_TYPE_MASK
+		actualProcBaseTypePid  uint64 = C.__PATHRS_PROC_TYPE_PID
+	)
+
+	assertEqual(pathrsProcBaseTypeMask, pathrsProcBase(actualProcBaseTypeMask), "__PATHRS_PROC_TYPE_MASK")
+	assertEqual(pathrsProcBaseTypePid, pathrsProcBase(actualProcBaseTypePid), "__PATHRS_PROC_TYPE_PID")
+}
+
+func pathrsProcPid(pid uint32) pathrsProcBase { return pathrsProcBaseTypePid | pathrsProcBase(pid) }
 
 func pathrsProcOpen(base pathrsProcBase, path string, flags int) (uintptr, error) {
 	cBase := C.pathrs_proc_base_t(base)

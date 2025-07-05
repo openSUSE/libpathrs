@@ -47,36 +47,92 @@ use rustix::{
 /// Indicate what base directory should be used when doing `/proc/...`
 /// operations with a [`ProcfsHandle`].
 ///
-/// This is necessary because `/proc/thread-self` is not present on pre-3.17
-/// kernels and so it may be necessary to emulate `/proc/thread-self` access on
-/// those older kernels.
-///
-/// Most users should use `ProcfsBase::ProcSelf`, but certain users (such as
+/// Most users should use [`ProcSelf`], but certain users (such as
 /// multi-threaded programs where you really want thread-specific information)
-/// may want to use `ProcSelf::ProcThreadSelf`. Note that on systems that use
-/// green threads (such as Go), you must take care to ensure the thread stays
-/// alive until you stop using the handle (if the thread dies the handle may
-/// start returning invalid data or errors because it refers to a specific
-/// thread that no longer exists).
+/// may want to use [`ProcThreadSelf`].
+///
+/// [`ProcSelf`]: Self::ProcSelf
+/// [`ProcThreadSelf`]: Self::ProcThreadSelf
 #[doc(alias = "pathrs_proc_base_t")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum ProcfsBase {
-    /// Use `/proc`. Note that this mode may be more expensive because we have
-    /// to take steps to try to avoid leaking unmasked procfs handles, so you
-    /// should use [`ProcfsBase::ProcSelf`] if you can.
-    // TODO: Should we have a ProcfsBase::Pid(pid_t)? This isn't strictly
-    // necessary (and the C API for this could be a little weird) but it might
-    // be nice for users to explicitly say that an operation is in reference to
-    // a PID. However, at the moment the maximum pid the kernel supports is 2^22
-    // (and almost all systems have smaller defaults) so we could use values
-    // >=2^63 in the C API.
+    /// Use `/proc`. As this requires us to disable any masking of our internal
+    /// procfs mount, any file handles returned from [`ProcfsHandle::open`]
+    /// using `ProcRoot` should be treated with extra care to ensure you do not
+    /// leak them into containers. Ideally users should use [`ProcSelf`] if
+    /// possible.
+    ///
+    /// [`ProcSelf`]: Self::ProcSelf
     ProcRoot,
+
+    /// Use `/proc/<pid>`. This is useful shorthand when looking up information
+    /// about other processes (the alternative being passing the PID as a string
+    /// component with [`ProcRoot`][`Self::ProcRoot`] manually).
+    ///
+    /// Note that this operation is inherently racy -- the process referenced by
+    /// this PID may have died and the PID recycled with a different process. In
+    /// principle, this means that it is only really safe to use this with:
+    ///
+    ///  * PID 1 (the init process), as that PID cannot ever get recycled.
+    ///  * Your current PID (though you should just use [`ProcSelf`]).
+    ///  * Your current TID (though you should just use [`ProcThreadSelf`]), or
+    ///    _possibly_ other TIDs in your thread-group if you are absolutely sure
+    ///    they have not been reaped (typically with [`JoinHandle::join`],
+    ///    though there are other ways).
+    ///  * PIDs of child processes (as long as you are sure that no other part
+    ///    of your program incorrectly catches or ignores `SIGCHLD`, and that
+    ///    you do it *before* you call [`wait(2)`] or any equivalent method that
+    ///    could reap zombies).
+    ///
+    /// Outside of those specific uses, users should probably avoid using this.
+    // TODO: Add support for pidfds, to resolve the race issue.
+    ///
+    /// [`ProcRoot`]: Self::ProcRoot
+    /// [`ProcSelf`]: Self::ProcSelf
+    /// [`ProcThreadSelf`]: Self::ProcThreadSelf
+    /// [`JoinHandle::join`]: https://doc.rust-lang.org/std/thread/struct.JoinHandle.html#method.join
+    /// [`pthread_join(3)`]: https://man7.org/linux/man-pages/man3/pthread_join.3.html
+    /// [`wait(2)`]: https://man7.org/linux/man-pages/man2/wait.2.html
+    // NOTE: It seems incredibly unlikely that this will ever need to be
+    //       expanded beyond u32. glibc has always used u16 for pid_t, and the
+    //       kernel itself (even at time of writing) only supports a maximum of
+    //       2^22 PIDs internally. Even the newest pid-related APIs
+    //       (PIDFD_GET_INFO for instance) only allocate a u32 for pids. By
+    //       making this a u32 we can easily pack it inside a u64 for the C API.
+    ProcPid(u32),
+
     /// Use `/proc/self`. For most programs, this is the standard choice.
     ProcSelf,
-    /// Use `/proc/thread-self`. In multi-threaded programs where one thread has
-    /// a different `CLONE_FS`, it is possible for `/proc/self` to point the
-    /// wrong thread and so `/proc/thread-self` may be necessary.
+
+    /// Use `/proc/thread-self`. In multi-threaded programs, it is possible for
+    /// `/proc/self` to point a different thread than the currently-executing
+    /// thread. For programs which make use of [`unshare(2)`] or are interacting
+    /// with strictly thread-specific structures (such as `/proc/self/stack`)
+    /// may prefer to use `ProcThreadSelf` to avoid strange behaviour.
+    ///
+    /// However, if you pass a handle returned or derived from
+    /// [`ProcfsHandle::open`] between threads (this can happen implicitly when
+    /// using green-thread systems such as Go), you must take care to ensure the
+    /// original thread stays alive until you stop using the handle. If the
+    /// thread dies, the handle may start returning invalid data or errors
+    /// because it refers to a specific thread that no longer exists. For
+    /// correctness reasons you probably want to also actually lock execution to
+    /// the thread while using the handle. This drawback does not apply to
+    /// [`ProcSelf`].
+    ///
+    /// # Compatibility
+    /// `/proc/thread-self` was added in Linux 3.17 (in 2014), so all modern
+    /// systems -- with the notable exception of RHEL 7 -- have support for it.
+    /// For older kernels, `ProcThreadSelf` will emulate `/proc/thread-self`
+    /// support via other means (namely `/proc/self/task/$tid`), which should
+    /// work in almost all cases. As a final fallback (for the very few programs
+    /// that interact heavily with PID namespaces), we will silently fallback to
+    /// [`ProcSelf`] (this may become an error in future versions).
+    ///
+    /// [`unshare(2)`]: https://www.man7.org/linux/man-pages/man2/unshare.2.html
+    /// [`ProcSelf`]: Self::ProcSelf
+    /// [runc]: https://github.com/opencontainers/runc
     ProcThreadSelf,
 }
 
@@ -86,6 +142,7 @@ impl ProcfsBase {
         match self {
             Self::ProcRoot => PathBuf::from("."),
             Self::ProcSelf => PathBuf::from("self"),
+            Self::ProcPid(pid) => PathBuf::from(format!("{pid}")),
             Self::ProcThreadSelf => [
                 // /proc/thread-self was added in Linux 3.17.
                 "thread-self".into(),
@@ -94,7 +151,10 @@ impl ProcfsBase {
                 // However, if the proc root is not using our pid namespace, the
                 // tid in /proc/self/task/... will be wrong and we need to fall
                 // back to /proc/self. This is technically incorrect but we have
-                // no other choice.
+                // no other choice -- and this is needed for runc (mainly
+                // because of RHEL 7 which has a 3.10 kernel).
+                // TODO: Remove this and just return an error so callers can
+                //       make their own fallback decisions...
                 "self".into(),
             ]
             .into_iter()
@@ -322,6 +382,8 @@ impl ProcfsHandle {
         )?;
         self.verify_same_procfs_mnt(&fd)?;
         Ok(fd)
+        // TODO: For ProcfsBase::ProcPid, should ENOENT here be converted to
+        //       ESRCH to be more "semantically correct"?
     }
 
     /// Safely open a magic-link inside `procfs`.

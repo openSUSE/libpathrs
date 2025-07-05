@@ -21,6 +21,35 @@
 #endif
 #define __CBINDGEN_ALIGNED(n) __attribute__((aligned(n)))
 
+#ifndef PATHRS_PROC_PID
+/*
+ * Used to construct pathrs_proc_base_t values for a PID (or TID). Passing
+ * PATHRS_PROC_PID(pid) to pathrs_proc_*() as pathrs_proc_base_t will cause
+ * libpathrs to use /proc/$pid as the base of the operation.
+ *
+ * This is essentially functionally equivalent to prefixing "$pid/" to the
+ * subpath argument and using PATHRS_PROC_ROOT.
+ *
+ * Note that this operation is inherently racy -- the process referenced by this
+ * PID may have died and the PID recycled with a different process. In
+ * principle, this means that it is only really safe to use this with:
+ *
+ *  - PID 1 (the init process), as that PID cannot ever get recycled.
+ *  - Your current PID (though you should just use PATHRS_PROC_SELF).
+ *  - Your current TID (though you should just use PATHRS_PROC_THREAD_SELF),
+ *    or _possibly_ other TIDs in your thread-group if you are absolutely sure
+ *    they have not been reaped (typically with pthread_join(3), though there
+ *    are other ways).
+ *  - PIDs of child processes (as long as you are sure that no other part of
+ *    your program incorrectly catches or ignores SIGCHLD, and that you do it
+ *    *before* you call wait(2) or any equivalent method that could reap
+ *    zombies).
+ *
+ * Outside of those specific uses, users should probably avoid using this.
+ */
+#define PATHRS_PROC_PID(n) (__PATHRS_PROC_TYPE_PID | (n))
+#endif /* PATHRS_PROC_PID */
+
 
 #ifndef LIBPATHRS_H
 #define LIBPATHRS_H
@@ -39,22 +68,48 @@
 #include <sys/types.h>
 
 /**
+ * Bits in `pathrs_proc_base_t` that indicate the type of the base value.
+ *
+ * NOTE: This is used internally by libpathrs. You should avoid using this
+ * macro if possible.
+ */
+#define __PATHRS_PROC_TYPE_MASK 18446744069414584320ull
+
+/**
+ * Bits in `pathrs_proc_base_t` that must be set for `/proc/$pid` values. Don't
+ * use this directly, instead use `PATHRS_PROC_PID(n)` to convert a PID to an
+ * appropriate `pathrs_proc_base_t` value.
+ *
+ * NOTE: This is used internally by libpathrs. You should avoid using this
+ * macro if possible.
+ */
+#define __PATHRS_PROC_TYPE_PID 9223372036854775808ull
+
+/**
  * Indicate what base directory should be used when doing operations with
- * pathrs_proc_*. This is necessary because /proc/thread-self is not present on
- * pre-3.17 kernels and so it may be necessary to emulate /proc/thread-self
- * access on those older kernels.
+ * `pathrs_proc_*`. In addition to the values defined here, the following
+ * macros can be used for other values:
+ *
+ *  * `PATHRS_PROC_PID(pid)` refers to the `/proc/<pid>` directory for the
+ *    process with PID (or TID) `pid`.
+ *
+ *    Note that this operation is inherently racy and should probably avoided
+ *    for most uses -- see the block comment above `PATHRS_PROC_PID(n)` for
+ *    more details.
+ *
+ * Unknown values will result in an error being returned.
  */
 enum pathrs_proc_base_t {
     /**
-     * Use `/proc`. Note that this mode may be more expensive because we have
+     * Use /proc. Note that this mode may be more expensive because we have
      * to take steps to try to avoid leaking unmasked procfs handles, so you
-     * should use `PATHRS_PROC_SELF` if you can.
+     * should use PATHRS_PROC_SELF if you can.
      */
-    PATHRS_PROC_ROOT = 1342308351,
+    PATHRS_PROC_ROOT = 18446744067006164835ull,
     /**
      * Use /proc/self. For most programs, this is the standard choice.
      */
-    PATHRS_PROC_SELF = 152919583,
+    PATHRS_PROC_SELF = 18446744065272536607ull,
     /**
      * Use /proc/thread-self. In multi-threaded programs where one thread has a
      * different CLONE_FS, it is possible for /proc/self to point the wrong
@@ -64,7 +119,7 @@ enum pathrs_proc_base_t {
      * where your code can change threads without warning and old threads can
      * be killed (such as Go -- where you want to use runtime.LockOSThread).
      */
-    PATHRS_PROC_THREAD_SELF = 1051549215,
+    PATHRS_PROC_THREAD_SELF = 18446744066171166239ull,
 };
 typedef uint64_t pathrs_proc_base_t;
 
