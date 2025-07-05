@@ -26,9 +26,6 @@ fn main() {
     if cfg!(feature = "capi") {
         let name = "pathrs";
         let major = env::var("CARGO_PKG_VERSION_MAJOR").unwrap();
-        println!(
-            "cargo:rustc-cdylib-link-arg=-Wl,-soname,lib{}.so.{}",
-            name, major
-        );
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,lib{name}.so.{major}");
     }
 }

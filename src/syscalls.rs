@@ -86,7 +86,7 @@ impl fmt::Display for FrozenFd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             libc::AT_FDCWD => write!(f, "[AT_FDCWD]")?,
-            fd => write!(f, "[{}]", fd)?,
+            fd => write!(f, "[{fd}]")?,
         };
         match &self.1 {
             Some(path) => write!(f, "{path:?}")?,

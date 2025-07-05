@@ -152,7 +152,7 @@ fn proc_subpath<Fd: AsRawFd>(fd: Fd) -> Result<String, Error> {
     if fd == libc::AT_FDCWD {
         Ok("cwd".to_string())
     } else if fd.is_positive() {
-        Ok(format!("fd/{}", fd))
+        Ok(format!("fd/{fd}"))
     } else {
         Err(ErrorImpl::InvalidArgument {
             name: "fd".into(),
