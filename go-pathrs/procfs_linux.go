@@ -154,6 +154,24 @@ func ProcSelfOpen(path string, flags int) (*os.File, error) {
 	return file, err
 }
 
+// ProcPidOpen safely opens a given path from inside /proc/$pid/, where pid can
+// be either a PID or TID.
+//
+// This is effectively equivalent to calling [ProcRootOpen] with the pid
+// prefixed to the subpath.
+//
+// Be aware that due to PID recycling, using this is generally not safe except
+// in certain circumstances. See the documentation of [ProcBasePid] for more
+// details.
+func ProcPidOpen(pid int, path string, flags int) (*os.File, error) {
+	file, closer, err := procOpen(ProcBasePid(pid), path, flags)
+	if closer != nil {
+		// should not happen
+		panic("non-zero closer returned from procOpen(ProcPidOpen)")
+	}
+	return file, err
+}
+
 // ProcThreadSelfOpen safely opens a given path from inside /proc/thread-self/.
 //
 // Most Go processes have heterogeneous threads (all threads have most of the
@@ -178,16 +196,6 @@ func ProcSelfOpen(path string, flags int) (*os.File, error) {
 // [os.File.Close]: https://pkg.go.dev/os#File.Close
 func ProcThreadSelfOpen(path string, flags int) (*os.File, ProcHandleCloser, error) {
 	return procOpen(ProcBaseThreadSelf, path, flags)
-}
-
-// ProcPidOpen safely opens a given path from inside /proc/$pid/.
-func ProcPidOpen(pid int, path string, flags int) (*os.File, error) {
-	file, closer, err := procOpen(ProcBasePid(pid), path, flags)
-	if closer != nil {
-		// should not happen
-		panic("non-zero closer returned from procOpen(ProcPidOpen)")
-	}
-	return file, err
 }
 
 // ProcReadlink safely reads the contents of a symlink from the given procfs
