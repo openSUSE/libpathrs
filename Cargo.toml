@@ -75,10 +75,11 @@ static_assertions = "^1.1"
 anyhow = "^1"
 clap = { version = "^3", features = ["cargo"] }
 errno = "^0.3"
+indoc = "^2"
 tempfile = "^3"
 paste = "^1"
 path-clean = "^1"
-pretty_assertions = "^1"
+pretty_assertions = { version = "^1", features = ["unstable"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

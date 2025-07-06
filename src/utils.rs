@@ -28,6 +28,9 @@ pub(crate) use path::*;
 mod fd;
 pub(crate) use fd::*;
 
+mod fdinfo;
+pub(crate) use fdinfo::*;
+
 mod sysctl;
 pub(crate) use sysctl::*;
 
