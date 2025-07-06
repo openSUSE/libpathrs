@@ -37,9 +37,20 @@ maintenance = { status = "experimental" }
 crate-type = ["rlib"]
 
 [features]
+default = []
 capi = ["dep:rand", "dep:open-enum"]
-# Only used for tests.
+# All of these _test_* features are only used for our own tests -- they must
+# not be used by actual users of libpathrs! The leading "_" should mean that
+# they are hidden from documentation (such as the features list on crates.io).
 _test_as_root = []
+# NOTE: These features _disable_ functionality! This is generally a no-no when
+# designing features, but since these features are internal-only and must be
+# enabled-by-default, the alternative would be to add undocumented features to
+# the default-features set and make --no-default-features disable core parts of
+# libpathrs. So instead, these features disable features but only in an
+# "additive way" (by forcing the syscall wrapper to return -ENOSYS). This
+# should avoid the possible issues with non-additive features.
+_test_enosys_openat2 = []
 
 [profile.release]
 # Enable link-time optimisations.

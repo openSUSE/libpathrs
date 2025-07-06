@@ -653,125 +653,161 @@ pub(crate) fn statx(
     })
 }
 
-// MSRV(1.80): Use LazyLock.
-pub(crate) static OPENAT2_IS_SUPPORTED: Lazy<bool> =
-    Lazy::new(|| openat2(AT_FDCWD, ".", Default::default()).is_ok());
+mod openat2 {
+    use super::*;
 
-bitflags! {
-    /// Wrapper for the underlying `libc`'s `RESOLVE_*` flags.
-    ///
-    /// The flag values and their meaning is identical to the description in the
-    /// [`openat2(2)`] man page.
-    ///
-    /// [`openat2(2)`]: http://man7.org/linux/man-pages/man2/openat2.2.html
-    #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
-    pub(crate) struct ResolveFlags: u64 {
-        const RESOLVE_BENEATH = libc::RESOLVE_BENEATH;
-        const RESOLVE_IN_ROOT = libc::RESOLVE_IN_ROOT;
-        const RESOLVE_NO_MAGICLINKS = libc::RESOLVE_NO_MAGICLINKS;
-        const RESOLVE_NO_SYMLINKS = libc::RESOLVE_NO_SYMLINKS;
-        const RESOLVE_NO_XDEV = libc::RESOLVE_NO_XDEV;
-        const RESOLVE_CACHED = libc::RESOLVE_CACHED;
+    // MSRV(1.80): Use LazyLock.
+    pub(crate) static OPENAT2_IS_SUPPORTED: Lazy<bool> =
+        Lazy::new(|| openat2(AT_FDCWD, ".", Default::default()).is_ok());
 
-        // Don't clobber unknown RESOLVE_* bits.
-        const _ = !0;
+    bitflags! {
+        /// Wrapper for the underlying `libc`'s `RESOLVE_*` flags.
+        ///
+        /// The flag values and their meaning is identical to the description in the
+        /// [`openat2(2)`] man page.
+        ///
+        /// [`openat2(2)`]: http://man7.org/linux/man-pages/man2/openat2.2.html
+        #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
+        pub(crate) struct ResolveFlags: u64 {
+            const RESOLVE_BENEATH = libc::RESOLVE_BENEATH;
+            const RESOLVE_IN_ROOT = libc::RESOLVE_IN_ROOT;
+            const RESOLVE_NO_MAGICLINKS = libc::RESOLVE_NO_MAGICLINKS;
+            const RESOLVE_NO_SYMLINKS = libc::RESOLVE_NO_SYMLINKS;
+            const RESOLVE_NO_XDEV = libc::RESOLVE_NO_XDEV;
+            const RESOLVE_CACHED = libc::RESOLVE_CACHED;
+
+            // Don't clobber unknown RESOLVE_* bits.
+            const _ = !0;
+        }
     }
-}
 
-/// Arguments for how `openat2` should open the target path.
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct OpenHow {
-    /// O_* flags (`-EINVAL` on unknown or incompatible flags).
-    pub flags: u64,
-    /// O_CREAT or O_TMPFILE file mode (must be zero otherwise).
-    pub mode: u64,
-    /// RESOLVE_* flags (`-EINVAL` on unknown flags).
-    pub resolve: u64,
-}
+    /// Arguments for how `openat2` should open the target path.
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug, Default)]
+    pub(crate) struct OpenHow {
+        /// O_* flags (`-EINVAL` on unknown or incompatible flags).
+        pub flags: u64,
+        /// O_CREAT or O_TMPFILE file mode (must be zero otherwise).
+        pub mode: u64,
+        /// RESOLVE_* flags (`-EINVAL` on unknown flags).
+        pub resolve: u64,
+    }
 
-impl fmt::Display for OpenHow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ ")?;
-        // self.flags
-        if let Ok(oflags) = i32::try_from(self.flags) {
-            // If the flags can fit inside OpenFlags, pretty-print the flags.
-            write!(f, "flags: {:?}, ", OpenFlags::from_bits_retain(oflags))?;
+    impl fmt::Display for OpenHow {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{{ ")?;
+            // self.flags
+            if let Ok(oflags) = i32::try_from(self.flags) {
+                // If the flags can fit inside OpenFlags, pretty-print the flags.
+                write!(f, "flags: {:?}, ", OpenFlags::from_bits_retain(oflags))?;
+            } else {
+                write!(f, "flags: 0x{:x}, ", self.flags)?;
+            }
+            if self.flags & (libc::O_CREAT | libc::O_TMPFILE) as u64 != 0 {
+                write!(f, "mode: 0o{:o}, ", self.mode)?;
+            }
+            // self.resolve
+            write!(
+                f,
+                "resolve: {:?}",
+                ResolveFlags::from_bits_retain(self.resolve)
+            )?;
+            write!(f, " }}")
+        }
+    }
+
+    /// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
+    // NOTE: rustix's openat2 wrapper is not extensible-friendly so we use our own
+    // for now. See <https://github.com/bytecodealliance/rustix/issues/1186>.
+    pub(crate) fn openat2_follow(
+        dirfd: impl AsFd,
+        path: impl AsRef<Path>,
+        mut how: OpenHow,
+    ) -> Result<OwnedFd, Error> {
+        let dirfd = dirfd.as_fd().check_rustix_fd()?;
+        let path = path.as_ref();
+
+        // Add O_CLOEXEC and O_NOCTTY explicitly (as we do for openat). However,
+        // O_NOCTTY cannot be set if O_PATH is set (openat2 verifies flag
+        // arguments).
+        how.flags |= libc::O_CLOEXEC as u64;
+        if how.flags & libc::O_PATH as u64 == 0 {
+            how.flags |= libc::O_NOCTTY as u64;
+        }
+
+        if cfg!(feature = "_test_enosys_openat2") {
+            Err(Error::Openat2 {
+                dirfd: dirfd.into(),
+                path: path.into(),
+                how,
+                size: std::mem::size_of::<OpenHow>(),
+                source: Errno::NOSYS,
+            })?;
+        }
+
+        // SAFETY: Obviously safe-to-use Linux syscall.
+        let fd = unsafe {
+            libc::syscall(
+                libc::SYS_openat2,
+                dirfd.as_raw_fd(),
+                path.to_c_string().as_ptr(),
+                &how as *const OpenHow,
+                std::mem::size_of::<OpenHow>(),
+            )
+        } as RawFd;
+        let err = IOError::last_os_error();
+
+        if fd >= 0 {
+            // SAFETY: We know it's a real file descriptor.
+            Ok(unsafe { OwnedFd::from_raw_fd(fd) })
         } else {
-            write!(f, "flags: 0x{:x}, ", self.flags)?;
+            Err(Error::Openat2 {
+                dirfd: dirfd.into(),
+                path: path.into(),
+                how,
+                size: std::mem::size_of::<OpenHow>(),
+                source: err
+                    .raw_os_error()
+                    .map(Errno::from_raw_os_error)
+                    .expect("syscall failure must result in a real OS error"),
+            })
         }
-        if self.flags & (libc::O_CREAT | libc::O_TMPFILE) as u64 != 0 {
-            write!(f, "mode: 0o{:o}, ", self.mode)?;
+    }
+
+    /// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY |
+    /// O_NOFOLLOW`.
+    pub(crate) fn openat2(
+        dirfd: impl AsFd,
+        path: impl AsRef<Path>,
+        mut how: OpenHow,
+    ) -> Result<OwnedFd, Error> {
+        how.flags |= libc::O_NOFOLLOW as u64;
+
+        openat2_follow(dirfd, path, how)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        use pretty_assertions::assert_eq;
+
+        #[test]
+        #[cfg_attr(not(feature = "_test_enosys_openat2"), ignore)]
+        fn openat2_disabled() {
+            assert_eq!(
+                openat2(AT_FDCWD, ".", Default::default())
+                    .map(|file| file
+                        .as_unsafe_path_unchecked()
+                        .expect("getting unsafe path should work"))
+                    .map_err(|err| err.errno()),
+                Err(Errno::NOSYS)
+            );
         }
-        // self.resolve
-        write!(
-            f,
-            "resolve: {:?}",
-            ResolveFlags::from_bits_retain(self.resolve)
-        )?;
-        write!(f, " }}")
     }
 }
 
-/// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
-// NOTE: rustix's openat2 wrapper is not extensible-friendly so we use our own
-// for now. See <https://github.com/bytecodealliance/rustix/issues/1186>.
-pub(crate) fn openat2_follow(
-    dirfd: impl AsFd,
-    path: impl AsRef<Path>,
-    mut how: OpenHow,
-) -> Result<OwnedFd, Error> {
-    let dirfd = dirfd.as_fd().check_rustix_fd()?;
-    let path = path.as_ref();
-
-    // Add O_CLOEXEC and O_NOCTTY explicitly (as we do for openat). However,
-    // O_NOCTTY cannot be set if O_PATH is set (openat2 verifies flag
-    // arguments).
-    how.flags |= libc::O_CLOEXEC as u64;
-    if how.flags & libc::O_PATH as u64 == 0 {
-        how.flags |= libc::O_NOCTTY as u64;
-    }
-
-    // SAFETY: Obviously safe-to-use Linux syscall.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_openat2,
-            dirfd.as_raw_fd(),
-            path.to_c_string().as_ptr(),
-            &how as *const OpenHow,
-            std::mem::size_of::<OpenHow>(),
-        )
-    } as RawFd;
-    let err = IOError::last_os_error();
-
-    if fd >= 0 {
-        // SAFETY: We know it's a real file descriptor.
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-    } else {
-        Err(Error::Openat2 {
-            dirfd: dirfd.into(),
-            path: path.into(),
-            how,
-            size: std::mem::size_of::<OpenHow>(),
-            source: err
-                .raw_os_error()
-                .map(Errno::from_raw_os_error)
-                .expect("syscall failure must result in a real OS error"),
-        })
-    }
-}
-
-/// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY |
-/// O_NOFOLLOW`.
-pub(crate) fn openat2(
-    dirfd: impl AsFd,
-    path: impl AsRef<Path>,
-    mut how: OpenHow,
-) -> Result<OwnedFd, Error> {
-    how.flags |= libc::O_NOFOLLOW as u64;
-
-    openat2_follow(dirfd, path, how)
-}
+pub(crate) use openat2::*;
 
 #[cfg(test)]
 pub(crate) fn getpid() -> rustix_process::RawPid {
