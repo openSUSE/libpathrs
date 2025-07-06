@@ -272,7 +272,7 @@ impl<P: AsRef<Path>> PathIterExt for P {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::{path_split, path_strip_trailing_slash, PathIterExt};
+    use super::*;
 
     use std::path::{Path, PathBuf};
 

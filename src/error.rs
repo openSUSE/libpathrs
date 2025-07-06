@@ -60,6 +60,11 @@ impl Error {
     pub(crate) fn is_safety_violation(&self) -> bool {
         self.0.is_safety_violation()
     }
+
+    #[cfg(test)]
+    pub(crate) fn into_inner(self) -> ErrorImpl {
+        *self.0
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
