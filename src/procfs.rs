@@ -590,22 +590,8 @@ impl ProcfsHandle {
     pub fn try_from_fd<Fd: Into<OwnedFd>>(inner: Fd) -> Result<Self, Error> {
         let inner = inner.into();
 
-        // Make sure the file is actually a procfs handle.
-        verify_is_procfs(&inner)?;
-
-        // And make sure it's the root of procfs. The root directory is
-        // guaranteed to have an inode number of PROC_ROOT_INO. If this check
-        // ever stops working, it's a kernel regression.
-        let ino = inner.metadata().expect("fstat(/proc) should work").ino();
-        if ino != Self::PROC_ROOT_INO {
-            Err(ErrorImpl::SafetyViolation {
-                description: format!(
-                    "/proc is not root of a procfs mount (ino is 0x{ino:X}, not 0x{:X})",
-                    Self::PROC_ROOT_INO,
-                )
-                .into(),
-            })?
-        }
+        // Make sure the file is actually a procfs root.
+        verify_is_procfs_root(&inner)?;
 
         let mnt_id = utils::fetch_mnt_id(&inner, "")?;
         let resolver = ProcfsResolver::default();
@@ -646,6 +632,29 @@ pub(crate) fn verify_is_procfs(fd: impl AsFd) -> Result<(), Error> {
             rustix_fs::PROC_SUPER_MAGIC,
         ))?
     }
+    Ok(())
+}
+
+pub(crate) fn verify_is_procfs_root(fd: impl AsFd) -> Result<(), Error> {
+    let fd = fd.as_fd();
+
+    // Make sure the file is actually a procfs handle.
+    verify_is_procfs(fd)?;
+
+    // And make sure it's the root of procfs. The root directory is
+    // guaranteed to have an inode number of PROC_ROOT_INO. If this check
+    // ever stops working, it's a kernel regression.
+    let ino = fd.metadata().expect("fstat(/proc) should work").ino();
+    if ino != ProcfsHandle::PROC_ROOT_INO {
+        Err(ErrorImpl::SafetyViolation {
+            description: format!(
+                "/proc is not root of a procfs mount (ino is 0x{ino:X}, not 0x{:X})",
+                ProcfsHandle::PROC_ROOT_INO,
+            )
+            .into(),
+        })?;
+    }
+
     Ok(())
 }
 
