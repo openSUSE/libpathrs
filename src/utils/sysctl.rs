@@ -54,7 +54,7 @@ pub(crate) fn sysctl_read_line(procfs: &ProcfsHandle, sysctl: &str) -> Result<St
 pub(crate) fn sysctl_read_parse<T>(procfs: &ProcfsHandle, sysctl: &str) -> Result<T, Error>
 where
     T: FromStr,
-    Error: From<T::Err>,
+    T::Err: Into<ErrorImpl> + Into<Error>,
 {
     sysctl_read_line(procfs, sysctl).and_then(|s| {
         s.parse()
