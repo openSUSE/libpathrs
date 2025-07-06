@@ -111,7 +111,7 @@ impl MetadataExt for Metadata {
     }
 }
 
-pub(crate) trait FdExt {
+pub(crate) trait FdExt: AsFd {
     /// Equivalent to [`File::metadata`].
     ///
     /// [`File::metadata`]: std::fs::File::metadata
@@ -139,7 +139,8 @@ pub(crate) trait FdExt {
     /// kinds of attacks.
     ///
     /// Currently this should only be used by the `syscall::FrozenFd` logic
-    /// which saves the path a file descriptor references.
+    /// which saves the path a file descriptor references for error messages, as
+    /// well as in some test code.
     fn as_unsafe_path_unchecked(&self) -> Result<PathBuf, Error>;
 
     /// Check if the File is on a "dangerous" filesystem that might contain
