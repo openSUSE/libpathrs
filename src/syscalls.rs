@@ -614,7 +614,7 @@ pub(crate) fn statx<Fd: AsFd, P: AsRef<Path>>(
 
 // MSRV(1.80): Use LazyLock.
 pub(crate) static OPENAT2_IS_SUPPORTED: Lazy<bool> =
-    Lazy::new(|| openat2(AT_FDCWD, ".", &Default::default()).is_ok());
+    Lazy::new(|| openat2(AT_FDCWD, ".", Default::default()).is_ok());
 
 bitflags! {
     /// Wrapper for the underlying `libc`'s `RESOLVE_*` flags.
@@ -624,7 +624,7 @@ bitflags! {
     ///
     /// [`openat2(2)`]: http://man7.org/linux/man-pages/man2/openat2.2.html
     #[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
-    struct ResolveFlags: u64 {
+    pub(crate) struct ResolveFlags: u64 {
         const RESOLVE_BENEATH = libc::RESOLVE_BENEATH;
         const RESOLVE_IN_ROOT = libc::RESOLVE_IN_ROOT;
         const RESOLVE_NO_MAGICLINKS = libc::RESOLVE_NO_MAGICLINKS;
@@ -639,8 +639,8 @@ bitflags! {
 
 /// Arguments for how `openat2` should open the target path.
 #[repr(C)]
-#[derive(Clone, Debug, Default)]
-pub struct OpenHow {
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct OpenHow {
     /// O_* flags (`-EINVAL` on unknown or incompatible flags).
     pub flags: u64,
     /// O_CREAT or O_TMPFILE file mode (must be zero otherwise).
@@ -672,20 +672,24 @@ impl fmt::Display for OpenHow {
     }
 }
 
+/// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
 // NOTE: rustix's openat2 wrapper is not extensible-friendly so we use our own
 // for now. See <https://github.com/bytecodealliance/rustix/issues/1186>.
-pub(crate) fn openat2<Fd: AsFd, P: AsRef<Path>>(
+pub(crate) fn openat2_follow<Fd: AsFd, P: AsRef<Path>>(
     dirfd: Fd,
     path: P,
-    how: &OpenHow,
+    mut how: OpenHow,
 ) -> Result<OwnedFd, Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
 
-    // Add O_CLOEXEC explicitly. No need for O_NOFOLLOW because
-    // RESOLVE_IN_ROOT handles that correctly in a race-free way.
-    let mut how = how.clone();
+    // Add O_CLOEXEC and O_NOCTTY explicitly (as we do for openat). However,
+    // O_NOCTTY cannot be set if O_PATH is set (openat2 verifies flag
+    // arguments).
     how.flags |= libc::O_CLOEXEC as u64;
+    if how.flags & libc::O_PATH as u64 == 0 {
+        how.flags |= libc::O_NOCTTY as u64;
+    }
 
     // SAFETY: Obviously safe-to-use Linux syscall.
     let fd = unsafe {
@@ -714,6 +718,18 @@ pub(crate) fn openat2<Fd: AsFd, P: AsRef<Path>>(
                 .expect("syscall failure must result in a real OS error"),
         })
     }
+}
+
+/// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY |
+/// O_NOFOLLOW`.
+pub(crate) fn openat2<Fd: AsFd, P: AsRef<Path>>(
+    dirfd: Fd,
+    path: P,
+    mut how: OpenHow,
+) -> Result<OwnedFd, Error> {
+    how.flags |= libc::O_NOFOLLOW as u64;
+
+    openat2_follow(dirfd, path, how)
 }
 
 #[cfg(test)]
