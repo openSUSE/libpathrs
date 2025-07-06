@@ -16,4 +16,5 @@
 
 .PHONY: smoke-test
 smoke-test:
-	./cat.py . ../../cat.py &>/dev/null
+	./cat.py . ../../cat.py
+	./sysctl.py kernel.hostname kernel.overflowuid kernel.overflowgid
