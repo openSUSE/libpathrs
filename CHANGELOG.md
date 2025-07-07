@@ -152,6 +152,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
       directory (otherwise you get `ENOTDIR`).
 - opath resolver: we now return `ELOOP` when we run into a symlink that came
   from mount with the `MS_NOSYMFOLLOW` set, to match the behaviour of `openat2`.
+- openat2: we now set `O_NOCTTY` and `O_NOFOLLOW` more aggressively when doing
+  `openat2` operations, to avoid theoretical DoS attacks (these were set for
+  `openat` but we missed including them for `openat2`).
 
 ### Changed ###
 - syscalls: switch to rustix for most of our syscall wrappers to simplify how

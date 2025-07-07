@@ -54,7 +54,7 @@ pub(crate) fn open<Fd: AsFd, P: AsRef<Path>>(
         ..Default::default()
     };
 
-    syscalls::openat2(&root, path.as_ref(), &how)
+    syscalls::openat2_follow(&root, path.as_ref(), how)
         .map(File::from)
         .map_err(|err| {
             ErrorImpl::RawOsError {
@@ -96,7 +96,7 @@ pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
     // do is attempt the openat2(2) a couple of times. If it still fails, just
     // error out.
     for _ in 0..16 {
-        match syscalls::openat2(&root, path.as_ref(), &how) {
+        match syscalls::openat2_follow(&root, path.as_ref(), how) {
             Ok(file) => return Ok(Handle::from_fd(file)),
             Err(err) => match err.root_cause().raw_os_error() {
                 Some(libc::ENOSYS) => {

@@ -116,10 +116,10 @@ fn openat2_resolve<Fd: AsFd, P: AsRef<Path>>(
     let rflags =
         libc::RESOLVE_BENEATH | libc::RESOLVE_NO_MAGICLINKS | libc::RESOLVE_NO_XDEV | rflags.bits();
 
-    syscalls::openat2(
+    syscalls::openat2_follow(
         root,
         path,
-        &OpenHow {
+        OpenHow {
             flags: oflags,
             resolve: rflags,
             ..Default::default()
