@@ -18,11 +18,11 @@
  */
 
 use crate::{
-    error::{Error, ErrorExt, ErrorImpl},
+    error::{Error, ErrorExt, ErrorImpl, ErrorKind},
     flags::OpenFlags,
     procfs::{self, ProcfsBase, ProcfsHandle},
     syscalls,
-    utils::{self, RawProcfsRoot},
+    utils::{self, MaybeOwnedFd, RawProcfsRoot},
 };
 
 use std::{
@@ -330,55 +330,142 @@ impl<Fd: AsFd> FdExt for Fd {
     }
 }
 
-pub(crate) fn fetch_mnt_id(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<Option<u64>, Error> {
-    // NOTE: stx.stx_mnt_id is fairly new (added in Linux 5.8[1]) so this check
-    // might not work on quite a few kernels and so we have to fallback to not
-    // checking the mount ID (removing some protections).
+pub(crate) fn fetch_mnt_id(
+    proc_rootfd: RawProcfsRoot<'_>,
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
+) -> Result<u64, Error> {
+    let dirfd = dirfd.as_fd();
+    let path = path.as_ref();
+
+    // The most ideal method of fetching mount IDs for a file descriptor (or
+    // subpath) is statx(2) with STATX_MNT_ID_UNIQUE, as it provides a globally
+    // unique 64-bit identifier for a mount that cannot be recycled without
+    // having to interact with procfs (which is important since this code is
+    // called within procfs, so we cannot use ProcfsHandle to protect against
+    // attacks).
     //
-    // In theory, name_to_handle_at(2) also lets us get the mount of a
-    // handle in a race-free way (and would be a useful fallback for pre-statx
-    // kernels -- name_to_handle_at(2) was added in Linux 2.6.39[2]).
+    // Unfortunately, STATX_MNT_ID_UNIQUE was added in Linux 6.8, so we need to
+    // have some fallbacks. STATX_MNT_ID is (for the most part) just as good for
+    // our usecase (since we operate relative to a file descriptor, the mount ID
+    // shouldn't be recycled while we keep the file descriptor open). This helps
+    // a fair bit, but STATX_MNT_ID was still only added in Linux 5.8, and so
+    // even some post-openat2(2) systems would be insecure if we just left it at
+    // that.
     //
-    // Unfortunately, before AT_HANDLE_FID (added in Linux 6.7[3]) procfs did
-    // not permit the export of file handles. name_to_handle_at(2) does return
-    // the mount ID in most error cases, but for -EOPNOTSUPP it doesn't and so
-    // we can't use it for pre-statx kernels.
+    // As a fallback, we can use the "mnt_id" field from /proc/self/fdinfo/<fd>
+    // to get the mount ID -- unlike statx(2), this functionality has existed on
+    // Linux since time immemorial and thus we can error out if this operation
+    // fails. This does require us to operate on procfs in a less-safe way
+    // (unlike the alternative approaches), however note that:
     //
-    // The only other alternative would be to scan /proc/self/mountinfo, but
-    // since we are worried about procfs attacks there isn't much point (an
-    // attacker could bind-mount /proc/self/environ over /proc/$pid/mountinfo
-    // and simply change their environment to make the mountinfo look
-    // reasonable.
+    //  * For openat2(2) systems, this is completely safe (fdinfo files are regular
+    //    files, and thus -- unlike magic-links -- RESOLVE_NO_XDEV can be used to
+    //    safely protect against bind-mounts).
     //
-    // So we have to live with limited protection for pre-5.8 kernels.
+    //  * For non-openat2(2) systems, an attacker can theoretically attack this by
+    //    overmounting fdinfo with something like /proc/self/environ and fill it
+    //    with a fake fdinfo file.
     //
-    // [1]: Linux commit fa2fcf4f1df1 ("statx: add mount ID")
-    // [2]: Linux commit 990d6c2d7aee ("vfs: Add name to file handle conversion support")
-    // [3]: Linux commit 64343119d7b8 ("exportfs: support encoding non-decodeable file handles by default")
+    //    However, get_fdinfo_field and fd_get_verify_fdinfo have enough extra
+    //    protections that would probably make it infeasible for an attacker to
+    //    easily bypass it in practice. You can see the comments there for more
+    //    details, but in short an attacker would probably need to be able to
+    //    predict the file descriptor numbers for several transient files as
+    //    well as the inode number of the target file, and be able to create
+    //    overmounts while racing against libpathrs -- it seems unlikely that
+    //    this would be trivial to do (especially compared to how trivial
+    //    attacks are without these protections).
+    //
+    // NOTE: A very old trick for getting mount IDs in a race-free way was to
+    //       (ab)use name_to_handle_at(2) -- if you request a file handle with
+    //       too small a buffer, name_to_handle_at(2) will return -EOVERFLOW but
+    //       will still give you the mount ID. Sadly, name_to_handle_at(2) did
+    //       not work on procfs (or any other pseudofilesystem) until
+    //       AT_HANDLE_FID supported was added in Linux 6.7 (at which point
+    //       there's no real benefit to using it).
+    //
+    //       Maybe we could use this for RESOLVE_NO_XDEV emulation in the
+    //       EmulatedOpath resolver, but for procfs this approach is not useful.
+    //
+    // NOTE: Obvious alternatives like parsing /proc/self/mountinfo can be
+    //       dismissed out-of-hand as not being useful (mountinfo is trivially
+    //       bypassable by an attacker with mount privileges, is generally awful
+    //       to parse, and doesn't work with open_tree(2)-style detached
+    //       mounts).
 
     const STATX_MNT_ID_UNIQUE: StatxFlags = StatxFlags::from_bits_retain(0x4000);
     let want_mask = StatxFlags::MNT_ID | STATX_MNT_ID_UNIQUE;
 
-    match syscalls::statx(dirfd, path, want_mask) {
+    let mnt_id = match syscalls::statx(dirfd, path, want_mask) {
         Ok(stx) => {
             let got_mask = StatxFlags::from_bits_retain(stx.stx_mask);
-            Ok(if got_mask.intersects(want_mask) {
+            if got_mask.intersects(want_mask) {
                 Some(stx.stx_mnt_id)
             } else {
                 None
-            })
+            }
         }
         Err(err) => match err.root_cause().raw_os_error() {
             // We have to handle STATX_MNT_ID not being supported on pre-5.8
             // kernels, so treat an ENOSYS or EINVAL the same so that we can
             // work on pre-4.11 (pre-statx) kernels as well.
-            Some(libc::ENOSYS) | Some(libc::EINVAL) => Ok(None),
+            Some(libc::ENOSYS) | Some(libc::EINVAL) => None,
             _ => Err(ErrorImpl::RawOsError {
                 operation: "check mnt_id of filesystem".into(),
                 source: err,
             })?,
         },
     }
+    // Kind of silly intermediate Result<_, Error> type so that we can use
+    // Result::or_else.
+    // TODO: In principle we could remove this once result_flattening is
+    // stabilised...
+    .ok_or_else(|| {
+        ErrorImpl::NotSupported {
+            feature: "STATX_MNT_ID".into(),
+        }
+        .into()
+    })
+    .or_else(|_: Error| -> Result<_, Error> {
+        // openat doesn't support O_EMPTYPATH, so if we are operating on "" we
+        // should reuse the dirfd directly.
+        let file = if path.as_os_str().is_empty() {
+            MaybeOwnedFd::BorrowedFd(dirfd)
+        } else {
+            MaybeOwnedFd::OwnedFd(syscalls::openat(dirfd, path, OpenFlags::O_PATH, 0).map_err(
+                |err| ErrorImpl::RawOsError {
+                    operation: "open target file for mnt_id check".into(),
+                    source: err,
+                },
+            )?)
+        };
+        let file = file.as_fd();
+
+        match file
+            .get_fdinfo_field(proc_rootfd, "mnt_id")
+            .map_err(|err| (err.kind(), err))
+        {
+            Ok(Some(mnt_id)) => Ok(mnt_id),
+            // "mnt_id" *must* exist as a field -- make sure we return a
+            // SafetyViolation here if it is missing or an invalid value
+            // (InternalError), otherwise an attacker could silence this check
+            // by creating a "mnt_id"-less fdinfo.
+            // TODO: Should we actually match for ErrorImpl::ParseIntError here?
+            Ok(None) | Err((ErrorKind::InternalError, _)) => Err(ErrorImpl::SafetyViolation {
+                description: format!(
+                    r#"fd {:?} has a fake fdinfo: invalid or missing "mnt_id" field"#,
+                    file.as_raw_fd(),
+                )
+                .into(),
+            }
+            .into()),
+            // Pass through any other errors.
+            Err((_, err)) => Err(err),
+        }
+    })?;
+
+    Ok(mnt_id)
 }
 
 #[cfg(test)]

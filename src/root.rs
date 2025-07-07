@@ -1047,7 +1047,7 @@ impl RootRef<'_> {
         // of whether there are any remaining components (for consistency).
         let mut current = handle
             .reopen(OpenFlags::O_DIRECTORY)
-            .with_wrap(|| format!("cannot create directories in {}", FrozenFd::from(handle)))?;
+            .with_wrap(|| format!("cannot re-open {} with O_DIRECTORY", FrozenFd::from(handle)))?;
 
         // For the remaining
         let remaining_parts = remaining
