@@ -55,6 +55,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   on a operating on a different process. This is also now supported by the C
   API (by just passing the `pid_t` instead of a special `pathrs_proc_base_t`
   value).
+- procfs: we now make use of `/proc/thread-self/fdinfo`'s `mnt_id` field to try
+  to thwart bind-mount attacks on systems without `STATX_MNT_ID` support.
+
+  On systems with `openat2(2)`, this protection is effectively just as safe as
+  `STATX_MNT_ID` (which lets us lower the minimum recommended kernel version
+  from Linux 5.8 to Linux 5.6). For older systems, this protection is not
+  perfect, but is designed to be difficult for an attacker to bypass as
+  consistently and easily as it would be without these protections.
+
+  Note that it is still the case that post-6.8 kernels (`STATX_MNT_ID_UNIQUE`)
+  are still the most strongly recommended kernels to use.
 
 ### Changes ###
 - procfs: our internal `GLOBAL_PROCFS_HANDLE` has been removed entirely, and

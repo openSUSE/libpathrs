@@ -34,7 +34,7 @@ use std::{
     io::Error as IOError,
     os::unix::{
         fs::MetadataExt,
-        io::{AsFd, OwnedFd},
+        io::{AsFd, BorrowedFd, OwnedFd},
     },
     path::{Path, PathBuf},
 };
@@ -226,7 +226,7 @@ impl ProcfsBase {
 #[derive(Debug)]
 pub struct ProcfsHandle {
     inner: OwnedFd,
-    mnt_id: Option<u64>,
+    mnt_id: u64,
     is_subset: bool,
     pub(crate) resolver: ProcfsResolver,
 }
@@ -240,8 +240,12 @@ impl ProcfsHandle {
     // This is part of Linux's ABI.
     const PROC_ROOT_INO: u64 = 1;
 
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
+    }
+
     pub(crate) fn as_raw_procfs(&self) -> RawProcfsRoot<'_> {
-        RawProcfsRoot::UnsafeFd(self.inner.as_fd())
+        RawProcfsRoot::UnsafeFd(self.as_fd())
     }
 
     /// Create a new `fsopen(2)`-based [`ProcfsHandle`]. This handle is safe
@@ -368,8 +372,9 @@ impl ProcfsHandle {
     }
 
     fn open_base(&self, base: ProcfsBase) -> Result<OwnedFd, Error> {
-        let proc_rootfd = self.inner.as_fd();
+        let proc_rootfd = self.as_fd();
         let fd = self.resolver.resolve(
+            self.as_raw_procfs(),
             proc_rootfd,
             base.into_path(self.as_raw_procfs()),
             OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
@@ -449,7 +454,7 @@ impl ProcfsHandle {
         // However, ProcfsHandle::open already checks that the mount ID and
         // fstype are safe, so we can just reuse the mount ID we get without
         // issue.
-        let parent_mnt_id = utils::fetch_mnt_id(&parent, "")?;
+        let parent_mnt_id = utils::fetch_mnt_id(self.as_raw_procfs(), &parent, "")?;
 
         // Detect if the magic-link we are about to open is actually a
         // bind-mount. There is no "statfsat" so we can't check that the f_type
@@ -460,7 +465,7 @@ impl ProcfsHandle {
         //
         // NOTE: This check is only safe if there are no racing mounts, so only
         // for the ProcfsHandle::{new_fsopen,new_open_tree} cases.
-        verify_same_mnt(parent_mnt_id, &parent, trailing)?;
+        verify_same_mnt(self.as_raw_procfs(), parent_mnt_id, &parent, trailing)?;
 
         syscalls::openat_follow(parent, trailing, oflags, 0)
             .map(File::from)
@@ -522,7 +527,13 @@ impl ProcfsHandle {
         let subpath = subpath.as_ref();
         let fd = self
             .resolver
-            .resolve(&basedir, subpath, oflags, ResolverFlags::empty())
+            .resolve(
+                self.as_raw_procfs(),
+                &basedir,
+                subpath,
+                oflags,
+                ResolverFlags::empty(),
+            )
             .and_then(|fd| {
                 self.verify_same_procfs_mnt(&fd)?;
                 Ok(fd)
@@ -567,7 +578,7 @@ impl ProcfsHandle {
 
     fn verify_same_procfs_mnt(&self, fd: impl AsFd) -> Result<(), Error> {
         // Detect if the file we landed on is from a bind-mount.
-        verify_same_mnt(self.mnt_id, &fd, "")?;
+        verify_same_mnt(self.as_raw_procfs(), self.mnt_id, &fd, "")?;
         // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
         // do is check the fs_type to avoid mounts non-procfs filesystems.
         // Unfortunately, attackers can bind-mount procfs files and still
@@ -584,7 +595,7 @@ impl ProcfsHandle {
         // Make sure the file is actually a procfs root.
         verify_is_procfs_root(&inner)?;
 
-        let mnt_id = utils::fetch_mnt_id(&inner, "")?;
+        let mnt_id = utils::fetch_mnt_id(RawProcfsRoot::UnsafeFd(inner.as_fd()), &inner, "")?;
         let resolver = ProcfsResolver::default();
 
         // Figure out if the mount we have is subset=pid or hidepid=. For
@@ -650,11 +661,12 @@ pub(crate) fn verify_is_procfs_root(fd: impl AsFd) -> Result<(), Error> {
 }
 
 pub(crate) fn verify_same_mnt(
-    root_mnt_id: Option<u64>,
+    proc_rootfd: RawProcfsRoot<'_>,
+    root_mnt_id: u64,
     dirfd: impl AsFd,
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
-    let mnt_id = utils::fetch_mnt_id(dirfd, path)?;
+    let mnt_id = utils::fetch_mnt_id(proc_rootfd, dirfd, path)?;
     // We the file we landed on a bind-mount / other procfs?
     if root_mnt_id != mnt_id {
         // Emulate RESOLVE_NO_XDEV's errors so that any failure looks like an

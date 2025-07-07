@@ -18,11 +18,11 @@
  */
 
 use crate::{
-    error::{Error, ErrorExt, ErrorImpl},
+    error::{Error, ErrorExt, ErrorImpl, ErrorKind},
     flags::OpenFlags,
     procfs::{self, ProcfsBase, ProcfsHandle},
     syscalls,
-    utils::{self, RawProcfsRoot},
+    utils::{self, MaybeOwnedFd, RawProcfsRoot},
 };
 
 use std::{
@@ -330,9 +330,19 @@ impl<Fd: AsFd> FdExt for Fd {
     }
 }
 
-pub(crate) fn fetch_mnt_id(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<Option<u64>, Error> {
+pub(crate) fn fetch_mnt_id(
+    proc_rootfd: RawProcfsRoot<'_>,
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
+) -> Result<u64, Error> {
+    let dirfd = dirfd.as_fd();
+    let path = path.as_ref();
+
     // NOTE: stx.stx_mnt_id is fairly new (added in Linux 5.8[1]) so this check
-    // might not work on quite a few kernels and so we have to fallback to not
+    // might not work on quite a few kernels and so we have to fallback to
+    // parsing /proc/self/fdinfo (which is theoretically racy if we do not have
+    // a safe ProcfsHandle to use).
+    //
     // checking the mount ID (removing some protections).
     //
     // In theory, name_to_handle_at(2) also lets us get the mount of a
@@ -359,26 +369,75 @@ pub(crate) fn fetch_mnt_id(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<O
     const STATX_MNT_ID_UNIQUE: StatxFlags = StatxFlags::from_bits_retain(0x4000);
     let want_mask = StatxFlags::MNT_ID | STATX_MNT_ID_UNIQUE;
 
-    match syscalls::statx(dirfd, path, want_mask) {
+    let mnt_id = match syscalls::statx(dirfd, path, want_mask) {
         Ok(stx) => {
             let got_mask = StatxFlags::from_bits_retain(stx.stx_mask);
-            Ok(if got_mask.intersects(want_mask) {
+            if got_mask.intersects(want_mask) {
                 Some(stx.stx_mnt_id)
             } else {
                 None
-            })
+            }
         }
         Err(err) => match err.root_cause().raw_os_error() {
             // We have to handle STATX_MNT_ID not being supported on pre-5.8
             // kernels, so treat an ENOSYS or EINVAL the same so that we can
             // work on pre-4.11 (pre-statx) kernels as well.
-            Some(libc::ENOSYS) | Some(libc::EINVAL) => Ok(None),
+            Some(libc::ENOSYS) | Some(libc::EINVAL) => None,
             _ => Err(ErrorImpl::RawOsError {
                 operation: "check mnt_id of filesystem".into(),
                 source: err,
             })?,
         },
     }
+    // Kind of silly intermediate Result<_, Error> type so that we can use
+    // Result::or_else.
+    // TODO: In principle we could remove this once result_flattening is
+    // stabilised...
+    .ok_or_else(|| {
+        ErrorImpl::NotSupported {
+            feature: "STATX_MNT_ID".into(),
+        }
+        .into()
+    })
+    .or_else(|_: Error| -> Result<_, Error> {
+        // openat doesn't support O_EMPTYPATH, so if we are operating on "" we
+        // should reuse the dirfd directly.
+        let file = if path.as_os_str().is_empty() {
+            MaybeOwnedFd::BorrowedFd(dirfd)
+        } else {
+            MaybeOwnedFd::OwnedFd(syscalls::openat(dirfd, path, OpenFlags::O_PATH, 0).map_err(
+                |err| ErrorImpl::RawOsError {
+                    operation: "open target file for mnt_id check".into(),
+                    source: err,
+                },
+            )?)
+        };
+        let file = file.as_fd();
+
+        match file
+            .get_fdinfo_field_unchecked(proc_rootfd, "mnt_id")
+            .map_err(|err| (err.kind(), err))
+        {
+            Ok(Some(mnt_id)) => Ok(mnt_id),
+            // "mnt_id" *must* exist as a field -- make sure we return a
+            // SafetyViolation here if it is missing or an invalid value
+            // (InternalError), otherwise an attacker could silence this check
+            // by creating a "mnt_id"-less fdinfo.
+            // TODO: Should we actually match for ErrorImpl::ParseIntError here?
+            Ok(None) | Err((ErrorKind::InternalError, _)) => Err(ErrorImpl::SafetyViolation {
+                description: format!(
+                    r#"fd {:?} has a fake fdinfo: invalid or missing "mnt_id" field"#,
+                    file.as_raw_fd(),
+                )
+                .into(),
+            }
+            .into()),
+            // Pass through any other errors.
+            Err((_, err)) => Err(err),
+        }
+    })?;
+
+    Ok(mnt_id)
 }
 
 #[cfg(test)]
