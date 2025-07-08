@@ -29,18 +29,18 @@ pub(in crate::tests) trait HandleImpl: AsFd + std::fmt::Debug + Sized {
     type Error: ErrorImpl;
 
     // NOTE: We return Self::Cloned so that we can share types with HandleRef.
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned;
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self::Cloned;
 
     fn try_clone(&self) -> Result<Self::Cloned, anyhow::Error>;
 
-    fn reopen<Fd: Into<OpenFlags>>(&self, flags: Fd) -> Result<File, Self::Error>;
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Self::Error>;
 }
 
 impl HandleImpl for Handle {
     type Cloned = Handle;
     type Error = Error;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self::Cloned {
         Self::Cloned::from_fd(fd)
     }
 
@@ -48,7 +48,7 @@ impl HandleImpl for Handle {
         self.as_ref().try_clone().map_err(From::from)
     }
 
-    fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Self::Error> {
         self.as_ref().reopen(flags)
     }
 }
@@ -57,7 +57,7 @@ impl HandleImpl for &Handle {
     type Cloned = Handle;
     type Error = Error;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self::Cloned {
         Self::Cloned::from_fd(fd)
     }
 
@@ -65,7 +65,7 @@ impl HandleImpl for &Handle {
         Handle::try_clone(self).map_err(From::from)
     }
 
-    fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Self::Error> {
         Handle::reopen(self, flags)
     }
 }
@@ -74,7 +74,7 @@ impl HandleImpl for HandleRef<'_> {
     type Cloned = Handle;
     type Error = Error;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self::Cloned {
         Self::Cloned::from_fd(fd)
     }
 
@@ -82,7 +82,7 @@ impl HandleImpl for HandleRef<'_> {
         self.try_clone().map_err(From::from)
     }
 
-    fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Self::Error> {
         self.reopen(flags)
     }
 }
@@ -91,7 +91,7 @@ impl HandleImpl for &HandleRef<'_> {
     type Cloned = Handle;
     type Error = Error;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self::Cloned {
         Self::Cloned::from_fd(fd)
     }
 
@@ -99,7 +99,7 @@ impl HandleImpl for &HandleRef<'_> {
         HandleRef::try_clone(self).map_err(From::from)
     }
 
-    fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Self::Error> {
         HandleRef::reopen(self, flags)
     }
 }

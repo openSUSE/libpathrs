@@ -54,7 +54,7 @@ pub struct Handle {
 impl Handle {
     /// Wrap an [`OwnedFd`] into a [`Handle`].
     #[inline]
-    pub fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    pub fn from_fd(fd: impl Into<OwnedFd>) -> Self {
         Self { inner: fd.into() }
     }
 
@@ -95,7 +95,7 @@ impl Handle {
     /// [`Root::create`]: crate::Root::create
     #[doc(alias = "pathrs_reopen")]
     #[inline]
-    pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
+    pub fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Error> {
         self.as_ref().reopen(flags)
     }
 }
@@ -195,7 +195,7 @@ impl HandleRef<'_> {
     ///
     /// [`Root::create`]: crate::Root::create
     #[doc(alias = "pathrs_reopen")]
-    pub fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Error> {
+    pub fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Error> {
         self.inner
             .reopen(&ProcfsHandle::new()?, flags.into())
             .map(File::from)

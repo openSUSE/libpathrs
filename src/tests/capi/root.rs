@@ -46,14 +46,14 @@ pub(in crate::tests) struct CapiRoot {
 }
 
 impl CapiRoot {
-    pub(in crate::tests) fn open<P: AsRef<Path>>(path: P) -> Result<Self, CapiError> {
+    pub(in crate::tests) fn open(path: impl AsRef<Path>) -> Result<Self, CapiError> {
         let path = capi_utils::path_to_cstring(path);
 
         capi_utils::call_capi_fd(|| unsafe { capi::core::pathrs_open_root(path.as_ptr()) })
             .map(Self::from_fd)
     }
 
-    pub(in crate::tests) fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    pub(in crate::tests) fn from_fd(fd: impl Into<OwnedFd>) -> Self {
         Self { inner: fd.into() }
     }
 
@@ -61,7 +61,7 @@ impl CapiRoot {
         Ok(Self::from_fd(self.inner.try_clone()?))
     }
 
-    fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<CapiHandle, CapiError> {
+    fn resolve(&self, path: impl AsRef<Path>) -> Result<CapiHandle, CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
@@ -71,7 +71,7 @@ impl CapiRoot {
         .map(CapiHandle::from_fd)
     }
 
-    fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<CapiHandle, CapiError> {
+    fn resolve_nofollow(&self, path: impl AsRef<Path>) -> Result<CapiHandle, CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
@@ -81,10 +81,10 @@ impl CapiRoot {
         .map(CapiHandle::from_fd)
     }
 
-    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open_subpath(
         &self,
-        path: P,
-        flags: F,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
@@ -96,7 +96,7 @@ impl CapiRoot {
         .map(From::from)
     }
 
-    fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, CapiError> {
+    fn readlink(&self, path: impl AsRef<Path>) -> Result<PathBuf, CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
@@ -105,7 +105,7 @@ impl CapiRoot {
         })
     }
 
-    fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), CapiError> {
+    fn create(&self, path: impl AsRef<Path>, inode_type: &InodeType) -> Result<(), CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
@@ -168,14 +168,15 @@ impl CapiRoot {
         })
     }
 
-    fn create_file<P: AsRef<Path>>(
+    fn create_file(
         &self,
-        path: P,
-        flags: OpenFlags,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
         perm: &Permissions,
     ) -> Result<File, CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
+        let flags = flags.into();
 
         capi_utils::call_capi_fd(|| unsafe {
             capi::core::pathrs_inroot_creat(
@@ -188,9 +189,9 @@ impl CapiRoot {
         .map(File::from)
     }
 
-    fn mkdir_all<P: AsRef<Path>>(
+    fn mkdir_all(
         &self,
-        path: P,
+        path: impl AsRef<Path>,
         perm: &Permissions,
     ) -> Result<CapiHandle, CapiError> {
         let root_fd = self.inner.as_fd();
@@ -202,7 +203,7 @@ impl CapiRoot {
         .map(CapiHandle::from_fd)
     }
 
-    fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), CapiError> {
+    fn remove_dir(&self, path: impl AsRef<Path>) -> Result<(), CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
@@ -211,7 +212,7 @@ impl CapiRoot {
         })
     }
 
-    fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), CapiError> {
+    fn remove_file(&self, path: impl AsRef<Path>) -> Result<(), CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
@@ -220,7 +221,7 @@ impl CapiRoot {
         })
     }
 
-    fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), CapiError> {
+    fn remove_all(&self, path: impl AsRef<Path>) -> Result<(), CapiError> {
         let root_fd = self.inner.as_fd();
         let path = capi_utils::path_to_cstring(path);
 
@@ -229,10 +230,10 @@ impl CapiRoot {
         })
     }
 
-    fn rename<P: AsRef<Path>>(
+    fn rename(
         &self,
-        source: P,
-        destination: P,
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
         rflags: RenameFlags,
     ) -> Result<(), CapiError> {
         let root_fd = self.inner.as_fd();
@@ -269,7 +270,7 @@ impl RootImpl for CapiRoot {
     // <https://github.com/dtolnay/anyhow/issues/25>
     type Error = CapiError;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>, resolver: Resolver) -> Self::Cloned {
         assert_eq!(
             resolver,
             Resolver::default(),
@@ -286,65 +287,65 @@ impl RootImpl for CapiRoot {
         self.try_clone()
     }
 
-    fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
+    fn resolve(&self, path: impl AsRef<Path>) -> Result<Self::Handle, Self::Error> {
         self.resolve(path)
     }
 
-    fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
+    fn resolve_nofollow(&self, path: impl AsRef<Path>) -> Result<Self::Handle, Self::Error> {
         self.resolve_nofollow(path)
     }
 
-    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open_subpath(
         &self,
-        path: P,
-        flags: F,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error> {
         self.open_subpath(path, flags)
     }
 
-    fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {
+    fn readlink(&self, path: impl AsRef<Path>) -> Result<PathBuf, Self::Error> {
         self.readlink(path)
     }
 
-    fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Self::Error> {
+    fn create(&self, path: impl AsRef<Path>, inode_type: &InodeType) -> Result<(), Self::Error> {
         self.create(path, inode_type)
     }
 
-    fn create_file<P: AsRef<Path>>(
+    fn create_file(
         &self,
-        path: P,
+        path: impl AsRef<Path>,
         flags: OpenFlags,
         perm: &Permissions,
     ) -> Result<File, Self::Error> {
         self.create_file(path, flags, perm)
     }
 
-    fn mkdir_all<P: AsRef<Path>>(
+    fn mkdir_all(
         &self,
-        path: P,
+        path: impl AsRef<Path>,
         perm: &Permissions,
     ) -> Result<Self::Handle, Self::Error> {
         self.mkdir_all(path, perm)
     }
 
-    fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Self::Error> {
+    fn remove_dir(&self, path: impl AsRef<Path>) -> Result<(), Self::Error> {
         self.remove_dir(path)
     }
 
-    fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Self::Error> {
+    fn remove_file(&self, path: impl AsRef<Path>) -> Result<(), Self::Error> {
         self.remove_file(path)
     }
 
-    fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Self::Error> {
+    fn remove_all(&self, path: impl AsRef<Path>) -> Result<(), Self::Error> {
         self.remove_all(path)
     }
 
-    fn rename<P: AsRef<Path>>(
+    fn rename(
         &self,
-        source: P,
-        destination: P,
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
         rflags: RenameFlags,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), CapiError> {
         self.rename(source, destination, rflags)
     }
 }
@@ -356,7 +357,7 @@ impl RootImpl for &CapiRoot {
     // <https://github.com/dtolnay/anyhow/issues/25>
     type Error = CapiError;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd, resolver: Resolver) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>, resolver: Resolver) -> Self::Cloned {
         assert_eq!(
             resolver,
             Resolver::default(),
@@ -373,65 +374,65 @@ impl RootImpl for &CapiRoot {
         CapiRoot::try_clone(self)
     }
 
-    fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
+    fn resolve(&self, path: impl AsRef<Path>) -> Result<Self::Handle, Self::Error> {
         CapiRoot::resolve(self, path)
     }
 
-    fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Self::Handle, Self::Error> {
+    fn resolve_nofollow(&self, path: impl AsRef<Path>) -> Result<Self::Handle, Self::Error> {
         CapiRoot::resolve_nofollow(self, path)
     }
 
-    fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open_subpath(
         &self,
-        path: P,
-        flags: F,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error> {
         CapiRoot::open_subpath(self, path, flags)
     }
 
-    fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Self::Error> {
+    fn readlink(&self, path: impl AsRef<Path>) -> Result<PathBuf, Self::Error> {
         CapiRoot::readlink(self, path)
     }
 
-    fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Self::Error> {
+    fn create(&self, path: impl AsRef<Path>, inode_type: &InodeType) -> Result<(), Self::Error> {
         CapiRoot::create(self, path, inode_type)
     }
 
-    fn create_file<P: AsRef<Path>>(
+    fn create_file(
         &self,
-        path: P,
+        path: impl AsRef<Path>,
         flags: OpenFlags,
         perm: &Permissions,
     ) -> Result<File, Self::Error> {
         CapiRoot::create_file(self, path, flags, perm)
     }
 
-    fn mkdir_all<P: AsRef<Path>>(
+    fn mkdir_all(
         &self,
-        path: P,
+        path: impl AsRef<Path>,
         perm: &Permissions,
     ) -> Result<Self::Handle, Self::Error> {
         CapiRoot::mkdir_all(self, path, perm)
     }
 
-    fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Self::Error> {
+    fn remove_dir(&self, path: impl AsRef<Path>) -> Result<(), Self::Error> {
         CapiRoot::remove_dir(self, path)
     }
 
-    fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Self::Error> {
+    fn remove_file(&self, path: impl AsRef<Path>) -> Result<(), Self::Error> {
         CapiRoot::remove_file(self, path)
     }
 
-    fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Self::Error> {
+    fn remove_all(&self, path: impl AsRef<Path>) -> Result<(), Self::Error> {
         CapiRoot::remove_all(self, path)
     }
 
-    fn rename<P: AsRef<Path>>(
+    fn rename(
         &self,
-        source: P,
-        destination: P,
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
         rflags: RenameFlags,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), CapiError> {
         CapiRoot::rename(self, source, destination, rflags)
     }
 }

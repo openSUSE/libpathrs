@@ -89,6 +89,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   overwhelm the performance overhead of even `fsopen(2)`. It might make sense
   to revisit this in the future -- please open an issue if you can demonstrate
   that the lack of caching causes a measurable performance issue.
+- api: many of the generic type parameters have been replaced with `impl Trait`
+  arguments, in order to make using libpathrs a bit more ergonomic. Unless you
+  were specifically setting the generic types with `::<>` syntax, this change
+  should not affect you.
 
 ### Fixes ###
 - multiarch: we now build correctly on 32-bit architectures as well as

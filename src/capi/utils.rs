@@ -99,8 +99,8 @@ pub(crate) unsafe fn parse_path<'a>(path: *const c_char) -> Result<&'a Path, Err
     Ok(OsStr::from_bytes(bytes).as_ref())
 }
 
-pub(crate) unsafe fn copy_path_into_buffer<P: AsRef<Path>>(
-    path: P,
+pub(crate) unsafe fn copy_path_into_buffer(
+    path: impl AsRef<Path>,
     buf: *mut c_char,
     bufsize: size_t,
 ) -> Result<c_int, Error> {

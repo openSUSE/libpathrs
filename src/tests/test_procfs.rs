@@ -376,9 +376,9 @@ mod utils {
         "/proc/thread-self/fdinfo/",
     ];
 
-    fn try_mount<P: AsRef<Path>>(
+    fn try_mount(
         over_mounts: &mut HashSet<PathBuf>,
-        dst: P,
+        dst: impl AsRef<Path>,
         ty: MountType,
     ) -> Result<(), Error> {
         let dst = dst.as_ref();
@@ -511,11 +511,11 @@ mod utils {
         }
     }
 
-    pub(super) fn check_proc_open<Proc, ProcFn, P: AsRef<Path>, F: Into<OpenFlags>>(
+    pub(super) fn check_proc_open<Proc, ProcFn>(
         proc_fn: ProcFn,
         base: ProcfsBase,
-        path: P,
-        oflags: F,
+        path: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
         are_over_mounts_visible: bool,
         expected: ExpectedResult,
     ) -> Result<(), Error>
@@ -544,11 +544,11 @@ mod utils {
         )
     }
 
-    pub(super) fn check_proc_open_follow<Proc, ProcFn, P: AsRef<Path>, F: Into<OpenFlags>>(
+    pub(super) fn check_proc_open_follow<Proc, ProcFn>(
         proc_fn: ProcFn,
         base: ProcfsBase,
-        path: P,
-        oflags: F,
+        path: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
         are_over_mounts_visible: bool,
         expected: ExpectedResult,
     ) -> Result<(), Error>
@@ -587,10 +587,10 @@ mod utils {
         )
     }
 
-    pub(super) fn check_proc_readlink<Proc, ProcFn, P: AsRef<Path>>(
+    pub(super) fn check_proc_readlink<Proc, ProcFn>(
         proc_fn: ProcFn,
         base: ProcfsBase,
-        path: P,
+        path: impl AsRef<Path>,
         are_over_mounts_visible: bool,
         expected: ExpectedResult,
     ) -> Result<(), Error>

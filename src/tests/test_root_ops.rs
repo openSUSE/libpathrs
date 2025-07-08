@@ -715,9 +715,9 @@ mod utils {
         Ok(R::from_fd(root_fd, root.resolver()))
     }
 
-    pub(super) fn check_root_create<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_create<R: RootImpl>(
         root: R,
-        path: P,
+        path: impl AsRef<Path>,
         inode_type: InodeType,
         expected_result: Result<(&str, RawMode), ErrorKind>,
     ) -> Result<(), Error> {
@@ -785,9 +785,9 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_create_file<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_create_file<R: RootImpl>(
         root: R,
-        path: P,
+        path: impl AsRef<Path>,
         oflags: OpenFlags,
         perm: &Permissions,
         expected_result: Result<&str, ErrorKind>,
@@ -858,9 +858,9 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_open_subpath<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_open_subpath<R: RootImpl>(
         root: R,
-        path: P,
+        path: impl AsRef<Path>,
         oflags: OpenFlags,
         expected_result: Result<&str, ErrorKind>,
     ) -> Result<(), Error> {
@@ -939,9 +939,9 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_remove_dir<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_remove_dir<R: RootImpl>(
         root: R,
-        path: P,
+        path: impl AsRef<Path>,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
         check_root_remove(
@@ -952,9 +952,9 @@ mod utils {
         )
     }
 
-    pub(super) fn check_root_remove_file<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_remove_file<R: RootImpl>(
         root: R,
-        path: P,
+        path: impl AsRef<Path>,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
         check_root_remove(
@@ -965,9 +965,9 @@ mod utils {
         )
     }
 
-    pub(super) fn check_root_remove_all<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_remove_all<R: RootImpl>(
         root: R,
-        path: P,
+        path: impl AsRef<Path>,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
         check_root_remove(
@@ -978,10 +978,10 @@ mod utils {
         )
     }
 
-    pub(super) fn check_root_rename<R: RootImpl, P1: AsRef<Path>, P2: AsRef<Path>>(
+    pub(super) fn check_root_rename<R: RootImpl>(
         root: R,
-        src_path: P1,
-        dst_path: P2,
+        src_path: impl AsRef<Path>,
+        dst_path: impl AsRef<Path>,
         rflags: RenameFlags,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
@@ -1084,9 +1084,9 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_mkdir_all<R: RootImpl, P: AsRef<Path>>(
+    pub(super) fn check_root_mkdir_all<R: RootImpl>(
         root: R,
-        unsafe_path: P,
+        unsafe_path: impl AsRef<Path>,
         perm: Permissions,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
@@ -1175,10 +1175,10 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_mkdir_all_racing<R: RootImpl + Sync, P: AsRef<Path>>(
+    pub(super) fn check_root_mkdir_all_racing<R: RootImpl + Sync>(
         num_threads: usize,
         root: R,
-        unsafe_path: P,
+        unsafe_path: impl AsRef<Path>,
         perm: Permissions,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
@@ -1206,10 +1206,10 @@ mod utils {
         Ok(())
     }
 
-    pub(super) fn check_root_remove_all_racing<R: RootImpl + Sync, P: AsRef<Path>>(
+    pub(super) fn check_root_remove_all_racing<R: RootImpl + Sync>(
         num_threads: usize,
         root: R,
-        unsafe_path: P,
+        unsafe_path: impl AsRef<Path>,
         expected_result: Result<(), ErrorKind>,
     ) -> Result<(), Error> {
         let root = &root;

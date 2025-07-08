@@ -307,9 +307,9 @@ impl<Fd: AsFd + Sized> HotfixRustixFd for Fd {
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn openat_follow<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn openat_follow(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     mut flags: OpenFlags,
     mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<OwnedFd, Error> {
@@ -335,9 +335,9 @@ pub(crate) fn openat_follow<Fd: AsFd, P: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `openat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn openat<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn openat(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     mut flags: OpenFlags,
     mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<OwnedFd, Error> {
@@ -350,7 +350,7 @@ pub(crate) fn openat<Fd: AsFd, P: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `readlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
-pub(crate) fn readlinkat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<PathBuf, Error> {
+pub(crate) fn readlinkat(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<PathBuf, Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
 
@@ -386,9 +386,9 @@ pub(crate) fn readlinkat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `mkdirat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn mkdirat<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn mkdirat(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<(), Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
@@ -410,9 +410,9 @@ pub(crate) fn devmajorminor(dev: Dev) -> (u32, u32) {
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `mknodat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn mknodat<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn mknodat(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     raw_mode: RawMode, // TODO: Should we take rustix::fs::{Mode,FileType} directly?
     dev: Dev,
 ) -> Result<(), Error> {
@@ -440,9 +440,9 @@ pub(crate) fn mknodat<Fd: AsFd, P: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `unlinkat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn unlinkat<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn unlinkat(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     flags: AtFlags,
 ) -> Result<(), Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
@@ -460,11 +460,11 @@ pub(crate) fn unlinkat<Fd: AsFd, P: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `linkat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn linkat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
-    old_dirfd: Fd1,
-    old_path: P1,
-    new_dirfd: Fd2,
-    new_path: P2,
+pub(crate) fn linkat(
+    old_dirfd: impl AsFd,
+    old_path: impl AsRef<Path>,
+    new_dirfd: impl AsFd,
+    new_path: impl AsRef<Path>,
     flags: AtFlags,
 ) -> Result<(), Error> {
     let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
@@ -487,10 +487,10 @@ pub(crate) fn linkat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `symlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
-pub(crate) fn symlinkat<P1: AsRef<Path>, Fd: AsFd, P2: AsRef<Path>>(
-    target: P1,
-    dirfd: Fd,
-    path: P2,
+pub(crate) fn symlinkat(
+    target: impl AsRef<Path>,
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
 ) -> Result<(), Error> {
     let (dirfd, path) = (dirfd.as_fd().hotfix_rustix_fd()?, path.as_ref());
     let target = target.as_ref();
@@ -507,11 +507,11 @@ pub(crate) fn symlinkat<P1: AsRef<Path>, Fd: AsFd, P2: AsRef<Path>>(
 ///
 /// This is needed because Rust doesn't provide a way to access the dirfd
 /// argument of `renameat(2)`. We need the dirfd argument, so we need a wrapper.
-pub(crate) fn renameat<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
-    old_dirfd: Fd1,
-    old_path: P1,
-    new_dirfd: Fd2,
-    new_path: P2,
+pub(crate) fn renameat(
+    old_dirfd: impl AsFd,
+    old_path: impl AsRef<Path>,
+    new_dirfd: impl AsFd,
+    new_path: impl AsRef<Path>,
 ) -> Result<(), Error> {
     let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
     let (new_dirfd, new_path) = (new_dirfd.as_fd().hotfix_rustix_fd()?, new_path.as_ref());
@@ -538,11 +538,11 @@ pub(crate) static RENAME_FLAGS_SUPPORTED: Lazy<bool> = Lazy::new(|| {
 ///
 /// This is needed because Rust doesn't provide any interface for `renameat2(2)`
 /// (especially not an interface for the dirfd).
-pub(crate) fn renameat2<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
-    old_dirfd: Fd1,
-    old_path: P1,
-    new_dirfd: Fd2,
-    new_path: P2,
+pub(crate) fn renameat2(
+    old_dirfd: impl AsFd,
+    old_path: impl AsRef<Path>,
+    new_dirfd: impl AsFd,
+    new_path: impl AsRef<Path>,
     flags: RenameFlags,
 ) -> Result<(), Error> {
     // Use renameat(2) if no flags are specified.
@@ -568,7 +568,7 @@ pub(crate) fn renameat2<Fd1: AsFd, P1: AsRef<Path>, Fd2: AsFd, P2: AsRef<Path>>(
 /// Wrapper for `fstatfs(2)`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatfs(2)`.
-pub(crate) fn fstatfs<Fd: AsFd>(fd: Fd) -> Result<StatFs, Error> {
+pub(crate) fn fstatfs(fd: impl AsFd) -> Result<StatFs, Error> {
     let fd = fd.as_fd().hotfix_rustix_fd()?;
 
     rustix_fs::fstatfs(fd).map_err(|errno| Error::Fstatfs {
@@ -581,7 +581,7 @@ pub(crate) fn fstatfs<Fd: AsFd>(fd: Fd) -> Result<StatFs, Error> {
 /// AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH`.
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatat(2)`.
-pub(crate) fn fstatat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<Stat, Error> {
+pub(crate) fn fstatat(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<Stat, Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
     let path = path.as_ref();
     let flags = AtFlags::NO_AUTOMOUNT | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
@@ -594,9 +594,9 @@ pub(crate) fn fstatat<Fd: AsFd, P: AsRef<Path>>(dirfd: Fd, path: P) -> Result<St
     })
 }
 
-pub(crate) fn statx<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn statx(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     mask: StatxFlags,
 ) -> Result<Statx, Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
@@ -675,9 +675,9 @@ impl fmt::Display for OpenHow {
 /// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
 // NOTE: rustix's openat2 wrapper is not extensible-friendly so we use our own
 // for now. See <https://github.com/bytecodealliance/rustix/issues/1186>.
-pub(crate) fn openat2_follow<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn openat2_follow(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     mut how: OpenHow,
 ) -> Result<OwnedFd, Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
@@ -722,9 +722,9 @@ pub(crate) fn openat2_follow<Fd: AsFd, P: AsRef<Path>>(
 
 /// Wrapper for `openat2(2)` which auto-sets `O_CLOEXEC | O_NOCTTY |
 /// O_NOFOLLOW`.
-pub(crate) fn openat2<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn openat2(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     mut how: OpenHow,
 ) -> Result<OwnedFd, Error> {
     how.flags |= libc::O_NOFOLLOW as u64;
@@ -756,9 +756,7 @@ pub(crate) fn getcwd() -> Result<PathBuf, anyhow::Error> {
     Ok(OsStr::from_bytes(rustix_process::getcwd(buffer)?.to_bytes()).into())
 }
 
-pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsOpenFlags) -> Result<OwnedFd, Error> {
-    let fstype = fstype.as_ref();
-
+pub(crate) fn fsopen(fstype: &str, flags: FsOpenFlags) -> Result<OwnedFd, Error> {
     rustix_mount::fsopen(fstype, flags).map_err(|errno| Error::Fsopen {
         fstype: fstype.into(),
         flags,
@@ -766,14 +764,8 @@ pub(crate) fn fsopen<S: AsRef<str>>(fstype: S, flags: FsOpenFlags) -> Result<Own
     })
 }
 
-pub(crate) fn fsconfig_set_string<Fd: AsFd, K: AsRef<str>, V: AsRef<str>>(
-    sfd: Fd,
-    key: K,
-    value: V,
-) -> Result<(), Error> {
+pub(crate) fn fsconfig_set_string(sfd: impl AsFd, key: &str, value: &str) -> Result<(), Error> {
     let sfd = sfd.as_fd().hotfix_rustix_fd()?;
-    let key = key.as_ref();
-    let value = value.as_ref();
 
     rustix_mount::fsconfig_set_string(sfd, key, value).map_err(|errno| Error::FsconfigSetString {
         sfd: sfd.into(),
@@ -783,7 +775,7 @@ pub(crate) fn fsconfig_set_string<Fd: AsFd, K: AsRef<str>, V: AsRef<str>>(
     })
 }
 
-pub(crate) fn fsconfig_create<Fd: AsFd>(sfd: Fd) -> Result<(), Error> {
+pub(crate) fn fsconfig_create(sfd: impl AsFd) -> Result<(), Error> {
     let sfd = sfd.as_fd().hotfix_rustix_fd()?;
 
     rustix_mount::fsconfig_create(sfd).map_err(|errno| Error::FsconfigCreate {
@@ -792,8 +784,8 @@ pub(crate) fn fsconfig_create<Fd: AsFd>(sfd: Fd) -> Result<(), Error> {
     })
 }
 
-pub(crate) fn fsmount<Fd: AsFd>(
-    sfd: Fd,
+pub(crate) fn fsmount(
+    sfd: impl AsFd,
     flags: FsMountFlags,
     mount_attrs: MountAttrFlags,
 ) -> Result<OwnedFd, Error> {
@@ -807,9 +799,9 @@ pub(crate) fn fsmount<Fd: AsFd>(
     })
 }
 
-pub(crate) fn open_tree<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
+pub(crate) fn open_tree(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
     flags: OpenTreeFlags,
 ) -> Result<OwnedFd, Error> {
     let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;

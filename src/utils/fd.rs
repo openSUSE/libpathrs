@@ -254,10 +254,7 @@ impl<Fd: AsFd> FdExt for Fd {
     }
 }
 
-pub(crate) fn fetch_mnt_id<Fd: AsFd, P: AsRef<Path>>(
-    dirfd: Fd,
-    path: P,
-) -> Result<Option<u64>, Error> {
+pub(crate) fn fetch_mnt_id(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<Option<u64>, Error> {
     // NOTE: stx.stx_mnt_id is fairly new (added in Linux 5.8[1]) so this check
     // might not work on quite a few kernels and so we have to fallback to not
     // checking the mount ID (removing some protections).
@@ -322,7 +319,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
-    fn check_as_unsafe_path<Fd: AsFd, P: AsRef<Path>>(fd: Fd, want_path: P) -> Result<(), Error> {
+    fn check_as_unsafe_path(fd: impl AsFd, want_path: impl AsRef<Path>) -> Result<(), Error> {
         let want_path = want_path.as_ref();
 
         // Plain /proc/... lookup.

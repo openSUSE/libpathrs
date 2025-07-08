@@ -64,11 +64,11 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 
 /// Ensure that the expected path within the root matches the current fd.
-fn check_current<RootFd: AsFd, Fd: AsFd, P: AsRef<Path>>(
+fn check_current(
     procfs: &ProcfsHandle,
-    current: Fd,
-    root: RootFd,
-    expected: P,
+    current: impl AsFd,
+    root: impl AsFd,
+    expected: impl AsRef<Path>,
 ) -> Result<(), Error> {
     // SAFETY: as_unsafe_path is safe here since we're using it to build a path
     //         for a string-based check as part of a larger safety setup. This
@@ -147,7 +147,7 @@ static PROTECTED_SYMLINKS_SYSCTL: Lazy<u32> = Lazy::new(|| {
 ///
 /// Because we emulate symlink following in userspace, the kernel cannot apply
 /// `fs.protected_symlinks` restrictions so we need to emulate them ourselves.
-fn may_follow_link<DirFd: AsFd, Fd: AsFd>(dir: DirFd, link: Fd) -> Result<(), Error> {
+fn may_follow_link(dir: impl AsFd, link: impl AsFd) -> Result<(), Error> {
     let link = link.as_fd();
 
     // Not exposed by rustix. rustix::fs::StatVfs has a proper bitflags type but
@@ -204,9 +204,9 @@ fn may_follow_link<DirFd: AsFd, Fd: AsFd>(dir: DirFd, link: Fd) -> Result<(), Er
 /// difference is that if `symlink_stack` is `true`, the returned paths
 // TODO: Make (flags, no_follow_trailing, symlink_stack) a single struct to
 //       avoid possible issues with passing a bool to the wrong argument.
-fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
-    root: Fd,
-    path: P,
+fn do_resolve(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     flags: ResolverFlags,
     no_follow_trailing: bool,
     mut symlink_stack: Option<&mut SymlinkStack<OwnedFd>>,
@@ -493,9 +493,9 @@ fn do_resolve<Fd: AsFd, P: AsRef<Path>>(
 
 /// Resolve as many components as possible in `path` within `root` through
 /// user-space emulation.
-pub(crate) fn resolve_partial<Fd: AsFd, P: AsRef<Path>>(
-    root: Fd,
-    path: P,
+pub(crate) fn resolve_partial(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     flags: ResolverFlags,
     no_follow_trailing: bool,
 ) -> Result<PartialLookup<Rc<OwnedFd>>, Error> {
@@ -539,9 +539,9 @@ pub(crate) fn resolve_partial<Fd: AsFd, P: AsRef<Path>>(
 }
 
 /// Resolve `path` within `root` through user-space emulation.
-pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
-    root: Fd,
-    path: P,
+pub(crate) fn resolve(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     flags: ResolverFlags,
     no_follow_trailing: bool,
 ) -> Result<Handle, Error> {

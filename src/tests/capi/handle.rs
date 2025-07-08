@@ -37,7 +37,7 @@ pub struct CapiHandle {
 }
 
 impl CapiHandle {
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self {
         Self { inner: fd.into() }
     }
 
@@ -45,7 +45,7 @@ impl CapiHandle {
         Ok(Self::from_fd(self.inner.try_clone()?))
     }
 
-    fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, CapiError> {
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, CapiError> {
         let fd = self.inner.as_fd();
         let flags = flags.into();
 
@@ -70,7 +70,7 @@ impl HandleImpl for CapiHandle {
     type Cloned = CapiHandle;
     type Error = CapiError;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self::Cloned {
         Self::Cloned::from_fd(fd)
     }
 
@@ -78,7 +78,7 @@ impl HandleImpl for CapiHandle {
         self.try_clone()
     }
 
-    fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Self::Error> {
         self.reopen(flags)
     }
 }
@@ -87,7 +87,7 @@ impl HandleImpl for &CapiHandle {
     type Cloned = CapiHandle;
     type Error = CapiError;
 
-    fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self::Cloned {
+    fn from_fd(fd: impl Into<OwnedFd>) -> Self::Cloned {
         Self::Cloned::from_fd(fd)
     }
 
@@ -95,7 +95,7 @@ impl HandleImpl for &CapiHandle {
         CapiHandle::try_clone(self)
     }
 
-    fn reopen<F: Into<OpenFlags>>(&self, flags: F) -> Result<File, Self::Error> {
+    fn reopen(&self, flags: impl Into<OpenFlags>) -> Result<File, Self::Error> {
         CapiHandle::reopen(self, flags)
     }
 }

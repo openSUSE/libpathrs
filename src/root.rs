@@ -157,7 +157,7 @@ impl Root {
     /// fully-resolved pathname with no symlink components. This restriction
     /// might be relaxed in the future.
     #[doc(alias = "pathrs_open_root")]
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let file = syscalls::openat(
             syscalls::AT_FDCWD,
             path,
@@ -179,7 +179,7 @@ impl Root {
     /// The configuration is set to the system default and should be configured
     /// prior to usage, if appropriate.
     #[inline]
-    pub fn from_fd<Fd: Into<OwnedFd>>(fd: Fd) -> Self {
+    pub fn from_fd(fd: impl Into<OwnedFd>) -> Self {
         Self {
             inner: fd.into(),
             resolver: Default::default(),
@@ -273,7 +273,7 @@ impl Root {
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_resolve")]
     #[inline]
-    pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+    pub fn resolve(&self, path: impl AsRef<Path>) -> Result<Handle, Error> {
         self.as_ref().resolve(path)
     }
 
@@ -288,7 +288,7 @@ impl Root {
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_resolve_nofollow")]
     #[inline]
-    pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+    pub fn resolve_nofollow(&self, path: impl AsRef<Path>) -> Result<Handle, Error> {
         self.as_ref().resolve_nofollow(path)
     }
 
@@ -318,10 +318,10 @@ impl Root {
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_open")]
     #[inline]
-    pub fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+    pub fn open_subpath(
         &self,
-        path: P,
-        flags: F,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Error> {
         self.as_ref().open_subpath(path, flags)
     }
@@ -339,7 +339,7 @@ impl Root {
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_readlink")]
     #[inline]
-    pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
+    pub fn readlink(&self, path: impl AsRef<Path>) -> Result<PathBuf, Error> {
         self.as_ref().readlink(path)
     }
 
@@ -355,7 +355,7 @@ impl Root {
     #[doc(alias = "pathrs_inroot_symlink")]
     #[doc(alias = "pathrs_inroot_hardlink")]
     #[inline]
-    pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
+    pub fn create(&self, path: impl AsRef<Path>, inode_type: &InodeType) -> Result<(), Error> {
         self.as_ref().create(path, inode_type)
     }
 
@@ -386,10 +386,10 @@ impl Root {
     #[doc(alias = "pathrs_inroot_creat")]
     #[doc(alias = "pathrs_inroot_create")]
     #[inline]
-    pub fn create_file<P: AsRef<Path>>(
+    pub fn create_file(
         &self,
-        path: P,
-        flags: OpenFlags,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
         perm: &Permissions,
     ) -> Result<File, Error> {
         self.as_ref().create_file(path, flags, perm)
@@ -423,7 +423,7 @@ impl Root {
     /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
     #[doc(alias = "pathrs_inroot_mkdir_all")]
     #[inline]
-    pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
+    pub fn mkdir_all(&self, path: impl AsRef<Path>, perm: &Permissions) -> Result<Handle, Error> {
         self.as_ref().mkdir_all(path, perm)
     }
 
@@ -442,7 +442,7 @@ impl Root {
     /// [`remove_all`]: Self::remove_all
     #[doc(alias = "pathrs_inroot_rmdir")]
     #[inline]
-    pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn remove_dir(&self, path: impl AsRef<Path>) -> Result<(), Error> {
         self.as_ref().remove_dir(path)
     }
 
@@ -462,7 +462,7 @@ impl Root {
     /// [`remove_all`]: Self::remove_all
     #[doc(alias = "pathrs_inroot_unlink")]
     #[inline]
-    pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn remove_file(&self, path: impl AsRef<Path>) -> Result<(), Error> {
         self.as_ref().remove_file(path)
     }
 
@@ -483,7 +483,7 @@ impl Root {
     /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
     #[doc(alias = "pathrs_inroot_remove_all")]
     #[inline]
-    pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn remove_all(&self, path: impl AsRef<Path>) -> Result<(), Error> {
         self.as_ref().remove_all(path)
     }
 
@@ -497,10 +497,10 @@ impl Root {
     ///
     /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
     #[doc(alias = "pathrs_inroot_rename")]
-    pub fn rename<P: AsRef<Path>>(
+    pub fn rename(
         &self,
-        source: P,
-        destination: P,
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
         rflags: RenameFlags,
     ) -> Result<(), Error> {
         self.as_ref().rename(source, destination, rflags)
@@ -697,7 +697,7 @@ impl RootRef<'_> {
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_resolve")]
     #[inline]
-    pub fn resolve<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+    pub fn resolve(&self, path: impl AsRef<Path>) -> Result<Handle, Error> {
         self.resolver.resolve(self, path, false)
     }
 
@@ -712,7 +712,7 @@ impl RootRef<'_> {
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_resolve_nofollow")]
     #[inline]
-    pub fn resolve_nofollow<P: AsRef<Path>>(&self, path: P) -> Result<Handle, Error> {
+    pub fn resolve_nofollow(&self, path: impl AsRef<Path>) -> Result<Handle, Error> {
         self.resolver.resolve(self, path, true)
     }
 
@@ -742,10 +742,10 @@ impl RootRef<'_> {
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_open")]
     #[inline]
-    pub fn open_subpath<P: AsRef<Path>, F: Into<OpenFlags>>(
+    pub fn open_subpath(
         &self,
-        path: P,
-        flags: F,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Error> {
         self.resolver.open(self, path, flags)
     }
@@ -836,7 +836,7 @@ impl RootRef<'_> {
     /// [`resolve`]: Self::resolve
     /// [`resolve_nofollow`]: Self::resolve_nofollow
     #[doc(alias = "pathrs_inroot_readlink")]
-    pub fn readlink<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf, Error> {
+    pub fn readlink(&self, path: impl AsRef<Path>) -> Result<PathBuf, Error> {
         let link = self
             .resolve_nofollow(path)
             .wrap("resolve symlink O_NOFOLLOW for readlink")?;
@@ -860,7 +860,7 @@ impl RootRef<'_> {
     #[doc(alias = "pathrs_inroot_mknod")]
     #[doc(alias = "pathrs_inroot_symlink")]
     #[doc(alias = "pathrs_inroot_hardlink")]
-    pub fn create<P: AsRef<Path>>(&self, path: P, inode_type: &InodeType) -> Result<(), Error> {
+    pub fn create(&self, path: impl AsRef<Path>, inode_type: &InodeType) -> Result<(), Error> {
         // The path doesn't exist yet, so we need to get a safe reference to the
         // parent and just operate on the final (slashless) component.
         let (dir, name, trailing_slash) = self
@@ -952,12 +952,14 @@ impl RootRef<'_> {
     /// [`O_CREAT`]: http://man7.org/linux/man-pages/man2/open.2.html
     #[doc(alias = "pathrs_inroot_creat")]
     #[doc(alias = "pathrs_inroot_create")]
-    pub fn create_file<P: AsRef<Path>>(
+    pub fn create_file(
         &self,
-        path: P,
-        mut flags: OpenFlags,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
         perm: &Permissions,
     ) -> Result<File, Error> {
+        let mut flags = flags.into();
+
         // The path doesn't exist yet, so we need to get a safe reference to the
         // parent and just operate on the final (slashless) component.
         let (dir, name, trailing_slash) = self
@@ -1015,7 +1017,7 @@ impl RootRef<'_> {
     ///
     /// [`os.MkdirAll`]: https://pkg.go.dev/os#MkdirAll
     #[doc(alias = "pathrs_inroot_mkdir_all")]
-    pub fn mkdir_all<P: AsRef<Path>>(&self, path: P, perm: &Permissions) -> Result<Handle, Error> {
+    pub fn mkdir_all(&self, path: impl AsRef<Path>, perm: &Permissions) -> Result<Handle, Error> {
         if perm.mode() & !0o7777 != 0 {
             Err(ErrorImpl::InvalidArgument {
                 name: "perm".into(),
@@ -1204,7 +1206,7 @@ impl RootRef<'_> {
     /// [`remove_all`]: Self::remove_all
     #[doc(alias = "pathrs_inroot_rmdir")]
     #[inline]
-    pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn remove_dir(&self, path: impl AsRef<Path>) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Directory)
     }
 
@@ -1224,7 +1226,7 @@ impl RootRef<'_> {
     /// [`remove_all`]: Self::remove_all
     #[doc(alias = "pathrs_inroot_unlink")]
     #[inline]
-    pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn remove_file(&self, path: impl AsRef<Path>) -> Result<(), Error> {
         self.remove_inode(path.as_ref(), RemoveInodeType::Regular)
     }
 
@@ -1244,7 +1246,7 @@ impl RootRef<'_> {
     ///
     /// [`os.RemoveAll`]: https://pkg.go.dev/os#RemoveAll
     #[doc(alias = "pathrs_inroot_remove_all")]
-    pub fn remove_all<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn remove_all(&self, path: impl AsRef<Path>) -> Result<(), Error> {
         // Ignore trailing slashes -- we want to support handling trailing
         // slashes for directories, but adding resolve_exists_parent-like
         // verification logic to remove_all() is a bit much. So we just ignore
@@ -1268,10 +1270,10 @@ impl RootRef<'_> {
     ///
     /// [`renameat2(2)`]: http://man7.org/linux/man-pages/man2/renameat2.2.html
     #[doc(alias = "pathrs_inroot_rename")]
-    pub fn rename<P: AsRef<Path>>(
+    pub fn rename(
         &self,
-        source: P,
-        destination: P,
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
         rflags: RenameFlags,
     ) -> Result<(), Error> {
         // renameat2(2) doesn't let us rename paths using AT_EMPTY_PATH handles.

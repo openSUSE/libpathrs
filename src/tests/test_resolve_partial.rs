@@ -744,9 +744,9 @@ mod utils {
         })
     }
 
-    pub(super) fn check_root_resolve_partial<P: AsRef<Path>>(
+    pub(super) fn check_root_resolve_partial(
         root: &Root,
-        unsafe_path: P,
+        unsafe_path: impl AsRef<Path>,
         no_follow_trailing: bool,
         expected: Result<PartialLookup<LookupResult, ErrorKind>, ErrorKind>,
     ) -> Result<(), Error> {

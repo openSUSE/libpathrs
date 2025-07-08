@@ -39,11 +39,11 @@ use std::{
 pub struct CapiProcfsHandle;
 
 impl CapiProcfsHandle {
-    fn open_follow<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open_follow(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        oflags: F,
+        subpath: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
     ) -> Result<File, CapiError> {
         let base: CProcfsBase = base.into();
         let subpath = capi_utils::path_to_cstring(subpath);
@@ -55,17 +55,17 @@ impl CapiProcfsHandle {
         .map(File::from)
     }
 
-    fn open<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        oflags: F,
+        subpath: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
     ) -> Result<File, CapiError> {
         // The C API exposes ProcfsHandle::open using O_NOFOLLOW.
         self.open_follow(base, subpath, oflags.into() | OpenFlags::O_NOFOLLOW)
     }
 
-    fn readlink<P: AsRef<Path>>(&self, base: ProcfsBase, subpath: P) -> Result<PathBuf, CapiError> {
+    fn readlink(&self, base: ProcfsBase, subpath: impl AsRef<Path>) -> Result<PathBuf, CapiError> {
         let base: CProcfsBase = base.into();
         let subpath = capi_utils::path_to_cstring(subpath);
 
@@ -78,28 +78,28 @@ impl CapiProcfsHandle {
 impl ProcfsHandleImpl for CapiProcfsHandle {
     type Error = CapiError;
 
-    fn open_follow<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open_follow(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        flags: F,
+        subpath: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error> {
-        self.open_follow(base, subpath, flags)
+        self.open_follow(base, subpath, oflags)
     }
 
-    fn open<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        flags: F,
+        subpath: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error> {
-        self.open(base, subpath, flags)
+        self.open(base, subpath, oflags)
     }
 
-    fn readlink<P: AsRef<Path>>(
+    fn readlink(
         &self,
         base: ProcfsBase,
-        subpath: P,
+        subpath: impl AsRef<Path>,
     ) -> Result<PathBuf, Self::Error> {
         self.readlink(base, subpath)
     }

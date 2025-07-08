@@ -67,10 +67,10 @@ impl Default for ProcfsResolver {
 }
 
 impl ProcfsResolver {
-    pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
+    pub(crate) fn resolve(
         &self,
-        root: Fd,
-        path: P,
+        root: impl AsFd,
+        path: impl AsRef<Path>,
         oflags: OpenFlags,
         rflags: ResolverFlags,
     ) -> Result<OwnedFd, Error> {
@@ -99,9 +99,9 @@ impl ProcfsResolver {
 /// [`openat2`][openat2.2]-based implementation of [`ProcfsResolver`].
 ///
 /// [openat2.2]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
-fn openat2_resolve<Fd: AsFd, P: AsRef<Path>>(
-    root: Fd,
-    path: P,
+fn openat2_resolve(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     oflags: OpenFlags,
     rflags: ResolverFlags,
 ) -> Result<OwnedFd, Error> {
@@ -135,9 +135,9 @@ fn openat2_resolve<Fd: AsFd, P: AsRef<Path>>(
 }
 
 /// `O_PATH`-based implementation of [`ProcfsResolver`].
-fn opath_resolve<Fd: AsFd, P: AsRef<Path>>(
-    root: Fd,
-    path: P,
+fn opath_resolve(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     oflags: OpenFlags,
     rflags: ResolverFlags,
 ) -> Result<OwnedFd, Error> {

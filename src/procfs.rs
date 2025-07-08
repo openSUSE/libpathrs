@@ -407,11 +407,11 @@ impl ProcfsHandle {
     /// a magic-link to be a path component (ie. `/proc/self/root/etc/passwd`).
     /// This method *only* permits *trailing* symlinks.
     #[doc(alias = "pathrs_proc_open")]
-    pub fn open_follow<P: AsRef<Path>, F: Into<OpenFlags>>(
+    pub fn open_follow(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        oflags: F,
+        subpath: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
     ) -> Result<File, Error> {
         let subpath = subpath.as_ref();
         let mut oflags = oflags.into();
@@ -512,11 +512,11 @@ impl ProcfsHandle {
     ///
     /// [`openat2(2)`]: https://www.man7.org/linux/man-pages/man2/openat2.2.html
     #[doc(alias = "pathrs_proc_open")]
-    pub fn open<P: AsRef<Path>, F: Into<OpenFlags>>(
+    pub fn open(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        oflags: F,
+        subpath: impl AsRef<Path>,
+        oflags: impl Into<OpenFlags>,
     ) -> Result<File, Error> {
         let mut oflags = oflags.into();
         // Force-set O_NOFOLLOW.
@@ -559,7 +559,7 @@ impl ProcfsHandle {
     ///
     /// [`readlinkat(2)`]: https://www.man7.org/linux/man-pages/man2/readlinkat.2.html
     #[doc(alias = "pathrs_proc_readlink")]
-    pub fn readlink<P: AsRef<Path>>(&self, base: ProcfsBase, subpath: P) -> Result<PathBuf, Error> {
+    pub fn readlink(&self, base: ProcfsBase, subpath: impl AsRef<Path>) -> Result<PathBuf, Error> {
         let link = self.open(base, subpath, OpenFlags::O_PATH)?;
         syscalls::readlinkat(link, "").map_err(|err| {
             ErrorImpl::RawOsError {
@@ -570,7 +570,7 @@ impl ProcfsHandle {
         })
     }
 
-    fn verify_same_procfs_mnt<Fd: AsFd>(&self, fd: Fd) -> Result<(), Error> {
+    fn verify_same_procfs_mnt(&self, fd: impl AsFd) -> Result<(), Error> {
         // Detect if the file we landed on is from a bind-mount.
         verify_same_mnt(self.mnt_id, &fd, "")?;
         // For pre-5.8 kernels there is no STATX_MNT_ID, so the best we can
@@ -625,7 +625,7 @@ impl ProcfsHandle {
     }
 }
 
-pub(crate) fn verify_is_procfs<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
+pub(crate) fn verify_is_procfs(fd: impl AsFd) -> Result<(), Error> {
     let fs_type = syscalls::fstatfs(fd)
         .map_err(|err| ErrorImpl::RawOsError {
             operation: "fstatfs proc handle".into(),
@@ -645,10 +645,10 @@ pub(crate) fn verify_is_procfs<Fd: AsFd>(fd: Fd) -> Result<(), Error> {
     Ok(())
 }
 
-pub(crate) fn verify_same_mnt<Fd: AsFd, P: AsRef<Path>>(
+pub(crate) fn verify_same_mnt(
     root_mnt_id: Option<u64>,
-    dirfd: Fd,
-    path: P,
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
 ) -> Result<(), Error> {
     let mnt_id = utils::fetch_mnt_id(dirfd, path)?;
     // We the file we landed on a bind-mount / other procfs?
