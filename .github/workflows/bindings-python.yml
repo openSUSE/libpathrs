@@ -166,7 +166,7 @@ jobs:
         with:
           packages-dir: ${{ env.PYTHON_DIST }}
 
-  complete:
+  python-complete:
     if: ${{ ! failure() && ! cancelled() }}
     needs:
       - ruff

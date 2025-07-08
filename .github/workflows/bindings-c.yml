@@ -42,7 +42,7 @@ jobs:
       # Run smoke-tests.
       - run: make -C examples/c smoke-test
 
-  complete:
+  c-complete:
     needs:
       - smoke-test
     runs-on: ubuntu-latest

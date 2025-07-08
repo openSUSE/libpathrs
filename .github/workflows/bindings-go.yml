@@ -97,7 +97,7 @@ jobs:
       # Run smoke-tests.
       - run: make -C examples/go smoke-test
 
-  complete:
+  go-complete:
     needs:
       - lint
       - go-fix

@@ -198,7 +198,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  complete:
+  rust-complete:
     if: ${{ ! failure() && ! cancelled() }}
     needs:
       - codespell
