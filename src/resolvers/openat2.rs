@@ -35,9 +35,9 @@ use std::{
 /// Open `path` within `root` through `openat(2)`.
 ///
 /// This is an optimised version of `resolve(root, path, ...)?.reopen(flags)`.
-pub(crate) fn open<Fd: AsFd, P: AsRef<Path>>(
-    root: Fd,
-    path: P,
+pub(crate) fn open(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     rflags: ResolverFlags,
     oflags: OpenFlags,
 ) -> Result<File, Error> {
@@ -66,9 +66,9 @@ pub(crate) fn open<Fd: AsFd, P: AsRef<Path>>(
 }
 
 /// Resolve `path` within `root` through `openat2(2)`.
-pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
-    root: Fd,
-    path: P,
+pub(crate) fn resolve(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     rflags: ResolverFlags,
     no_follow_trailing: bool,
 ) -> Result<Handle, Error> {
@@ -123,13 +123,15 @@ pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
 
 /// Resolve as many components as possible in `path` within `root` using
 /// `openat2(2)`.
-pub(crate) fn resolve_partial<Fd: AsFd>(
-    root: Fd,
-    path: &Path,
+pub(crate) fn resolve_partial(
+    root: impl AsFd,
+    path: impl AsRef<Path>,
     rflags: ResolverFlags,
     no_follow_trailing: bool,
 ) -> Result<PartialLookup<Handle>, Error> {
     let root = root.as_fd();
+    let path = path.as_ref();
+
     let mut last_error = match resolve(root, path, rflags, no_follow_trailing) {
         Ok(handle) => return Ok(PartialLookup::Complete(handle)),
         Err(err) => err,

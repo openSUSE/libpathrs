@@ -32,52 +32,49 @@ use std::{
 pub(in crate::tests) trait ProcfsHandleImpl: std::fmt::Debug {
     type Error: ErrorImpl;
 
-    fn open_follow<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open_follow(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        flags: F,
+        subpath: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error>;
 
-    fn open<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        flags: F,
+        subpath: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error>;
 
-    fn readlink<P: AsRef<Path>>(
-        &self,
-        base: ProcfsBase,
-        subpath: P,
-    ) -> Result<PathBuf, Self::Error>;
+    fn readlink(&self, base: ProcfsBase, subpath: impl AsRef<Path>)
+        -> Result<PathBuf, Self::Error>;
 }
 
 impl ProcfsHandleImpl for ProcfsHandle {
     type Error = Error;
 
-    fn open_follow<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open_follow(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        flags: F,
+        subpath: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error> {
         self.open_follow(base, subpath, flags)
     }
 
-    fn open<P: AsRef<Path>, F: Into<OpenFlags>>(
+    fn open(
         &self,
         base: ProcfsBase,
-        subpath: P,
-        flags: F,
+        subpath: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Self::Error> {
         self.open(base, subpath, flags)
     }
 
-    fn readlink<P: AsRef<Path>>(
+    fn readlink(
         &self,
         base: ProcfsBase,
-        subpath: P,
+        subpath: impl AsRef<Path>,
     ) -> Result<PathBuf, Self::Error> {
         self.readlink(base, subpath)
     }

@@ -58,7 +58,7 @@ fn are_vfs_flags(flags: MountFlags) -> bool {
         .is_empty()
 }
 
-pub(in crate::tests) fn mount<P: AsRef<Path>>(dst: P, ty: MountType) -> Result<(), Error> {
+pub(in crate::tests) fn mount(dst: impl AsRef<Path>, ty: MountType) -> Result<(), Error> {
     let dst = dst.as_ref();
     let dst_file = syscalls::openat(
         syscalls::AT_FDCWD,

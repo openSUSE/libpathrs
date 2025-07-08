@@ -793,11 +793,11 @@ mod utils {
         Quit,
     }
 
-    pub(super) fn rename_exchange<Fd: AsFd, P1: AsRef<Path>, P2: AsRef<Path>>(
+    pub(super) fn rename_exchange(
         ctl_rx: Receiver<RenameStateMsg>,
-        root: Fd,
-        path1: P1,
-        path2: P2,
+        root: impl AsFd,
+        path1: impl AsRef<Path>,
+        path2: impl AsRef<Path>,
     ) {
         let root = root.as_fd();
         let (path1, path2) = (path1.as_ref(), path2.as_ref());
@@ -837,10 +837,10 @@ mod utils {
         }
     }
 
-    pub(super) fn check_root_race_resolve_partial<P: AsRef<Path>>(
+    pub(super) fn check_root_race_resolve_partial(
         root: &Root,
         ctl_tx: &SyncSender<RenameStateMsg>,
-        unsafe_path: P,
+        unsafe_path: impl AsRef<Path>,
         no_follow_trailing: bool,
         allowed_results: &[Result<PartialLookup<LookupResult, ErrorKind>, ErrorKind>],
     ) -> Result<(), Error> {

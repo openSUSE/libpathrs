@@ -74,7 +74,7 @@ where
     }
 }
 
-pub(in crate::tests) fn check_oflags<Fd: AsFd>(fd: Fd, flags: OpenFlags) -> Result<(), Error> {
+pub(in crate::tests) fn check_oflags(fd: impl AsFd, flags: OpenFlags) -> Result<(), Error> {
     let fd = fd.as_fd();
 
     // Convert to OFlags so we can compare them.

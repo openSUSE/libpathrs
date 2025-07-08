@@ -206,11 +206,11 @@ impl From<PartialLookup<Rc<OwnedFd>>> for PartialLookup<Handle> {
 }
 
 impl Resolver {
-    pub(crate) fn open<Fd: AsFd, P: AsRef<Path>, F: Into<OpenFlags>>(
+    pub(crate) fn open(
         &self,
-        root: Fd,
-        path: P,
-        flags: F,
+        root: impl AsFd,
+        path: impl AsRef<Path>,
+        flags: impl Into<OpenFlags>,
     ) -> Result<File, Error> {
         let flags = flags.into();
 
@@ -272,10 +272,10 @@ impl Resolver {
     }
 
     #[inline]
-    pub(crate) fn resolve<Fd: AsFd, P: AsRef<Path>>(
+    pub(crate) fn resolve(
         &self,
-        root: Fd,
-        path: P,
+        root: impl AsFd,
+        path: impl AsRef<Path>,
         no_follow_trailing: bool,
     ) -> Result<Handle, Error> {
         match self.backend {
@@ -289,10 +289,10 @@ impl Resolver {
     }
 
     #[inline]
-    pub(crate) fn resolve_partial<Fd: AsFd, P: AsRef<Path>>(
+    pub(crate) fn resolve_partial(
         &self,
-        root: Fd,
-        path: P,
+        root: impl AsFd,
+        path: impl AsRef<Path>,
         no_follow_trailing: bool,
     ) -> Result<PartialLookup<Handle>, Error> {
         match self.backend {

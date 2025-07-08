@@ -45,8 +45,9 @@ impl RmdirResultExt for Result<(), Error> {
     }
 }
 
-fn remove_inode<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> {
+fn remove_inode(dirfd: impl AsFd, name: impl AsRef<Path>) -> Result<(), Error> {
     let dirfd = dirfd.as_fd();
+    let name = name.as_ref();
 
     // To ensure we return a useful error, we try both unlink and rmdir and
     // try to avoid returning EISDIR/ENOTDIR if both failed.
@@ -69,8 +70,9 @@ fn remove_inode<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> {
         })
 }
 
-pub(crate) fn remove_all<Fd: AsFd>(dirfd: Fd, name: &Path) -> Result<(), Error> {
+pub(crate) fn remove_all(dirfd: impl AsFd, name: impl AsRef<Path>) -> Result<(), Error> {
     let dirfd = dirfd.as_fd();
+    let name = name.as_ref();
 
     if name.as_os_str().as_bytes().contains(&b'/') {
         Err(ErrorImpl::SafetyViolation {

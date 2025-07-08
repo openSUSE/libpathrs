@@ -548,9 +548,9 @@ mod utils {
         })
     }
 
-    pub(super) fn check_root_resolve<R, H, P: AsRef<Path>>(
+    pub(super) fn check_root_resolve<R, H>(
         root: R,
-        unsafe_path: P,
+        unsafe_path: impl AsRef<Path>,
         no_follow_trailing: bool,
         expected: Result<LookupResult, ErrorKind>,
     ) -> Result<(), Error>

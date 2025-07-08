@@ -108,7 +108,7 @@ fn fetch_error(res: libc::c_int) -> Result<libc::c_int, CapiError> {
     }
 }
 
-pub(in crate::tests) fn path_to_cstring<P: AsRef<Path>>(path: P) -> CString {
+pub(in crate::tests) fn path_to_cstring(path: impl AsRef<Path>) -> CString {
     CString::new(path.as_ref().as_os_str().as_bytes())
         .expect("normal path conversion shouldn't result in spurious nul bytes")
 }
