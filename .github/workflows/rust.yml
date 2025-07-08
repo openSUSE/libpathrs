@@ -91,6 +91,15 @@ jobs:
         run: >-
           cargo build --target=${{ matrix.target }} --release --all-features
 
+  validate-cbindgen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install cbindgen
+        run: cargo install --force cbindgen
+      - run: make validate-cbindgen
+
   rustdoc:
     name: cargo doc
     runs-on: ubuntu-latest
@@ -192,9 +201,11 @@ jobs:
   complete:
     if: ${{ ! failure() && ! cancelled() }}
     needs:
+      - codespell
       - check
       - check-msrv
       - check-cross
+      - validate-cbindgen
       - rustdoc
       - test
       - examples

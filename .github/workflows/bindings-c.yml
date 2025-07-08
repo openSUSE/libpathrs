@@ -29,15 +29,6 @@ on:
 name: bindings-c
 
 jobs:
-  validate-cbindgen:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: install cbindgen
-        run: cargo install --force cbindgen
-      - run: make validate-cbindgen
-
   smoke-test:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +44,6 @@ jobs:
 
   complete:
     needs:
-      - validate-cbindgen
       - smoke-test
     runs-on: ubuntu-latest
     steps:
