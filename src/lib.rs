@@ -123,9 +123,9 @@
 //!
 //! | Feature               | Minimum Kernel Version  | Description | Fallback |
 //! | --------------------- | ----------------------- | ----------- | -------- |
-//! | [`openat2(2)`]        | Linux 5.6 (2020-03-29)  | In-kernel restrictions of path lookup. This is used extensively by `libpathrs` to safely do path lookups. | Userspace emulated path lookups. |
 //! | `/proc/thread-self`   | Linux 3.17 (2014-10-05) | Used when operating on the current thread's `/proc` directory for use with `PATHRS_PROC_THREAD_SELF`. | `/proc/self/task/$tid` is used, but this might not be available in some edge cases so `/proc/self` is used as a final fallback. |
 //! | New Mount API         | Linux 5.2 (2019-07-07)  | Used to create a private procfs handle when operating on `/proc` (with `fsopen(2)` or `open_tree(2)`). | Open a regular handle to `/proc`. This can lead to certain race attacks if the attacker can dynamically create mounts. |
+//! | [`openat2(2)`]        | Linux 5.6 (2020-03-29)  | In-kernel restrictions of path lookup. This is used extensively by `libpathrs` to safely do path lookups. | Userspace emulated path lookups. |
 //! | `STATX_MNT_ID`        | Linux 5.8 (2020-08-02)  | Used to verify whether there are bind-mounts on top of `/proc` that could result in insecure operations. | There is **no fallback**. Not using this protection can lead to fairly trivial attacks if an attacker can configure your mount table. |
 //! | `STATX_MNT_ID_UNIQUE` | Linux 6.8 (2024-03-10)  | Used for the same reason as `STATX_MNT_ID`, but allows us to protect against mount ID recycling. This is effectively a safer version of `STATX_MNT_ID`. | `STATX_MNT_ID` is used (see the `STATX_MNT_ID` fallback if it's not available either). |
 //!
