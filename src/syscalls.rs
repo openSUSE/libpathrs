@@ -58,7 +58,6 @@ use rustix::{
 // SAFETY: AT_FDCWD is always a valid file descriptor.
 pub(crate) const AT_FDCWD: BorrowedFd<'static> = rustix_fs::CWD;
 // SAFETY: BADFD is not a valid file descriptor, but it's not -1.
-#[cfg(test)]
 pub(crate) const BADFD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(-libc::EBADF) };
 
 /// Representation of a file descriptor and its associated path at a given point

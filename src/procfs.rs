@@ -162,9 +162,7 @@ impl ProcfsBase {
             .find(|base| {
                 match proc_root {
                     Some(root) => syscalls::fstatat(root, base),
-                    None => {
-                        syscalls::fstatat(syscalls::AT_FDCWD, PathBuf::from("/proc").join(base))
-                    }
+                    None => syscalls::fstatat(syscalls::BADFD, PathBuf::from("/proc").join(base)),
                 }
                 .is_ok()
             })
@@ -295,7 +293,7 @@ impl ProcfsHandle {
     /// overmounts unless `flags` contains `OpenTreeFlags::AT_RECURSIVE`.
     pub(crate) fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
         syscalls::open_tree(
-            syscalls::AT_FDCWD,
+            syscalls::BADFD,
             "/proc",
             OpenTreeFlags::OPEN_TREE_CLONE | flags,
         )
@@ -315,7 +313,7 @@ impl ProcfsHandle {
     /// This handle is NOT safe against racing attackers and overmounts.
     pub(crate) fn new_unsafe_open() -> Result<Self, Error> {
         syscalls::openat(
-            syscalls::AT_FDCWD,
+            syscalls::BADFD,
             "/proc",
             OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
             0,
