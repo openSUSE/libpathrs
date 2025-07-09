@@ -90,7 +90,7 @@ impl From<&Error> for CError {
         //       <https://github.com/rust-lang/rust/issues/58520>
         let desc = {
             let mut desc = err.to_string();
-            let mut err: &(dyn StdError) = err;
+            let mut err: &dyn StdError = err;
             while let Some(next) = err.source() {
                 desc.push_str(": ");
                 desc.push_str(&next.to_string());
