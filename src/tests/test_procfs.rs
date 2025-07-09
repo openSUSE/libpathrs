@@ -230,8 +230,8 @@ macro_rules! procfs_tests {
 
 procfs_tests! {
     // Non-procfs overmount.
-    tmpfs_dir: open(self, "fdinfo", O_DIRECTORY) => (error: ErrOvermount("/proc/self/fdinfo", ErrorKind::OsError(Some(libc::EXDEV))));
-    tmpfs_dir: open_follow(self, "fdinfo", O_DIRECTORY) => (error: ErrOvermount("/proc/self/fdinfo", ErrorKind::OsError(Some(libc::EXDEV))));
+    tmpfs_dir: open(self, "net", O_DIRECTORY) => (error: ErrOvermount("/proc/self/net", ErrorKind::OsError(Some(libc::EXDEV))));
+    tmpfs_dir: open_follow(self, "net", O_DIRECTORY) => (error: ErrOvermount("/proc/self/net", ErrorKind::OsError(Some(libc::EXDEV))));
     // No overmounts.
     nomount: open(self, "attr/current", O_RDONLY) => (error: Ok);
     nomount: open_follow(self, "attr/current", O_RDONLY) => (error: Ok);
@@ -445,7 +445,7 @@ mod utils {
 
                 try_mount(
                     &mut over_mounts,
-                    prefix.join("fdinfo"),
+                    prefix.join("net"),
                     // Non-procfs mount.
                     MountType::Tmpfs,
                 )?;
