@@ -74,6 +74,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 utils::$with_root_fn(|root_dir: &Path| {
@@ -97,6 +98,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _openat2>]() -> Result<(), Error> {
                 utils::$with_root_fn(|root_dir: &Path| {
@@ -120,6 +122,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 utils::$with_root_fn(|root_dir: &Path| {
@@ -143,6 +146,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<rootref_ $test_name _opath>]() -> Result<(), Error> {
                 utils::$with_root_fn(|root_dir: &Path| {
@@ -173,8 +177,8 @@ macro_rules! resolve_tests {
 
     ([$with_root_fn:ident] $(#[cfg($ignore_meta:meta)])* capi-fn $test_name:ident ($root_var:ident : CapiRoot) $body:block => $expected:expr) => {
         paste::paste! {
-            #[cfg(feature = "capi")]
             #[test]
+            #[cfg(feature = "capi")]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<capi_root_ $test_name>]() -> Result<(), Error> {
                 utils::$with_root_fn(|root_dir: &Path| {

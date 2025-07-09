@@ -48,6 +48,7 @@ macro_rules! procfs_tests {
 
             #[test]
             $(#[$meta])*
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             fn [<procfs_overmounts_ $func_prefix openat2_ $test_name>]() -> Result<(), Error> {
                 if !*syscalls::OPENAT2_IS_SUPPORTED {
                     // skip this test
@@ -68,6 +69,7 @@ macro_rules! procfs_tests {
 
             #[test]
             $(#[$meta])*
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             fn [<procfs_overmounts_ $func_prefix opath_ $test_name>]() -> Result<(), Error> {
                 utils::[<check_proc_ $procfs_op>](
                     || {
@@ -117,21 +119,21 @@ macro_rules! procfs_tests {
 
         procfs_tests! {
             $(#[$meta])*
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            #[cfg_attr(not(feature = "_test_as_root"), ignore, allow(unused_attributes))]
             @rust-fn [<new_fsopen_ $test_name>]
                 { ProcfsHandle::new_fsopen(false) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
             $(#[$meta])*
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            #[cfg_attr(not(feature = "_test_as_root"), ignore, allow(unused_attributes))]
             @rust-fn [<new_fsopen_subset_ $test_name>]
                 { ProcfsHandle::new_fsopen(true) }.$procfs_op($($args)*) => (over_mounts: false, $($tt)*);
         }
 
         procfs_tests! {
             $(#[$meta])*
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            #[cfg_attr(not(feature = "_test_as_root"), ignore, allow(unused_attributes))]
             @rust-fn [<new_open_tree_ $test_name>]
                 {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE)
@@ -140,7 +142,7 @@ macro_rules! procfs_tests {
 
         procfs_tests! {
             $(#[$meta])*
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            #[cfg_attr(not(feature = "_test_as_root"), ignore, allow(unused_attributes))]
             @rust-fn [<new_open_tree_recursive_ $test_name>]
                 {
                     ProcfsHandle::new_open_tree(OpenTreeFlags::OPEN_TREE_CLONE | OpenTreeFlags::AT_RECURSIVE)
@@ -170,7 +172,7 @@ macro_rules! procfs_tests {
     ($(#[cfg($ignore_meta:meta)])* $test_name:ident : readlink (ProcfsBase::$base:ident $(($pid:literal))?, $path:expr ) => ($($tt:tt)*)) => {
         paste::paste! {
             procfs_tests! {
-                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                $(#[cfg_attr(not($ignore_meta), ignore, allow(unused_attributes))])*
                 @impl [<$base:lower $($pid)* _readlink_ $test_name>]
                     procfs.readlink(ProcfsBase::$base $(($pid))*, $path) => ($($tt)*);
             }
@@ -181,7 +183,7 @@ macro_rules! procfs_tests {
     ($(#[cfg($ignore_meta:meta)])* $test_name:ident : open (ProcfsBase::$base:ident $(($pid:literal))?, $path:expr, $($flag:ident)|* ) => ($($tt:tt)*)) => {
         paste::paste! {
             procfs_tests! {
-                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                $(#[cfg_attr(not($ignore_meta), ignore, allow(unused_attributes))])*
                 @impl [<$base:lower $($pid)* _open_ $test_name>]
                     procfs.open(ProcfsBase::$base $(($pid))*, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }
@@ -192,7 +194,7 @@ macro_rules! procfs_tests {
     ($(#[cfg($ignore_meta:meta)])* $test_name:ident : open_follow (ProcfsBase::$base:ident $(($pid:literal))?, $path:expr, $($flag:ident)|* ) => ($($tt:tt)*)) => {
         paste::paste! {
             procfs_tests! {
-                $(#[cfg_attr(not($ignore_meta), ignore)])*
+                $(#[cfg_attr(not($ignore_meta), ignore, allow(unused_attributes))])*
                 @impl [<$base:lower $($pid)* _open_follow_ $test_name>]
                     procfs.open_follow(ProcfsBase::$base $(($pid))*, $path, $(OpenFlags::$flag)|*) => ($($tt)*);
             }

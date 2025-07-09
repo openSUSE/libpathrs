@@ -34,8 +34,8 @@ use anyhow::Error;
 macro_rules! root_op_tests {
     ($(#[$meta:meta])* fn $test_name:ident ($root_var:ident) $body:block) => {
         paste::paste! {
-            $(#[$meta])*
             #[test]
+            $(#[$meta])*
             fn [<root_ $test_name>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let $root_var = Root::open(&root_dir)?;
@@ -43,8 +43,8 @@ macro_rules! root_op_tests {
                 $body
             }
 
-            $(#[$meta])*
             #[test]
+            $(#[$meta])*
             fn [<rootref_ $test_name>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let root = Root::open(&root_dir)?;
@@ -53,8 +53,9 @@ macro_rules! root_op_tests {
                 $body
             }
 
-            $(#[$meta])*
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
+            $(#[$meta])*
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let $root_var = Root::open(&root_dir)?
@@ -67,8 +68,9 @@ macro_rules! root_op_tests {
                 $body
             }
 
-            $(#[$meta])*
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
+            $(#[$meta])*
             fn [<rootref_ $test_name _openat2>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let root = Root::open(&root_dir)?;
@@ -83,8 +85,9 @@ macro_rules! root_op_tests {
                 $body
             }
 
-            $(#[$meta])*
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
+            $(#[$meta])*
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let $root_var = Root::open(&root_dir)?
@@ -98,8 +101,9 @@ macro_rules! root_op_tests {
                 $body
             }
 
-            $(#[$meta])*
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
+            $(#[$meta])*
             fn [<rootref_ $test_name _opath>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let root = Root::open(&root_dir)?;
@@ -115,9 +119,9 @@ macro_rules! root_op_tests {
                 $body
             }
 
-            $(#[$meta])*
-            #[cfg(feature = "capi")]
             #[test]
+            #[cfg(feature = "capi")]
+            $(#[$meta])*
             fn [<capi_root_ $test_name>]() -> Result<(), Error> {
                 let root_dir = tests_common::create_basic_tree()?;
                 let $root_var = capi::CapiRoot::open(&root_dir)?;
@@ -179,7 +183,7 @@ macro_rules! root_op_tests {
     };
     ($(#[cfg($ignore_meta:meta)])* @impl mkblk $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
         root_op_tests!{
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            #[cfg_attr(not(feature = "_test_as_root"), ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::BlockDevice(Permissions::from_mode($mode), libc::makedev($major, $minor))
@@ -188,7 +192,7 @@ macro_rules! root_op_tests {
     };
     ($(#[cfg($ignore_meta:meta)])* @impl mkchar $test_name:ident ($path:expr, $mode:literal, $major:literal, $minor:literal) => $expected_result:expr) => {
         root_op_tests!{
-            #[cfg_attr(not(feature = "_test_as_root"), ignore)]
+            #[cfg_attr(not(feature = "_test_as_root"), ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             @mknod fn $test_name ($path) {
                 InodeType::CharacterDevice(Permissions::from_mode($mode), libc::makedev($major, $minor))
