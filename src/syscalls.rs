@@ -41,7 +41,8 @@ use bitflags::bitflags;
 use once_cell::sync::Lazy;
 use rustix::{
     fs::{
-        self as rustix_fs, AtFlags, Dev, FileType, Mode, RawMode, Stat, StatFs, Statx, StatxFlags,
+        self as rustix_fs, Access, AtFlags, Dev, FileType, Mode, RawMode, Stat, StatFs, Statx,
+        StatxFlags,
     },
     io::Errno,
     mount::{self as rustix_mount, FsMountFlags, FsOpenFlags, MountAttrFlags, OpenTreeFlags},
@@ -108,6 +109,15 @@ pub(crate) enum Error {
     // NOTE: This is temporary until the issue is fixed in rustix.
     #[error("invalid file descriptor {fd} (see <https://github.com/bytecodealliance/rustix/issues/1187> for more details)")]
     InvalidFd { fd: RawFd, source: Errno },
+
+    #[error("accessat({dirfd}, {path:?}, {access:?}, {flags:?})")]
+    Accessat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        access: Access,
+        flags: AtFlags,
+        source: Errno,
+    },
 
     #[error("openat({dirfd}, {path:?}, {flags:?}, 0o{mode:o})")]
     Openat {
@@ -257,6 +267,7 @@ impl Error {
         // XXX: This should probably be a macro...
         *match self {
             Error::InvalidFd { source, .. } => source,
+            Error::Accessat { source, .. } => source,
             Error::Openat { source, .. } => source,
             Error::Openat2 { source, .. } => source,
             Error::Readlinkat { source, .. } => source,
@@ -312,6 +323,25 @@ impl<Fd: AsFd + Sized> CheckRustixFd for Fd {
             }),
         }
     }
+}
+
+/// Wrapper for `faccessat(2)`.
+pub(crate) fn accessat(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
+    access: Access,
+    mut flags: AtFlags,
+) -> Result<(), Error> {
+    let (dirfd, path) = (dirfd.as_fd().check_rustix_fd()?, path.as_ref());
+    flags |= AtFlags::SYMLINK_NOFOLLOW;
+
+    rustix_fs::accessat(dirfd, path, access, flags).map_err(|errno| Error::Accessat {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        flags,
+        access,
+        source: errno,
+    })
 }
 
 /// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.

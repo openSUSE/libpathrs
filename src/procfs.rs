@@ -138,7 +138,6 @@ pub enum ProcfsBase {
 
 impl ProcfsBase {
     pub(crate) fn into_path(self, proc_root: Option<BorrowedFd<'_>>) -> PathBuf {
-        let proc_root = proc_root.as_ref().map(AsFd::as_fd);
         match self {
             Self::ProcRoot => PathBuf::from("."),
             Self::ProcSelf => PathBuf::from("self"),
@@ -161,8 +160,15 @@ impl ProcfsBase {
             // Return the first option that exists in proc_root.
             .find(|base| {
                 match proc_root {
-                    Some(root) => syscalls::fstatat(root, base),
-                    None => syscalls::fstatat(syscalls::BADFD, PathBuf::from("/proc").join(base)),
+                    Some(root) => {
+                        syscalls::accessat(root, base, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
+                    }
+                    None => syscalls::accessat(
+                        syscalls::BADFD,
+                        PathBuf::from("/proc").join(base),
+                        Access::EXISTS,
+                        AtFlags::SYMLINK_NOFOLLOW,
+                    ),
                 }
                 .is_ok()
             })
@@ -610,7 +616,7 @@ impl ProcfsHandle {
         let is_subset = [/* subset=pid */ "stat", /* hidepid=n */ "1"]
             .iter()
             .any(|&subpath| {
-                rustix_fs::accessat(&inner, subpath, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
+                syscalls::accessat(&inner, subpath, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
                     .is_err()
             });
 
