@@ -29,6 +29,16 @@ use std::{os::unix::io::AsFd, sync::mpsc, thread};
 
 use anyhow::Error;
 
+// If openat2 is disabled, the race tests get really slow (especially in CI), so
+// just reduce the number of rounds to something far more sane.
+// TODO: Maybe we should do more runs locally than in CI, since GHA boxes are
+// quite slow compared to my laptop?
+const TEST_RETRIES: usize = if cfg!(feature = "_test_enosys_openat2") {
+    1000
+} else {
+    20000
+};
+
 macro_rules! resolve_race_tests {
     // resolve_race_tests! {
     //     test_ok: resolve_partial(...) => Ok(("path", Some("remaining", ErrorKind::...)), libc::S_IF...));
@@ -56,6 +66,7 @@ macro_rules! resolve_race_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore)]
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 let (tmpdir, root_dir) = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
@@ -79,6 +90,7 @@ macro_rules! resolve_race_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore)]
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 let (tmpdir, root_dir) = $root_dir;
                 let mut $root_var = Root::open(&root_dir)?;
@@ -127,7 +139,7 @@ macro_rules! resolve_race_tests {
                         });
 
                         let expected = vec![ $($expected)* ];
-                        for _ in 0..50000 {
+                        for _ in 0..TEST_RETRIES {
                             // Make sure the rename thread isn't paused.
                             ctl_tx
                                 .send(RenameStateMsg::Run)

@@ -45,7 +45,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --workspace --all-features --all-targets
+      - uses: taiki-e/install-action@cargo-hack
+      - name: cargo check
+        run: >-
+          cargo hack --workspace --feature-powerset --keep-going \
+            check --all-targets
 
   check-msrv:
     name: cargo check (msrv)
@@ -55,7 +59,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_MSRV }}
-      - run: cargo check --workspace --all-features --all-targets
+      - uses: taiki-e/install-action@cargo-hack
+      - name: cargo check
+        run: >-
+          cargo hack --workspace --feature-powerset --keep-going \
+            check --all-targets
 
   check-cross:
     strategy:
@@ -84,12 +92,28 @@ jobs:
         with:
           # TODO: Should we use MSRV for this?
           targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@cargo-hack
       - name: cargo check --target=${{ matrix.target }}
         run: >-
-          cargo check --target=${{ matrix.target }} --workspace --all-features --all-targets
+          cargo hack --workspace --feature-powerset --keep-going \
+            check --target=${{ matrix.target }} --all-targets
       - name: cargo build --target=${{ matrix.target }}
         run: >-
-          cargo build --target=${{ matrix.target }} --release --all-features
+          cargo hack --workspace --feature-powerset --keep-going \
+            build --target=${{ matrix.target }} --release
+
+  check-lint-nohack:
+    name: make lint (no cargo-hack)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: install cbindgen
+        run: cargo install --force cbindgen
+      - name: make lint
+        run: make CARGO_NIGHTLY=cargo lint
 
   validate-cbindgen:
     runs-on: ubuntu-latest
@@ -124,6 +148,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-hack
 
       # Rust tests.
       - name: rust doc tests
@@ -172,7 +197,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88
         with:
           components: clippy
-      - run: cargo clippy --all-features --all-targets
+      - uses: taiki-e/install-action@cargo-hack
+      - name: cargo clippy
+        run: >-
+          cargo hack --workspace --feature-powerset --keep-going \
+            clippy --all-targets
 
   release-crate:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -205,6 +234,7 @@ jobs:
       - check
       - check-msrv
       - check-cross
+      - check-lint-nohack
       - validate-cbindgen
       - rustdoc
       - test

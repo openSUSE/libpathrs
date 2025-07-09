@@ -1,4 +1,4 @@
-# libpathrs: safe path resolution on Linux
+# libpathrs: safe path resolution on LinuxCK
 # Copyright (C) 2019-2024 Aleksa Sarai <cyphar@cyphar.com>
 # Copyright (C) 2019-2024 SUSE LLC
 #
@@ -16,6 +16,26 @@
 
 CARGO ?= cargo
 CARGO_NIGHTLY ?= cargo +nightly
+
+# Unfortunately --all-features needs to be put after the subcommand, but
+# cargo-hack needs to be put before the subcommand. So make a function to make
+# this a little easier.
+ifneq (, $(shell which cargo-hack))
+define cargo_hack
+	$(1) hack --feature-powerset $(2)
+endef
+else
+define cargo_hack
+	$(1) $(2) --all-features
+endef
+endif
+CARGO_CHECK := $(call cargo_hack,$(CARGO),check)
+CARGO_CLIPPY := $(call cargo_hack,$(CARGO),clippy)
+CARGO_LLVM_COV := $(call cargo_hack,$(CARGO_NIGHTLY),llvm-cov)
+
+# What features should be used for cargo hack --feature-powerset when running
+# tests? TODO: Auto-generate this in hack/rust-tests.sh.
+TEST_POWERSET_FEATURES ?= openat2
 
 RUSTC_FLAGS := --features=capi -- -C panic=abort
 CARGO_FLAGS ?=
@@ -57,8 +77,8 @@ lint: validate-cbindgen lint-rust
 .PHONY: lint-rust
 lint-rust:
 	$(CARGO_NIGHTLY) fmt --all -- --check
-	$(CARGO) clippy --all-features --all-targets
-	$(CARGO) check $(CARGO_FLAGS) --all-features --all-targets
+	$(CARGO_CLIPPY) --all-targets
+	$(CARGO_CHECK) $(CARGO_FLAGS) --all-targets
 
 .PHONY: validate-cbindgen
 validate-cbindgen:
@@ -79,7 +99,7 @@ validate-cbindgen:
 
 .PHONY: test-rust-doctest
 test-rust-doctest:
-	$(CARGO_NIGHTLY) llvm-cov --no-report --branch --all-features --doc
+	$(CARGO_LLVM_COV) --no-report --branch --doc
 
 .PHONY: test-rust-unpriv
 test-rust-unpriv:

@@ -54,6 +54,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _openat2>]() -> Result<(), Error> {
                 utils::$with_root_fn(|mut $root_var: Root| {
@@ -76,6 +77,7 @@ macro_rules! resolve_tests {
             }
 
             #[test]
+            #[cfg_attr(feature = "_test_enosys_openat2", ignore, allow(unused_attributes))]
             $(#[cfg_attr(not($ignore_meta), ignore)])*
             fn [<root_ $test_name _opath>]() -> Result<(), Error> {
                 utils::$with_root_fn(|mut $root_var: Root| {
