@@ -51,6 +51,7 @@ _test_as_root = []
 # "additive way" (by forcing the syscall wrapper to return -ENOSYS). This
 # should avoid the possible issues with non-additive features.
 _test_enosys_openat2 = []
+_test_enosys_statx = []
 
 [profile.release]
 # Enable link-time optimisations.

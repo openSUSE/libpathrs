@@ -80,6 +80,13 @@ SPECIAL_FEATURES=("capi" "_test_as_root")
 function nextest_run() {
 	local features=("capi")
 
+	# Add any extra features passed in the environment.
+	local extra extra_features
+	IFS=, read -ra extra_features <<<"${EXTRA_FEATURES:-}"
+	for extra in "${extra_features[@]}"; do
+		[ -n "$extra" ] && features+=("$extra")
+	done
+
 	if [ -v CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER ]; then
 		unset CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER
 	fi
@@ -142,10 +149,19 @@ if [ "${#tests_to_run[@]}" -gt 0 ]; then
 		nextest_run --no-fail-fast -E "$test_spec"
 	done
 else
+	# "_test_enosys_statx" is not used with a whole-suite run because it would
+	# just be wasteful -- we only set it for a smaller run of the procfs code.
+	SPECIAL_FEATURES+=("_test_enosys_statx")
+
 	# We need to run race and non-race tests separately because the racing
 	# tests can cause the non-race tests to error out spuriously. Hopefully in
 	# the future <https://github.com/nextest-rs/nextest/discussions/2054> will
 	# be resolved and nextest will make it easier to do this.
 	nextest_run --no-fail-fast -E "not test(#tests::test_race_*)"
 	nextest_run --no-fail-fast -E "test(#tests::test_race_*)"
+
+	# In order to avoid re-running the entire test suite with just statx
+	# disabled, we re-run the key procfs tests with statx disabled.
+	EXTRA_FEATURES=_test_enosys_statx \
+		nextest_run --no-fail-fast -E "test(#tests::*procfs*)"
 fi
