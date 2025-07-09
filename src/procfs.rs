@@ -26,7 +26,7 @@ use crate::{
     flags::{OpenFlags, ResolverFlags},
     resolvers::procfs::ProcfsResolver,
     syscalls,
-    utils::{self, FdExt},
+    utils::{self, FdExt, RawProcfsRoot},
 };
 
 use std::{
@@ -34,7 +34,7 @@ use std::{
     io::Error as IOError,
     os::unix::{
         fs::MetadataExt,
-        io::{AsFd, BorrowedFd, OwnedFd},
+        io::{AsFd, OwnedFd},
     },
     path::{Path, PathBuf},
 };
@@ -137,7 +137,7 @@ pub enum ProcfsBase {
 }
 
 impl ProcfsBase {
-    pub(crate) fn into_path(self, proc_root: Option<BorrowedFd<'_>>) -> PathBuf {
+    pub(crate) fn into_path(self, proc_rootfd: RawProcfsRoot<'_>) -> PathBuf {
         match self {
             Self::ProcRoot => PathBuf::from("."),
             Self::ProcSelf => PathBuf::from("self"),
@@ -157,21 +157,8 @@ impl ProcfsBase {
                 "self".into(),
             ]
             .into_iter()
-            // Return the first option that exists in proc_root.
-            .find(|base| {
-                match proc_root {
-                    Some(root) => {
-                        syscalls::accessat(root, base, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
-                    }
-                    None => syscalls::accessat(
-                        syscalls::BADFD,
-                        PathBuf::from("/proc").join(base),
-                        Access::EXISTS,
-                        AtFlags::SYMLINK_NOFOLLOW,
-                    ),
-                }
-                .is_ok()
-            })
+            // Return the first option that exists in proc_rootfd.
+            .find(|base| proc_rootfd.exists_unchecked(base).is_ok())
             .expect("at least one candidate /proc/thread-self path should work"),
         }
     }
@@ -252,6 +239,10 @@ pub struct ProcfsHandle {
 impl ProcfsHandle {
     // This is part of Linux's ABI.
     const PROC_ROOT_INO: u64 = 1;
+
+    pub(crate) fn as_raw_procfs(&self) -> RawProcfsRoot<'_> {
+        RawProcfsRoot::UnsafeFd(self.inner.as_fd())
+    }
 
     /// Create a new `fsopen(2)`-based [`ProcfsHandle`]. This handle is safe
     /// against racing attackers changing the mount table and is guaranteed to
@@ -380,7 +371,7 @@ impl ProcfsHandle {
         let proc_rootfd = self.inner.as_fd();
         let fd = self.resolver.resolve(
             proc_rootfd,
-            base.into_path(Some(proc_rootfd)),
+            base.into_path(self.as_raw_procfs()),
             OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
             ResolverFlags::empty(),
         )?;

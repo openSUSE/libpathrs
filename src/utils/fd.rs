@@ -22,6 +22,7 @@ use crate::{
     flags::OpenFlags,
     procfs::{ProcfsBase, ProcfsHandle},
     syscalls,
+    utils::RawProcfsRoot,
 };
 
 use std::{
@@ -228,7 +229,7 @@ impl<Fd: AsFd> FdExt for Fd {
         let fd = self.as_fd();
         // "/proc/thread-self/fd/$n"
         let fd_path = PathBuf::from("/proc")
-            .join(ProcfsBase::ProcThreadSelf.into_path(None))
+            .join(ProcfsBase::ProcThreadSelf.into_path(RawProcfsRoot::UnsafeGlobal))
             .join(proc_subpath(fd)?);
 
         // Because this code is used within syscalls, we can't even check the
