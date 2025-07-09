@@ -138,7 +138,6 @@ pub enum ProcfsBase {
 
 impl ProcfsBase {
     pub(crate) fn into_path(self, proc_root: Option<BorrowedFd<'_>>) -> PathBuf {
-        let proc_root = proc_root.as_ref().map(AsFd::as_fd);
         match self {
             Self::ProcRoot => PathBuf::from("."),
             Self::ProcSelf => PathBuf::from("self"),
@@ -161,10 +160,15 @@ impl ProcfsBase {
             // Return the first option that exists in proc_root.
             .find(|base| {
                 match proc_root {
-                    Some(root) => syscalls::fstatat(root, base),
-                    None => {
-                        syscalls::fstatat(syscalls::AT_FDCWD, PathBuf::from("/proc").join(base))
+                    Some(root) => {
+                        syscalls::accessat(root, base, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
                     }
+                    None => syscalls::accessat(
+                        syscalls::BADFD,
+                        PathBuf::from("/proc").join(base),
+                        Access::EXISTS,
+                        AtFlags::SYMLINK_NOFOLLOW,
+                    ),
                 }
                 .is_ok()
             })
@@ -295,7 +299,7 @@ impl ProcfsHandle {
     /// overmounts unless `flags` contains `OpenTreeFlags::AT_RECURSIVE`.
     pub(crate) fn new_open_tree(flags: OpenTreeFlags) -> Result<Self, Error> {
         syscalls::open_tree(
-            syscalls::AT_FDCWD,
+            syscalls::BADFD,
             "/proc",
             OpenTreeFlags::OPEN_TREE_CLONE | flags,
         )
@@ -315,7 +319,7 @@ impl ProcfsHandle {
     /// This handle is NOT safe against racing attackers and overmounts.
     pub(crate) fn new_unsafe_open() -> Result<Self, Error> {
         syscalls::openat(
-            syscalls::AT_FDCWD,
+            syscalls::BADFD,
             "/proc",
             OpenFlags::O_PATH | OpenFlags::O_DIRECTORY,
             0,
@@ -612,7 +616,7 @@ impl ProcfsHandle {
         let is_subset = [/* subset=pid */ "stat", /* hidepid=n */ "1"]
             .iter()
             .any(|&subpath| {
-                rustix_fs::accessat(&inner, subpath, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
+                syscalls::accessat(&inner, subpath, Access::EXISTS, AtFlags::SYMLINK_NOFOLLOW)
                     .is_err()
             });
 

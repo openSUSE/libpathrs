@@ -41,7 +41,8 @@ use bitflags::bitflags;
 use once_cell::sync::Lazy;
 use rustix::{
     fs::{
-        self as rustix_fs, AtFlags, Dev, FileType, Mode, RawMode, Stat, StatFs, Statx, StatxFlags,
+        self as rustix_fs, Access, AtFlags, Dev, FileType, Mode, RawMode, Stat, StatFs, Statx,
+        StatxFlags,
     },
     io::Errno,
     mount::{self as rustix_mount, FsMountFlags, FsOpenFlags, MountAttrFlags, OpenTreeFlags},
@@ -58,7 +59,6 @@ use rustix::{
 // SAFETY: AT_FDCWD is always a valid file descriptor.
 pub(crate) const AT_FDCWD: BorrowedFd<'static> = rustix_fs::CWD;
 // SAFETY: BADFD is not a valid file descriptor, but it's not -1.
-#[cfg(test)]
 pub(crate) const BADFD: BorrowedFd<'static> = unsafe { BorrowedFd::borrow_raw(-libc::EBADF) };
 
 /// Representation of a file descriptor and its associated path at a given point
@@ -109,6 +109,15 @@ pub(crate) enum Error {
     // NOTE: This is temporary until the issue is fixed in rustix.
     #[error("invalid file descriptor {fd} (see <https://github.com/bytecodealliance/rustix/issues/1187> for more details)")]
     InvalidFd { fd: RawFd, source: Errno },
+
+    #[error("accessat({dirfd}, {path:?}, {access:?}, {flags:?})")]
+    Accessat {
+        dirfd: FrozenFd,
+        path: PathBuf,
+        access: Access,
+        flags: AtFlags,
+        source: Errno,
+    },
 
     #[error("openat({dirfd}, {path:?}, {flags:?}, 0o{mode:o})")]
     Openat {
@@ -258,6 +267,7 @@ impl Error {
         // XXX: This should probably be a macro...
         *match self {
             Error::InvalidFd { source, .. } => source,
+            Error::Accessat { source, .. } => source,
             Error::Openat { source, .. } => source,
             Error::Openat2 { source, .. } => source,
             Error::Readlinkat { source, .. } => source,
@@ -285,22 +295,53 @@ impl Error {
     }
 }
 
-// FIXME: Temporary fix for rustix panicking if a passed file descriptor is
-// non-standard <https://github.com/bytecodealliance/rustix/issues/1187>.
-trait HotfixRustixFd: Sized {
-    fn hotfix_rustix_fd(self) -> Result<Self, Error>;
+/// Rustix will trigger a panic if a [`BorrowedFd`] has a value it deems
+/// "unacceptable" (namely, most negative values). In rustix 1.0 they added
+/// support for the `-EBADF` pattern, but a user passing a different negative
+/// value should not trigger a crash, so we need to add this check to all fd
+/// operations using rustix.
+///
+/// See <https://github.com/bytecodealliance/rustix/issues/1187> for more
+/// information about the underlying issue. Note that while the issue is closed,
+/// the resolution was to only accept `-EBADF` -- any other negative values
+/// (other than `AT_FDCWD`) will still crash the program.
+trait CheckRustixFd: Sized {
+    fn check_rustix_fd(self) -> Result<Self, Error>;
 }
 
-impl<Fd: AsFd + Sized> HotfixRustixFd for Fd {
-    fn hotfix_rustix_fd(self) -> Result<Self, Error> {
+impl<Fd: AsFd + Sized> CheckRustixFd for Fd {
+    fn check_rustix_fd(self) -> Result<Self, Error> {
+        // We can't use BADFD.as_raw_fd() or (-libc::EBADF as _) in a match arm,
+        // instead we need to define a constant that we can then reference.
+        const BADFD: RawFd = -libc::EBADF as _;
+
         match self.as_fd().as_raw_fd() {
-            libc::AT_FDCWD | 0.. => Ok(self),
+            libc::AT_FDCWD | BADFD | 0.. => Ok(self),
             fd => Err(Error::InvalidFd {
                 fd,
                 source: Errno::BADF,
             }),
         }
     }
+}
+
+/// Wrapper for `faccessat(2)`.
+pub(crate) fn accessat(
+    dirfd: impl AsFd,
+    path: impl AsRef<Path>,
+    access: Access,
+    mut flags: AtFlags,
+) -> Result<(), Error> {
+    let (dirfd, path) = (dirfd.as_fd().check_rustix_fd()?, path.as_ref());
+    flags |= AtFlags::SYMLINK_NOFOLLOW;
+
+    rustix_fs::accessat(dirfd, path, access, flags).map_err(|errno| Error::Accessat {
+        dirfd: dirfd.into(),
+        path: path.into(),
+        flags,
+        access,
+        source: errno,
+    })
 }
 
 /// Wrapper for `openat(2)` which auto-sets `O_CLOEXEC | O_NOCTTY`.
@@ -313,7 +354,7 @@ pub(crate) fn openat_follow(
     mut flags: OpenFlags,
     mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<OwnedFd, Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
 
     // O_CLOEXEC is needed for obvious reasons, and O_NOCTTY ensures that a
@@ -351,7 +392,7 @@ pub(crate) fn openat(
 /// argument of `readlinkat(2)`. We need the dirfd argument, so we need a
 /// wrapper.
 pub(crate) fn readlinkat(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<PathBuf, Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
 
     // If the contents of the symlink are larger than this, we bail out avoid
@@ -391,7 +432,7 @@ pub(crate) fn mkdirat(
     path: impl AsRef<Path>,
     mode: RawMode, // TODO: Should we take rustix::fs::Mode directly?
 ) -> Result<(), Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
 
     rustix_fs::mkdirat(dirfd, path, Mode::from_raw_mode(mode)).map_err(|errno| Error::Mkdirat {
@@ -416,7 +457,7 @@ pub(crate) fn mknodat(
     raw_mode: RawMode, // TODO: Should we take rustix::fs::{Mode,FileType} directly?
     dev: Dev,
 ) -> Result<(), Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
     let (file_type, mode) = (
         FileType::from_raw_mode(raw_mode),
@@ -445,7 +486,7 @@ pub(crate) fn unlinkat(
     path: impl AsRef<Path>,
     flags: AtFlags,
 ) -> Result<(), Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
 
     rustix_fs::unlinkat(dirfd, path, flags).map_err(|errno| Error::Unlinkat {
@@ -467,8 +508,8 @@ pub(crate) fn linkat(
     new_path: impl AsRef<Path>,
     flags: AtFlags,
 ) -> Result<(), Error> {
-    let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
-    let (new_dirfd, new_path) = (new_dirfd.as_fd().hotfix_rustix_fd()?, new_path.as_ref());
+    let (old_dirfd, old_path) = (old_dirfd.as_fd().check_rustix_fd()?, old_path.as_ref());
+    let (new_dirfd, new_path) = (new_dirfd.as_fd().check_rustix_fd()?, new_path.as_ref());
 
     rustix_fs::linkat(old_dirfd, old_path, new_dirfd, new_path, flags).map_err(|errno| {
         Error::Linkat {
@@ -492,7 +533,7 @@ pub(crate) fn symlinkat(
     dirfd: impl AsFd,
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
-    let (dirfd, path) = (dirfd.as_fd().hotfix_rustix_fd()?, path.as_ref());
+    let (dirfd, path) = (dirfd.as_fd().check_rustix_fd()?, path.as_ref());
     let target = target.as_ref();
 
     rustix_fs::symlinkat(target, dirfd, path).map_err(|errno| Error::Symlinkat {
@@ -513,8 +554,8 @@ pub(crate) fn renameat(
     new_dirfd: impl AsFd,
     new_path: impl AsRef<Path>,
 ) -> Result<(), Error> {
-    let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
-    let (new_dirfd, new_path) = (new_dirfd.as_fd().hotfix_rustix_fd()?, new_path.as_ref());
+    let (old_dirfd, old_path) = (old_dirfd.as_fd().check_rustix_fd()?, old_path.as_ref());
+    let (new_dirfd, new_path) = (new_dirfd.as_fd().check_rustix_fd()?, new_path.as_ref());
 
     rustix_fs::renameat(old_dirfd, old_path, new_dirfd, new_path).map_err(|errno| Error::Renameat {
         old_dirfd: old_dirfd.into(),
@@ -550,8 +591,8 @@ pub(crate) fn renameat2(
         return renameat(old_dirfd, old_path, new_dirfd, new_path);
     }
 
-    let (old_dirfd, old_path) = (old_dirfd.as_fd().hotfix_rustix_fd()?, old_path.as_ref());
-    let (new_dirfd, new_path) = (new_dirfd.as_fd().hotfix_rustix_fd()?, new_path.as_ref());
+    let (old_dirfd, old_path) = (old_dirfd.as_fd().check_rustix_fd()?, old_path.as_ref());
+    let (new_dirfd, new_path) = (new_dirfd.as_fd().check_rustix_fd()?, new_path.as_ref());
 
     rustix_fs::renameat_with(old_dirfd, old_path, new_dirfd, new_path, flags.into()).map_err(
         |errno| Error::Renameat2 {
@@ -569,7 +610,7 @@ pub(crate) fn renameat2(
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatfs(2)`.
 pub(crate) fn fstatfs(fd: impl AsFd) -> Result<StatFs, Error> {
-    let fd = fd.as_fd().hotfix_rustix_fd()?;
+    let fd = fd.as_fd().check_rustix_fd()?;
 
     rustix_fs::fstatfs(fd).map_err(|errno| Error::Fstatfs {
         fd: fd.into(),
@@ -582,7 +623,7 @@ pub(crate) fn fstatfs(fd: impl AsFd) -> Result<StatFs, Error> {
 ///
 /// This is needed because Rust doesn't provide any interface for `fstatat(2)`.
 pub(crate) fn fstatat(dirfd: impl AsFd, path: impl AsRef<Path>) -> Result<Stat, Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
     let flags = AtFlags::NO_AUTOMOUNT | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
 
@@ -599,7 +640,7 @@ pub(crate) fn statx(
     path: impl AsRef<Path>,
     mask: StatxFlags,
 ) -> Result<Statx, Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
     let flags = AtFlags::NO_AUTOMOUNT | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
 
@@ -680,7 +721,7 @@ pub(crate) fn openat2_follow(
     path: impl AsRef<Path>,
     mut how: OpenHow,
 ) -> Result<OwnedFd, Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
 
     // Add O_CLOEXEC and O_NOCTTY explicitly (as we do for openat). However,
@@ -765,7 +806,7 @@ pub(crate) fn fsopen(fstype: &str, flags: FsOpenFlags) -> Result<OwnedFd, Error>
 }
 
 pub(crate) fn fsconfig_set_string(sfd: impl AsFd, key: &str, value: &str) -> Result<(), Error> {
-    let sfd = sfd.as_fd().hotfix_rustix_fd()?;
+    let sfd = sfd.as_fd().check_rustix_fd()?;
 
     rustix_mount::fsconfig_set_string(sfd, key, value).map_err(|errno| Error::FsconfigSetString {
         sfd: sfd.into(),
@@ -776,7 +817,7 @@ pub(crate) fn fsconfig_set_string(sfd: impl AsFd, key: &str, value: &str) -> Res
 }
 
 pub(crate) fn fsconfig_create(sfd: impl AsFd) -> Result<(), Error> {
-    let sfd = sfd.as_fd().hotfix_rustix_fd()?;
+    let sfd = sfd.as_fd().check_rustix_fd()?;
 
     rustix_mount::fsconfig_create(sfd).map_err(|errno| Error::FsconfigCreate {
         sfd: sfd.into(),
@@ -789,7 +830,7 @@ pub(crate) fn fsmount(
     flags: FsMountFlags,
     mount_attrs: MountAttrFlags,
 ) -> Result<OwnedFd, Error> {
-    let sfd = sfd.as_fd().hotfix_rustix_fd()?;
+    let sfd = sfd.as_fd().check_rustix_fd()?;
 
     rustix_mount::fsmount(sfd, flags, mount_attrs).map_err(|errno| Error::Fsmount {
         sfd: sfd.into(),
@@ -804,7 +845,7 @@ pub(crate) fn open_tree(
     path: impl AsRef<Path>,
     flags: OpenTreeFlags,
 ) -> Result<OwnedFd, Error> {
-    let dirfd = dirfd.as_fd().hotfix_rustix_fd()?;
+    let dirfd = dirfd.as_fd().check_rustix_fd()?;
     let path = path.as_ref();
 
     rustix_mount::open_tree(dirfd, path, flags).map_err(|errno| Error::OpenTree {
