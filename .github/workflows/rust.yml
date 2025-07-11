@@ -203,6 +203,63 @@ jobs:
           cargo hack --workspace --feature-powerset --keep-going \
             clippy --all-targets
 
+  size:
+    permissions:
+      contents: read
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix:
+        libtype: [ "cdylib", "staticlib" ]
+    name: check ${{ matrix.libtype }} size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: make release
+      - name: compute ${{ matrix.libtype }} file name
+        run: |-
+          case "${{ matrix.libtype }}" in
+            cdylib)
+              libfile=libpathrs.so ;;
+            staticlib)
+              libfile=libpathrs.a ;;
+            *)
+              exit 1 ;;
+          esac
+          echo "LIB_FILENAME=$libfile" >>"$GITHUB_ENV"
+      - name: strip ${{ matrix.libtype }}
+        run: |-
+          cp target/release/$LIB_FILENAME{,.nostrip}
+          strip target/release/$LIB_FILENAME
+      - name: compute ${{ matrix.libtype }} binary size
+        run: |-
+          LIB_SIZE="$(stat -c "%s" "target/release/$LIB_FILENAME" | numfmt --to=si --suffix=B)"
+          LIB_NOSTRIP_SIZE="$(stat -c "%s" "target/release/$LIB_FILENAME.nostrip" | numfmt --to=si --suffix=B)"
+          cat >&2 <<-EOF
+          === binary sizes ===
+          $LIB_FILENAME Size: $LIB_SIZE
+          Unstripped: $LIB_NOSTRIP_SIZE
+          EOF
+          echo "LIB_SIZE=$LIB_SIZE" >>"$GITHUB_ENV"
+          echo "LIB_NOSTRIP_SIZE=$LIB_NOSTRIP_SIZE" >>"$GITHUB_ENV"
+      # At the moment, we can only attach the commit status for push operations
+      # because pull requests don't get the right permissions in the default
+      # GITHUB_TOKEN. User Access Tokens would solve this, but libpathrs is
+      # currently in the openSUSE org, which I can't create access tokens for.
+      - if: github.event_name == 'push'
+        name: update commit status
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/{owner_repo}/statuses/{sha}
+          owner_repo: ${{ github.repository }}
+          sha: ${{ github.sha }}
+          state: success
+          description: ${{ env.LIB_FILENAME }} (${{ matrix.libtype }}) is ${{ env.LIB_SIZE }} (${{ env.LIB_NOSTRIP_SIZE }} unstripped)
+          context: rust-ci / ${{ matrix.libtype }} size
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release-crate:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs:
@@ -241,6 +298,7 @@ jobs:
       - examples
       - fmt
       - clippy
+      - size
       - release-crate
     runs-on: ubuntu-latest
     steps:
