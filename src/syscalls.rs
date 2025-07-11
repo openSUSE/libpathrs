@@ -644,6 +644,16 @@ pub(crate) fn statx(
     let path = path.as_ref();
     let flags = AtFlags::NO_AUTOMOUNT | AtFlags::SYMLINK_NOFOLLOW | AtFlags::EMPTY_PATH;
 
+    if cfg!(feature = "_test_enosys_statx") {
+        Err(Error::Statx {
+            dirfd: dirfd.into(),
+            path: path.into(),
+            flags,
+            mask,
+            source: Errno::NOSYS,
+        })?;
+    }
+
     rustix_fs::statx(dirfd, path, flags, mask).map_err(|errno| Error::Statx {
         dirfd: dirfd.into(),
         path: path.into(),

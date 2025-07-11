@@ -74,10 +74,19 @@ done
 # * "capi" only adds tests and modules in a purely additive way, so re-running
 #   the whole suite without them makes no sense.
 # * "_test_as_root" requires special handling to enable (the "sudo -E" runner).
-SPECIAL_FEATURES=("capi" "_test_as_root")
+# * "_test_enosys_statx" is not used with a whole-suite run because it would
+#   just be wasteful -- we only set it for a smaller run of the procfs code.
+SPECIAL_FEATURES=("capi" "_test_as_root" "_test_enosys_statx")
 
 function nextest_run() {
 	local features=("capi")
+
+	# Add any extra features passed in the environment.
+	local extra extra_features
+	IFS=, read -ra extra_features <<<"${EXTRA_FEATURES:-}"
+	for extra in "${extra_features[@]}"; do
+		[ -n "$extra" ] && features+=("$extra")
+	done
 
 	if [ -v CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER ]; then
 		unset CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER
@@ -142,3 +151,8 @@ ulimit -n "$(ulimit -Hn)"
 # nextest will make it easier to do this.
 nextest_run --no-fail-fast -E "not test(#tests::test_race_*)"
 nextest_run --no-fail-fast -E "test(#tests::test_race_*)"
+
+# In order to avoid re-running the entire test suite with just statx disabled,
+# we re-run the key procfs tests with statx disabled.
+EXTRA_FEATURES=_test_enosys_statx \
+	nextest_run --no-fail-fast -E "test(#tests::*procfs*)"

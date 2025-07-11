@@ -35,7 +35,7 @@ use crate::{
     procfs,
     resolvers::MAX_SYMLINK_TRAVERSALS,
     syscalls::{self, OpenHow},
-    utils::{self, FdExt, PathIterExt},
+    utils::{self, FdExt, PathIterExt, RawProcfsRoot},
 };
 
 use std::{
@@ -69,6 +69,7 @@ impl Default for ProcfsResolver {
 impl ProcfsResolver {
     pub(crate) fn resolve(
         &self,
+        proc_rootfd: RawProcfsRoot<'_>,
         root: impl AsFd,
         path: impl AsRef<Path>,
         oflags: OpenFlags,
@@ -91,7 +92,7 @@ impl ProcfsResolver {
 
         match *self {
             Self::Openat2 => openat2_resolve(root, path, oflags, rflags),
-            Self::RestrictedOpath => opath_resolve(root, path, oflags, rflags),
+            Self::RestrictedOpath => opath_resolve(proc_rootfd, root, path, oflags, rflags),
         }
     }
 }
@@ -136,13 +137,14 @@ fn openat2_resolve(
 
 /// `O_PATH`-based implementation of [`ProcfsResolver`].
 fn opath_resolve(
+    proc_rootfd: RawProcfsRoot<'_>,
     root: impl AsFd,
     path: impl AsRef<Path>,
     oflags: OpenFlags,
     rflags: ResolverFlags,
 ) -> Result<OwnedFd, Error> {
     let root = root.as_fd();
-    let root_mnt_id = utils::fetch_mnt_id(root, "")?;
+    let root_mnt_id = utils::fetch_mnt_id(proc_rootfd, root, "")?;
 
     // We only need to keep track of our current dirfd, since we are applying
     // the components one-by-one.
@@ -207,7 +209,7 @@ fn opath_resolve(
         // Check that the next component is on the same mountpoint.
         // NOTE: If the root is the host /proc mount, this is only safe if there
         // are no racing mounts.
-        procfs::verify_same_mnt(root_mnt_id, &next, "")
+        procfs::verify_same_mnt(proc_rootfd, root_mnt_id, &next, "")
             .with_wrap(|| format!("open next component {part:?}"))
             .wrap("emulated procfs resolver RESOLVE_NO_XDEV")?;
 
@@ -275,7 +277,7 @@ fn opath_resolve(
             match syscalls::openat(&current, &part, oflags | OpenFlags::O_NOFOLLOW, 0) {
                 Ok(final_reopen) => {
                     // Re-verify the next component is on the same mount.
-                    procfs::verify_same_mnt(root_mnt_id, &final_reopen, "")
+                    procfs::verify_same_mnt(proc_rootfd, root_mnt_id, &final_reopen, "")
                         .wrap("re-open final component")
                         .wrap("emulated procfs resolver RESOLVE_NO_XDEV")?;
                     return Ok(final_reopen);
@@ -375,7 +377,7 @@ mod tests {
         resolvers::procfs::ProcfsResolver,
         syscalls,
         tests::common as tests_common,
-        utils::FdExt,
+        utils::{FdExt, RawProcfsRoot},
     };
 
     use std::{fs::File, path::PathBuf};
@@ -399,7 +401,7 @@ mod tests {
                         let expected: ExpectedResult = $expected_result.map(|p: PathBuf| root_dir.join(p));
                         let oflags = $(OpenFlags::$oflag)|*;
                         let res = ProcfsResolver::Openat2
-                            .resolve(&root, $path, oflags, $rflags)
+                            .resolve(RawProcfsRoot::UnsafeGlobal, &root, $path, oflags, $rflags)
                             .as_ref()
                             .map(|f| {
                                 f.as_unsafe_path_unchecked()
@@ -421,7 +423,7 @@ mod tests {
                         let expected: ExpectedResult = $expected_result.map(|p: PathBuf| root_dir.join(p));
                         let oflags = $(OpenFlags::$oflag)|*;
                         let res = ProcfsResolver::RestrictedOpath
-                            .resolve(&root, $path, oflags, $rflags)
+                            .resolve(RawProcfsRoot::UnsafeGlobal, &root, $path, oflags, $rflags)
                             .as_ref()
                             .map(|f| {
                                 f.as_unsafe_path_unchecked()

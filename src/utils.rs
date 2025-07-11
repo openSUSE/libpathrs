@@ -28,5 +28,14 @@ pub(crate) use path::*;
 mod fd;
 pub(crate) use fd::*;
 
+mod fdinfo;
+pub(crate) use fdinfo::*;
+
 mod sysctl;
 pub(crate) use sysctl::*;
+
+mod maybe_owned;
+pub(crate) use maybe_owned::*;
+
+mod raw_procfs;
+pub(crate) use raw_procfs::*;
