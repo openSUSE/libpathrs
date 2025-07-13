@@ -68,6 +68,7 @@ while [ "$#" -gt 0 ]; do
 			bail "unknown option $1"
 	esac
 done
+tests_to_run=("$@")
 
 # These are features that do not make sense to add to the powerset of feature
 # combinations we test for:
@@ -136,9 +137,15 @@ set -x
 # necessary, see <https://github.com/openSUSE/libpathrs/issues/149>.
 ulimit -n "$(ulimit -Hn)"
 
-# We need to run race and non-race tests separately because the racing tests
-# can cause the non-race tests to error out spuriously. Hopefully in the future
-# <https://github.com/nextest-rs/nextest/discussions/2054> will be resolved and
-# nextest will make it easier to do this.
-nextest_run --no-fail-fast -E "not test(#tests::test_race_*)"
-nextest_run --no-fail-fast -E "test(#tests::test_race_*)"
+if [ "${#tests_to_run[@]}" -gt 0 ]; then
+	for test_spec in "${tests_to_run[@]}"; do
+		nextest_run --no-fail-fast -E "$test_spec"
+	done
+else
+	# We need to run race and non-race tests separately because the racing
+	# tests can cause the non-race tests to error out spuriously. Hopefully in
+	# the future <https://github.com/nextest-rs/nextest/discussions/2054> will
+	# be resolved and nextest will make it easier to do this.
+	nextest_run --no-fail-fast -E "not test(#tests::test_race_*)"
+	nextest_run --no-fail-fast -E "test(#tests::test_race_*)"
+fi
