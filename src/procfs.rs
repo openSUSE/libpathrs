@@ -141,7 +141,7 @@ impl ProcfsBase {
         match self {
             Self::ProcRoot => PathBuf::from("."),
             Self::ProcSelf => PathBuf::from("self"),
-            Self::ProcPid(pid) => PathBuf::from(format!("{pid}")),
+            Self::ProcPid(pid) => PathBuf::from(pid.to_string()),
             Self::ProcThreadSelf => [
                 // /proc/thread-self was added in Linux 3.17.
                 "thread-self".into(),

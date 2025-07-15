@@ -575,7 +575,7 @@ mod utils {
         let (handle, expected_path, expected_file_type) = match (result, expected) {
             (Ok(handle), Ok((expected_path, file_type))) => (
                 handle,
-                expected_path.replace("{{/proc/self}}", &format!("{}", syscalls::getpid())),
+                expected_path.replace("{{/proc/self}}", &syscalls::getpid().to_string()),
                 file_type,
             ),
             (result, expected) => {
