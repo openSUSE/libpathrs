@@ -60,6 +60,11 @@ impl Error {
     pub(crate) fn is_safety_violation(&self) -> bool {
         self.0.is_safety_violation()
     }
+
+    #[cfg(test)]
+    pub(crate) fn into_inner(self) -> ErrorImpl {
+        *self.0
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -100,6 +105,12 @@ pub(crate) enum ErrorImpl {
 
     #[error("integer parsing failed")]
     ParseIntError(#[from] std::num::ParseIntError),
+
+    // This should never actually get constructed in practice, but is needed so
+    // that you can have From<FromStr::Err> work for the no-op FromStr<String>,
+    // which in turn is needed for our nice generic str::parse-wrapping APIs.
+    #[error("impossible error: infallible error failed")]
+    InfallibleError(#[from] std::convert::Infallible),
 
     #[error("{context}")]
     Wrapped {
@@ -150,7 +161,9 @@ impl ErrorImpl {
             // These errors are internal error types that we don't want to
             // expose outside of the crate. All that matters to users is that
             // there was some internal error.
-            Self::BadSymlinkStackError { .. } | Self::ParseIntError(_) => ErrorKind::InternalError,
+            Self::BadSymlinkStackError { .. }
+            | Self::ParseIntError(_)
+            | Self::InfallibleError(_) => ErrorKind::InternalError,
             Self::Wrapped { source, .. } => source.kind(),
         }
     }

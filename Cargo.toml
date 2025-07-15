@@ -51,6 +51,7 @@ _test_as_root = []
 # "additive way" (by forcing the syscall wrapper to return -ENOSYS). This
 # should avoid the possible issues with non-additive features.
 _test_enosys_openat2 = []
+_test_enosys_statx = []
 
 [profile.release]
 # Enable link-time optimisations.
@@ -75,10 +76,11 @@ static_assertions = "^1.1"
 anyhow = "^1"
 clap = { version = "^3", features = ["cargo"] }
 errno = "^0.3"
+indoc = "^2"
 tempfile = "^3"
 paste = "^1"
 path-clean = "^1"
-pretty_assertions = "^1"
+pretty_assertions = { version = "^1", features = ["unstable"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

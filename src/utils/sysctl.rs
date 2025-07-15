@@ -29,7 +29,11 @@ use std::{
     str::FromStr,
 };
 
-pub(crate) fn sysctl_read_line(procfs: &ProcfsHandle, sysctl: &str) -> Result<String, Error> {
+pub(crate) fn sysctl_read_parse<T>(procfs: &ProcfsHandle, sysctl: &str) -> Result<T, Error>
+where
+    T: FromStr,
+    T::Err: Into<ErrorImpl> + Into<Error>,
+{
     // "/proc/sys"
     let mut sysctl_path = PathBuf::from("sys");
     // Convert "foo.bar.baz" to "foo/bar/baz".
@@ -48,23 +52,20 @@ pub(crate) fn sysctl_read_line(procfs: &ProcfsHandle, sysctl: &str) -> Result<St
         })?;
 
     // Strip newlines.
-    Ok(line.trim_end_matches("\n").into())
-}
-
-pub(crate) fn sysctl_read_parse<T>(procfs: &ProcfsHandle, sysctl: &str) -> Result<T, Error>
-where
-    T: FromStr,
-    T::Err: Into<ErrorImpl> + Into<Error>,
-{
-    sysctl_read_line(procfs, sysctl).and_then(|s| {
-        s.parse()
-            .map_err(Error::from)
-            .with_wrap(|| format!("could not parse int sysctl {sysctl:?}"))
-    })
+    line.trim_end_matches("\n")
+        .parse()
+        .map_err(Error::from)
+        .with_wrap(|| {
+            format!(
+                "could not parse sysctl {sysctl:?} as {:?}",
+                std::any::type_name::<T>()
+            )
+        })
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
         error::{Error, ErrorKind},
         procfs::ProcfsHandle,
@@ -80,14 +81,14 @@ mod tests {
     #[test]
     fn bad_sysctl_file_noexist() {
         assert_eq!(
-            super::sysctl_read_line(&TEST_PROCFS_HANDLE, "nonexistent.dummy.sysctl.path")
+            sysctl_read_parse::<String>(&TEST_PROCFS_HANDLE, "nonexistent.dummy.sysctl.path")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::ENOENT))),
             "reading line from non-existent sysctl",
         );
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "nonexistent.sysctl.path")
+            sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "nonexistent.sysctl.path")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::ENOENT))),
@@ -98,14 +99,14 @@ mod tests {
     #[test]
     fn bad_sysctl_file_noread() {
         assert_eq!(
-            super::sysctl_read_line(&TEST_PROCFS_HANDLE, "vm.drop_caches")
+            sysctl_read_parse::<String>(&TEST_PROCFS_HANDLE, "vm.drop_caches")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::EACCES))),
             "reading line from non-readable sysctl",
         );
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "vm.drop_caches")
+            sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "vm.drop_caches")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::OsError(Some(libc::EACCES))),
@@ -115,9 +116,9 @@ mod tests {
 
     #[test]
     fn bad_sysctl_parse_invalid_multinumber() {
-        assert!(super::sysctl_read_line(&TEST_PROCFS_HANDLE, "kernel.printk").is_ok());
+        assert!(sysctl_read_parse::<String>(&TEST_PROCFS_HANDLE, "kernel.printk").is_ok());
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "kernel.printk")
+            sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "kernel.printk")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::InternalError),
@@ -127,9 +128,9 @@ mod tests {
 
     #[test]
     fn bad_sysctl_parse_invalid_nonnumber() {
-        assert!(super::sysctl_read_line(&TEST_PROCFS_HANDLE, "kernel.random.uuid").is_ok());
+        assert!(sysctl_read_parse::<String>(&TEST_PROCFS_HANDLE, "kernel.random.uuid").is_ok());
         assert_eq!(
-            super::sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "kernel.random.uuid")
+            sysctl_read_parse::<u32>(&TEST_PROCFS_HANDLE, "kernel.random.uuid")
                 .as_ref()
                 .map_err(Error::kind),
             Err(ErrorKind::InternalError),
@@ -139,7 +140,7 @@ mod tests {
 
     #[test]
     fn sysctl_parse_int() {
-        assert!(super::sysctl_read_line(&TEST_PROCFS_HANDLE, "kernel.pid_max").is_ok());
-        assert!(super::sysctl_read_parse::<u64>(&TEST_PROCFS_HANDLE, "kernel.pid_max").is_ok());
+        assert!(sysctl_read_parse::<String>(&TEST_PROCFS_HANDLE, "kernel.pid_max").is_ok());
+        assert!(sysctl_read_parse::<u64>(&TEST_PROCFS_HANDLE, "kernel.pid_max").is_ok());
     }
 }
