@@ -48,7 +48,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - name: cargo check
         run: >-
-          cargo hack --workspace --feature-powerset --keep-going \
+          cargo hack --workspace --each-feature --keep-going \
             check --all-targets
 
   check-msrv:
@@ -62,7 +62,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - name: cargo check
         run: >-
-          cargo hack --workspace --feature-powerset --keep-going \
+          cargo hack --workspace --each-feature --keep-going \
             check --all-targets
 
   check-cross:
@@ -95,11 +95,11 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - name: cargo check --target=${{ matrix.target }}
         run: >-
-          cargo hack --workspace --feature-powerset --keep-going \
+          cargo hack --workspace --each-feature --keep-going \
             check --target=${{ matrix.target }} --all-targets
       - name: cargo build --target=${{ matrix.target }}
         run: >-
-          cargo hack --workspace --feature-powerset --keep-going \
+          cargo hack --workspace --each-feature --keep-going \
             build --target=${{ matrix.target }} --release
 
   check-lint-nohack:
@@ -200,7 +200,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - name: cargo clippy
         run: >-
-          cargo hack --workspace --feature-powerset --keep-going \
+          cargo hack --workspace --each-feature --keep-going \
             clippy --all-targets
 
   size:
