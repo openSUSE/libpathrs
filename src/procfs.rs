@@ -351,7 +351,7 @@ impl ProcfsHandle {
     /// mount table while these operations are running.
     pub fn new() -> Result<Self, Error> {
         Self::new_fsopen(true)
-            // TODO: Should we also try ~AT_RECURSIVE...?
+            .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::AT_RECURSIVE))
             .or_else(|_| Self::new_unsafe_open())
             .wrap("get safe procfs handle")
@@ -365,6 +365,7 @@ impl ProcfsHandle {
     pub(crate) fn new_unmasked() -> Result<Self, Error> {
         Self::new_fsopen(false)
             .or_else(|_| Self::new_open_tree(OpenTreeFlags::empty()))
+            .or_else(|_| Self::new_open_tree(OpenTreeFlags::AT_RECURSIVE))
             .or_else(|_| Self::new_unsafe_open())
             .wrap("get safe unmasked procfs handle")
         // TODO: We should probably verify is_subset here, to avoid an infinite
