@@ -148,7 +148,10 @@ where
 
     // TODO: Run this in a subprocess.
 
-    rustix_thread::unshare(UnshareFlags::FS | UnshareFlags::NEWNS)
+    // SAFETY: CLONE_FS | CLONE_NEWNS do not impact the IO safety of file
+    // descriptors, and we do not send file descriptors from the test to other
+    // threads anyway.
+    unsafe { rustix_thread::unshare_unsafe(UnshareFlags::FS | UnshareFlags::NEWNS) }
         .expect("unable to create a mount namespace");
 
     // Mark / as MS_SLAVE ("DOWNSTREAM" in rustix) to avoid DoSing the host.
