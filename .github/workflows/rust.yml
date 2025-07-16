@@ -247,8 +247,9 @@ jobs:
           echo "LIB_NOSTRIP_SIZE=$LIB_NOSTRIP_SIZE" >>"$GITHUB_ENV"
       # At the moment, we can only attach the commit status for push operations
       # because pull requests don't get the right permissions in the default
-      # GITHUB_TOKEN. User Access Tokens would solve this, but libpathrs is
-      # currently in the openSUSE org, which I can't create access tokens for.
+      # GITHUB_TOKEN. It's not really clear to me how we should work around
+      # this (secrets like access tokens are not provided for PRs from forked
+      # repos) -- we probably need to switch to status checks?
       - if: github.event_name == 'push'
         name: update commit status
         uses: octokit/request-action@v2.x
