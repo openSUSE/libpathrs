@@ -1,12 +1,12 @@
 ## `libpathrs` ##
 
-[![rust-ci build status](https://github.com/openSUSE/libpathrs/actions/workflows/rust.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/rust.yml)
-[![bindings-c build status](https://github.com/openSUSE/libpathrs/actions/workflows/bindings-c.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/bindings-c.yml)
-[![bindings-go build status](https://github.com/openSUSE/libpathrs/actions/workflows/bindings-go.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/bindings-go.yml)
-[![bindings-python build status](https://github.com/openSUSE/libpathrs/actions/workflows/bindings-python.yml/badge.svg)](https://github.com/openSUSE/libpathrs/actions/workflows/bindings-python.yml)
+[![rust-ci build status](https://github.com/cyphar/libpathrs/actions/workflows/rust.yml/badge.svg)](https://github.com/cyphar/libpathrs/actions/workflows/rust.yml)
+[![bindings-c build status](https://github.com/cyphar/libpathrs/actions/workflows/bindings-c.yml/badge.svg)](https://github.com/cyphar/libpathrs/actions/workflows/bindings-c.yml)
+[![bindings-go build status](https://github.com/cyphar/libpathrs/actions/workflows/bindings-go.yml/badge.svg)](https://github.com/cyphar/libpathrs/actions/workflows/bindings-go.yml)
+[![bindings-python build status](https://github.com/cyphar/libpathrs/actions/workflows/bindings-python.yml/badge.svg)](https://github.com/cyphar/libpathrs/actions/workflows/bindings-python.yml)
 [![docs](https://docs.rs/pathrs/badge.svg)](https://docs.rs/pathrs/)
 
-[![dependency status](https://deps.rs/repo/github/openSUSE/libpathrs/status.svg)](https://deps.rs/repo/github/openSUSE/libpathrs)
+[![dependency status](https://deps.rs/repo/github/cyphar/libpathrs/status.svg)](https://deps.rs/repo/github/cyphar/libpathrs)
 [![msrv](https://shields.io/crates/msrv/pathrs)](Cargo.toml)
 
 This library implements a set of C-friendly APIs (written in Rust) to make path

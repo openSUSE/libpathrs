@@ -57,7 +57,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/openSUSE/libpathrs"
-Repository = "https://github.com/openSUSE/libpathrs"
+Homepage = "https://github.com/cyphar/libpathrs"
+Repository = "https://github.com/cyphar/libpathrs"
 Documentation = "https://docs.rs/pathrs"
-Changelog = "https://github.com/openSUSE/libpathrs/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/cyphar/libpathrs/blob/main/CHANGELOG.md"

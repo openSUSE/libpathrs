@@ -81,7 +81,7 @@ usage() {
 	      --libdir=%{_libdir}
 
 	This script is part of the libpathrs project. If you find a bug, please
-	report it to <https://github.com/openSUSE/libpathrs>.
+	report it to <https://github.com/cyphar/libpathrs>.
 	EOF
 
 	exit_code=0
@@ -168,7 +168,7 @@ libdir=$libdir
 Name: libpathrs
 Version: $FULLVERSION
 Description: Safe path resolution library for Linux
-URL: https://github.com/openSUSE/libpathrs
+URL: https://github.com/cyphar/libpathrs
 Cflags: -I\${includedir}
 Libs: -L\${libdir} -lpathrs
 Libs.private: $native_static_libs

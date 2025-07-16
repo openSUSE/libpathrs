@@ -85,6 +85,6 @@ with pathrs.proc_open(pathrs.PROC_ROOT, "cpuinfo", "r") as cpuinfo:
 For more information about the libpathrs API and considerations you should have
 when using libpathrs, please see [the Rust documentation][libpathrs-rustdoc].
 
-[libpathrs]: https://github.com/openSUSE/libpathrs
-[libpathrs-readme]: https://github.com/openSUSE/libpathrs/blob/main/README.md
+[libpathrs]: https://github.com/cyphar/libpathrs
+[libpathrs-readme]: https://github.com/cyphar/libpathrs/blob/main/README.md
 [libpathrs-rustdoc]: https://docs.rs/pathrs

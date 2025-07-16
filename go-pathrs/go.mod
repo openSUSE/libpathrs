@@ -1,4 +1,4 @@
-module github.com/openSUSE/libpathrs/go-pathrs
+module github.com/cyphar/libpathrs/go-pathrs
 
 go 1.18
 

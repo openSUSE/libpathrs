@@ -30,7 +30,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/openSUSE/libpathrs/go-pathrs"
+	"github.com/cyphar/libpathrs/go-pathrs"
 )
 
 func Main(args []string) error {

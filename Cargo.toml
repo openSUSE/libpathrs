@@ -21,7 +21,7 @@ license = "LGPL-3.0-or-later"
 authors = ["Aleksa Sarai <cyphar@cyphar.com>"]
 
 description = "C-friendly API to make path resolution safer on Linux."
-repository = "https://github.com/openSUSE/libpathrs"
+repository = "https://github.com/cyphar/libpathrs"
 readme = "README.md"
 
 keywords = ["file", "fs", "security", "linux"]

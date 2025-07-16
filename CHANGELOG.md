@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+> **NOTE**: As of this release, the libpathrs repository has been moved to
+> https://github.com/cyphar/libpathrs. Please update any references you have
+> (though GitHub will redirect the old repository name to the new one).
+
 ### Breaking ###
 - python bindings: `Root.creat` has had its `filemode` and `flags` arguments
   swapped to match the argument order of `openat2` (and `Root.creat_raw`). This
@@ -29,6 +33,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
     `ProcfsBase` is now an opaque `struct` type rather than a simple `int`
     wrapper -- this was necessary in order to add support for
     `ProcfsBase::ProcPid` in the form of the `ProcBasePid` helper function.
+- go bindings: due to the change in repository name, the Go module name for the
+  libpathrs Go bindings has also been renamed to `github.com/cyphar/libpathrs`.
+  This will cause build errors for existing users which used the old repository
+  path, but can easily be fixed by updating `go.mod` and `go.sum` to use the
+  new repository name.
 
 ### Added ###
 - python bindings: add `Root.creat_raw` to create a new file and wrap it in a
@@ -435,11 +444,11 @@ Initial release.
   - C FFI.
   - Python bindings.
 
-[Unreleased]: https://github.com/openSUSE/libpathrs/compare/v0.1.3...HEAD
-[0.1.3]: https://github.com/openSUSE/libpathrs/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/openSUSE/libpathrs/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/openSUSE/libpathrs/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/openSUSE/libpathrs/compare/v0.0.2...v0.1.0
-[0.0.2]: https://github.com/openSUSE/libpathrs/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/openSUSE/libpathrs/compare/v0.0.0...v0.0.1
-[0.0.0]: https://github.com/openSUSE/libpathrs/commits/v0.0.0/
+[Unreleased]: https://github.com/cyphar/libpathrs/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/cyphar/libpathrs/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/cyphar/libpathrs/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/cyphar/libpathrs/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/cyphar/libpathrs/compare/v0.0.2...v0.1.0
+[0.0.2]: https://github.com/cyphar/libpathrs/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/cyphar/libpathrs/compare/v0.0.0...v0.0.1
+[0.0.0]: https://github.com/cyphar/libpathrs/commits/v0.0.0/

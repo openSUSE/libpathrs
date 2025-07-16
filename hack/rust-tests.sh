@@ -141,7 +141,7 @@ set -x
 # Increase the maximum file descriptor limit from the default 1024 to whatever
 # the hard limit is (which should be large enough) so that our racing
 # remove_all tests won't fail with EMFILE. Ideally this workaround wouldn't be
-# necessary, see <https://github.com/openSUSE/libpathrs/issues/149>.
+# necessary, see <https://github.com/cyphar/libpathrs/issues/149>.
 ulimit -n "$(ulimit -Hn)"
 
 if [ "${#tests_to_run[@]}" -gt 0 ]; then
