@@ -53,7 +53,7 @@ pub(crate) fn store_error(err: Error) -> CReturn {
             HashMapEntry::Occupied(_) => continue,
             HashMapEntry::Vacant(slot) => {
                 slot.insert(err);
-                return idx;
+                break idx;
             }
         }
     }
