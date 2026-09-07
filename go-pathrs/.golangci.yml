@@ -38,6 +38,11 @@ formatters:
     - gofumpt
     - goimports
   settings:
+    gofumpt:
+      extra:
+        balance-calls: true
+        clothe-returns: true
+        group-params: true
     goimports:
       local-prefixes:
         - cyphar.com/go-pathrs
