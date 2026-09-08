@@ -670,6 +670,23 @@ pub(crate) fn fstatfs(fd: impl AsFd) -> Result<StatFs, Error> {
     })
 }
 
+/// Wrapper for `fstatfs(2)` that only returns the filesystem type
+/// (`statfs.f_type`), widened to a [`u64`].
+///
+/// The exact type of `statfs.f_type` depends on both the architecture and the
+/// backend used by rustix, and is not always the same type as
+/// [`rustix::fs::FsWord`] (on s390x with musl, `f_type` is a `u32` while
+/// `FsWord` is a `u64`), which means that comparing `f_type` against
+/// `FsWord`-typed constants (such as [`rustix::fs::PROC_SUPER_MAGIC`]) doesn't
+/// compile on all targets. Widening the value to a `u64` lets us compare it
+/// against plain `u64` filesystem magic numbers everywhere.
+// The filesystem magic numbers we care about all fit inside a u32, so the
+// signedness of f_type (it is signed on most targets) is irrelevant here.
+#[allow(clippy::unnecessary_cast)]
+pub(crate) fn fstatfs_type(fd: impl AsFd) -> Result<u64, Error> {
+    fstatfs(fd).map(|statfs| statfs.f_type as u64)
+}
+
 /// Wrapper for `fstatat(2)`, which auto-sets `AT_NO_AUTOMOUNT |
 /// AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH`.
 ///
