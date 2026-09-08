@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] ##
 
+### Fixed ###
+- Fixed build failures on s390x with musl libc. The type of `struct statfs`'s
+  `f_type` field is not always the same as `rustix::fs::FsWord` (on
+  s390x-musl, `f_type` is a `u32` while `FsWord` is a `u64`), so comparing the
+  two would not compile. We now always compare filesystem magic numbers as
+  `u64`s. (#425)
+
 ## [0.2.6] - 2026-09-05 ##
 
 > "If only, if only," the woodpecker sighs,

@@ -234,9 +234,9 @@ fn proc_subpath<Fd: AsRawFd>(fd: Fd) -> Result<String, Error> {
 /// [kcommit-a481f4d91783]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a481f4d917835cad86701fc0d1e620c74bb5cd5f
 // TODO: Remove the explicit size once generic_arg_infer is stable.
 //       <https://github.com/rust-lang/rust/issues/85077>
-const DANGEROUS_FILESYSTEMS: [rustix_fs::FsWord; 2] = [
-    rustix_fs::PROC_SUPER_MAGIC, // procfs
-    0x5a3c_69f0,                 // apparmorfs
+const DANGEROUS_FILESYSTEMS: [u64; 2] = [
+    procfs::PROC_SUPER_MAGIC, // procfs
+    0x5a3c_69f0,              // apparmorfs
 ];
 
 impl<Fd: AsFd> FdExt for Fd {
@@ -304,11 +304,11 @@ impl<Fd: AsFd> FdExt for Fd {
         // nd_jump_link() is used internally. So, we just have to make an
         // educated guess based on which mainline filesystems expose
         // magic-links.
-        let stat = syscalls::fstatfs(self).map_err(|err| ErrorImpl::RawOsError {
+        let fs_type = syscalls::fstatfs_type(self).map_err(|err| ErrorImpl::RawOsError {
             operation: "check fstype of fd".into(),
             source: err,
         })?;
-        Ok(DANGEROUS_FILESYSTEMS.contains(&stat.f_type))
+        Ok(DANGEROUS_FILESYSTEMS.contains(&fs_type))
     }
 
     fn get_fdinfo_field<T: FromStr>(

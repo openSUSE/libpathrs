@@ -82,23 +82,40 @@ jobs:
           - riscv64gc-unknown-linux-gnu
           - sparc64-unknown-linux-gnu
           - s390x-unknown-linux-gnu
+        include:
+          # rustup does not distribute a pre-built libstd for tier 3 targets
+          # (such as s390x-unknown-linux-musl), so for those targets we need
+          # to use nightly Rust and build libstd ourselves with -Zbuild-std.
+          - target: s390x-unknown-linux-musl
+            build-std: true
     name: cargo check (${{ matrix.target }})
     runs-on: ubuntu-latest
+    env:
+      # Only set for the targets where we need to build libstd ourselves.
+      BUILD_STD_FLAGS: ${{ matrix.build-std && '-Zbuild-std' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !matrix.build-std }}
         with:
           # TODO: Should we use MSRV for this?
           targets: ${{ matrix.target }}
+      # -Zbuild-std requires nightly Rust (and the libstd sources).
+      - uses: dtolnay/rust-toolchain@nightly
+        if: ${{ matrix.build-std }}
+        with:
+          components: rust-src
       - uses: taiki-e/install-action@cargo-hack
       - name: cargo check --target=${{ matrix.target }}
         run: >-
           cargo hack --each-feature --keep-going \
-            check --target=${{ matrix.target }} --all-targets
+            check --target=${{ matrix.target }} --all-targets \
+            $BUILD_STD_FLAGS
       - name: cargo build --target=${{ matrix.target }}
         run: >-
           cargo hack --each-feature --keep-going \
-            build --target=${{ matrix.target }} --release
+            build --target=${{ matrix.target }} --release \
+            $BUILD_STD_FLAGS
 
   check-release-script:
     name: check release script
